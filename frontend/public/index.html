@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=5,viewport-fit=cover"/>
+
+    <!-- ── Favicons ──────────────────────────────────────────────────────── -->
+    <link rel="icon"             href="%PUBLIC_URL%/favicon.ico"/>
+    <link rel="icon"             href="%PUBLIC_URL%/favicon-32x32.png" sizes="32x32" type="image/png"/>
+    <link rel="icon"             href="%PUBLIC_URL%/favicon-16x16.png" sizes="16x16" type="image/png"/>
+    <link rel="apple-touch-icon" href="%PUBLIC_URL%/apple-touch-icon.png"/>
+    <link rel="manifest"         href="%PUBLIC_URL%/manifest.json"/>
+
+    <!-- ── Theme / brand colour ──────────────────────────────────────────── -->
+    <meta name="theme-color"                    content="#b5451b" id="meta-theme-color"/>
+    <meta name="mobile-web-app-capable"         content="yes"/>
+    <meta name="apple-mobile-web-app-capable"   content="yes"/>
+    <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+    <meta name="apple-mobile-web-app-title"     content="ShopZen"/>
+    <meta name="format-detection"               content="telephone=no"/>
+
+    <!-- ── SEO baseline (overridden per-page by useSEO hook) ─────────────── -->
+    <title>ShopZen</title>
+    <meta name="description"     content="Premium online store — quality products, delivered fast."/>
+    <meta name="robots"          content="index,follow,max-image-preview:large"/>
+    <link rel="canonical"        href="https://yourstore.com"/>
+
+    <!-- ── Open Graph baseline ───────────────────────────────────────────── -->
+    <meta property="og:type"        content="website"/>
+    <meta property="og:title"       content="ShopZen"/>
+    <meta property="og:description" content="Premium online store — quality products, delivered fast."/>
+    <meta property="og:image"       content="https://yourstore.com/og-default.png"/>
+    <meta property="og:url"         content="https://yourstore.com"/>
+    <meta property="og:site_name"   content="ShopZen"/>
+    <meta property="og:locale"      content="en_US"/>
+
+    <!-- ── Twitter Card baseline ─────────────────────────────────────────── -->
+    <meta name="twitter:card"        content="summary_large_image"/>
+    <meta name="twitter:title"       content="ShopZen"/>
+    <meta name="twitter:description" content="Premium online store — quality products, delivered fast."/>
+    <meta name="twitter:image"       content="https://yourstore.com/og-default.png"/>
+
+    <!-- ── Core Web Vitals: resource hints ───────────────────────────────── -->
+    <!-- Preconnect to critical origins -->
+    <link rel="preconnect"   href="https://fonts.googleapis.com"/>
+    <link rel="preconnect"   href="https://fonts.gstatic.com" crossorigin/>
+    <link rel="dns-prefetch" href="https://res.cloudinary.com"/>
+    <link rel="dns-prefetch" href="https://www.googletagmanager.com"/>
+    <link rel="dns-prefetch" href="https://connect.facebook.net"/>
+
+    <!--
+      ╔══════════════════════════════════════════════════════════╗
+      ║  THEME BOOTSTRAP  (runs synchronously before CSS loads)  ║
+      ║  Reads localStorage cache written by ThemeContext.js     ║
+      ║  on every API fetch, and by Settings.js on every save.   ║
+      ╚══════════════════════════════════════════════════════════╝
+    -->
+    <script>
+    (function(){
+      /* Compact theme table — mirrors ThemeContext.js THEMES */
+      var T={
+        default: {p:'#b5451b',pd:'#8b3214',pl:'#e8643c',a:'#f0a500',d:'#0f172a',s:'#1e293b',g:'linear-gradient(135deg,#b5451b 0%,#e8643c 50%,#f0a500 100%)',hg:'linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#b5451b 100%)',cb:'#ffffff',bb:'#fafaf8'},
+        ocean:   {p:'#0369a1',pd:'#024f7a',pl:'#0ea5e9',a:'#06b6d4',d:'#0c1a2e',s:'#0f2744',g:'linear-gradient(135deg,#0369a1 0%,#0ea5e9 50%,#06b6d4 100%)',hg:'linear-gradient(135deg,#0c1a2e 0%,#0f2744 50%,#0369a1 100%)',cb:'#ffffff',bb:'#f0f9ff'},
+        forest:  {p:'#15803d',pd:'#0f5f2e',pl:'#22c55e',a:'#84cc16',d:'#052e16',s:'#0a3d20',g:'linear-gradient(135deg,#15803d 0%,#22c55e 50%,#84cc16 100%)',hg:'linear-gradient(135deg,#052e16 0%,#0a3d20 50%,#15803d 100%)',cb:'#ffffff',bb:'#f0fdf4'},
+        royal:   {p:'#7c3aed',pd:'#5b21b6',pl:'#a78bfa',a:'#f59e0b',d:'#1e1b4b',s:'#2e1065',g:'linear-gradient(135deg,#7c3aed 0%,#a78bfa 50%,#f59e0b 100%)',hg:'linear-gradient(135deg,#1e1b4b 0%,#2e1065 50%,#7c3aed 100%)',cb:'#ffffff',bb:'#faf5ff'},
+        rose:    {p:'#be185d',pd:'#9d174d',pl:'#f43f5e',a:'#fb7185',d:'#1f0a14',s:'#3b0a20',g:'linear-gradient(135deg,#be185d 0%,#f43f5e 50%,#fb7185 100%)',hg:'linear-gradient(135deg,#1f0a14 0%,#3b0a20 50%,#be185d 100%)',cb:'#ffffff',bb:'#fff1f2'},
+        amber:   {p:'#b45309',pd:'#92400e',pl:'#f59e0b',a:'#fbbf24',d:'#1c0a00',s:'#451a03',g:'linear-gradient(135deg,#b45309 0%,#f59e0b 50%,#fbbf24 100%)',hg:'linear-gradient(135deg,#1c0a00 0%,#451a03 50%,#b45309 100%)',cb:'#ffffff',bb:'#fffbeb'},
+        midnight:{p:'#6366f1',pd:'#4338ca',pl:'#818cf8',a:'#38bdf8',d:'#0a0a0f',s:'#111120',g:'linear-gradient(135deg,#4338ca 0%,#6366f1 50%,#38bdf8 100%)',hg:'linear-gradient(135deg,#0a0a0f 0%,#111120 50%,#4338ca 100%)',cb:'#1a1a2e',bb:'#0d0d1a'},
+        coral:   {p:'#f97316',pd:'#ea580c',pl:'#fb923c',a:'#fcd34d',d:'#1c0a00',s:'#431407',g:'linear-gradient(135deg,#ea580c 0%,#f97316 50%,#fcd34d 100%)',hg:'linear-gradient(135deg,#1c0a00 0%,#431407 50%,#ea580c 100%)',cb:'#ffffff',bb:'#fff7ed'},
+        slate:   {p:'#334155',pd:'#1e293b',pl:'#475569',a:'#38bdf8',d:'#0f172a',s:'#1e293b',g:'linear-gradient(135deg,#1e293b 0%,#334155 50%,#38bdf8 100%)',hg:'linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#334155 100%)',cb:'#ffffff',bb:'#f8fafc'},
+        sakura:  {p:'#db2777',pd:'#be185d',pl:'#f472b6',a:'#a78bfa',d:'#1a0a14',s:'#2d1020',g:'linear-gradient(135deg,#be185d 0%,#db2777 50%,#a78bfa 100%)',hg:'linear-gradient(135deg,#1a0a14 0%,#2d1020 50%,#db2777 100%)',cb:'#ffffff',bb:'#fdf2f8'},
+        emerald: {p:'#059669',pd:'#047857',pl:'#34d399',a:'#6ee7b7',d:'#022c22',s:'#064e3b',g:'linear-gradient(135deg,#047857 0%,#059669 50%,#34d399 100%)',hg:'linear-gradient(135deg,#022c22 0%,#064e3b 50%,#047857 100%)',cb:'#ffffff',bb:'#ecfdf5'},
+        neon:    {p:'#a855f7',pd:'#7c3aed',pl:'#c084fc',a:'#22d3ee',d:'#050010',s:'#0d001a',g:'linear-gradient(135deg,#7c3aed 0%,#a855f7 50%,#22d3ee 100%)',hg:'linear-gradient(135deg,#050010 0%,#0d001a 50%,#7c3aed 100%)',cb:'#0d001a',bb:'#080010'}
+      };
+      var F={
+        default:{fd:"'Playfair Display',serif", fb:"'DM Sans',sans-serif",         u:'https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700;900&family=DM+Sans:wght@300;400;500;600;700&display=swap'},
+        modern: {fd:"'Poppins',sans-serif",     fb:"'Inter',sans-serif",            u:'https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&family=Inter:wght@300;400;500;600&display=swap'},
+        elegant:{fd:"'Cormorant Garamond',serif",fb:"'Raleway',sans-serif",         u:'https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=Raleway:wght@300;400;500;600;700&display=swap'},
+        bold:   {fd:"'Syne',sans-serif",        fb:"'Work Sans',sans-serif",        u:'https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Work+Sans:wght@300;400;500;600&display=swap'},
+        luxury: {fd:"'Bodoni Moda',serif",      fb:"'Jost',sans-serif",             u:'https://fonts.googleapis.com/css2?family=Bodoni+Moda:wght@400;600;700&family=Jost:wght@300;400;500;600&display=swap'},
+        tech:   {fd:"'Space Grotesk',sans-serif",fb:"'IBM Plex Sans',sans-serif",   u:'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap'},
+        minimal:{fd:"'Outfit',sans-serif",      fb:"'Nunito',sans-serif",           u:'https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Nunito:wght@300;400;500;600&display=swap'},
+        classic:{fd:"'Libre Baskerville',serif", fb:"'Source Sans 3',sans-serif",   u:'https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@400;700&family=Source+Sans+3:wght@300;400;500;600&display=swap'}
+      };
+
+      var s=null;
+      try{var raw=localStorage.getItem('shopzen_theme_v1');if(raw)s=JSON.parse(raw);}catch(e){}
+
+      var tk=(s&&s.theme)||'default';
+      var t=T[tk]||T['default'];
+      var pr=(s&&s.primaryColor)||t.p;
+      var pd=(s&&s.primaryDarkColor)||t.pd;
+      var pl=(s&&s.primaryLightColor)||t.pl;
+      var ac=(s&&s.secondaryColor)||t.a;
+      var dk=(s&&s.darkBgColor)||t.d;
+
+      var r=document.documentElement;
+      r.style.setProperty('--color-primary',       pr);
+      r.style.setProperty('--color-primary-dark',  pd);
+      r.style.setProperty('--color-primary-light', pl);
+      r.style.setProperty('--color-accent',        ac);
+      r.style.setProperty('--color-dark',          dk);
+      r.style.setProperty('--color-surface',       t.s);
+      r.style.setProperty('--theme-gradient',      t.g);
+      r.style.setProperty('--hero-gradient',       t.hg);
+      r.style.setProperty('--card-bg',             t.cb);
+      r.style.setProperty('--body-bg',             t.bb);
+      r.style.setProperty('--glow-primary',        pr+'66');
+      r.style.setProperty('--glow-accent',         ac+'4d');
+
+      var bodyStyle=document.createElement('style');
+      bodyStyle.id='theme-bootstrap-bg';
+      bodyStyle.textContent='html,body{background:'+t.bb+' !important}';
+      document.head.appendChild(bodyStyle);
+
+      var fk=(s&&s.fontStyle)||'default';
+      var f=F[fk]||F['default'];
+      r.style.setProperty('--font-display',f.fd);
+      r.style.setProperty('--font-body',   f.fb);
+      var fl=document.createElement('link');
+      fl.id='theme-font';fl.rel='stylesheet';fl.href=f.u;
+      document.head.appendChild(fl);
+
+      if(s&&s.customCSS){
+        var cs=document.createElement('style');
+        cs.id='theme-custom-css';
+        cs.textContent=s.customCSS;
+        document.head.appendChild(cs);
+      }
+
+      var mt=document.getElementById('meta-theme-color');
+      if(mt) mt.content=pr;
+    })();
+    </script>
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+  </body>
+</html>
