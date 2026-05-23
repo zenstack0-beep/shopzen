@@ -151,6 +151,23 @@ export default function Checkout() {
     e.preventDefault();
     if (!agreedTerms) { toast.error('Please agree to terms and conditions'); return; }
     if (!paymentMethod) { toast.error('Please select a payment method'); return; }
+
+    // ── Guest users must register before placing an order ──
+    if (!user) {
+      navigate('/register', {
+        state: {
+          fromCheckout: true,
+          prefill: {
+            firstName: billing.firstName,
+            lastName:  billing.lastName,
+            email:     billing.email,
+            phone:     billing.phone,
+          },
+        },
+      });
+      return;
+    }
+
     setLoading(true);
     try {
       const orderData = {
@@ -498,8 +515,10 @@ export default function Checkout() {
                 className="btn-primary w-full py-3.5 text-base flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed">
                 {loading ? (
                   <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Placing Order...</>
-                ) : (
+                ) : user ? (
                   <>Place Order — {sym} {total.toLocaleString()}{['payhere','stripe','paypal'].includes(paymentMethod) ? ' →' : ''}</>
+                ) : (
+                  <>Create Account &amp; Place Order — {sym} {total.toLocaleString()}</>
                 )}
               </button>
               {['payhere','stripe','paypal'].includes(paymentMethod) && (

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import toast from 'react-hot-toast';
@@ -90,7 +90,18 @@ export function Register() {
   const { register } = useAuth();
   const { settings } = useTheme();
   const navigate = useNavigate();
-  const [form, setForm] = useState({ firstName:'', lastName:'', username:'', email:'', password:'', phone:'' });
+  const location = useLocation();
+  // Pre-fill from checkout redirect if coming from checkout as guest
+  const prefill = location.state?.prefill || {};
+  const fromCheckout = location.state?.fromCheckout || false;
+  const [form, setForm] = useState({
+    firstName: prefill.firstName || '',
+    lastName:  prefill.lastName  || '',
+    username:  '',
+    email:     prefill.email     || '',
+    password:  '',
+    phone:     prefill.phone     || '',
+  });
   const [loading, setLoading] = useState(false);
   const [newUserCoupon, setNewUserCoupon] = useState(null);
 
@@ -100,8 +111,15 @@ export function Register() {
     setLoading(true);
     try {
       const res = await register(form);
-      if (res?.data?.newUserCoupon) setNewUserCoupon(res.data.newUserCoupon);
-      else { toast.success('Account created! Welcome 🎉'); navigate('/'); }
+      if (res?.data?.newUserCoupon) {
+        setNewUserCoupon(res.data.newUserCoupon);
+      } else if (fromCheckout) {
+        toast.success('Account created! Returning to checkout... 🛒');
+        navigate('/checkout');
+      } else {
+        toast.success('Account created! Welcome 🎉');
+        navigate('/');
+      }
     } catch (err) { toast.error(err.response?.data?.message || 'Registration failed'); }
     finally { setLoading(false); }
   };
@@ -117,7 +135,7 @@ export function Register() {
           <p className="font-mono text-3xl font-bold tracking-widest">{newUserCoupon.code}</p>
           <p className="text-white/90 mt-2 text-sm">{newUserCoupon.description || `${newUserCoupon.value}${newUserCoupon.type==='percentage'?'%':` ${settings?.currencySymbol||'Rs.'}`} off your first order`}</p>
         </div>
-        <button onClick={() => navigate('/shop')} className="btn-primary w-full">Start Shopping →</button>
+        <button onClick={() => navigate(fromCheckout ? '/checkout' : '/shop')} className="btn-primary w-full">{fromCheckout ? 'Continue to Checkout →' : 'Start Shopping →'}</button>
       </div>
     </div>
   );
@@ -128,7 +146,13 @@ export function Register() {
         <div className="text-center mb-8">
           <Logo settings={settings}/>
           <h1 className="text-3xl font-bold text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>Create Account</h1>
-          <p className="text-gray-500 mt-1 text-sm">Join thousands of happy customers</p>
+          {fromCheckout ? (
+            <p className="text-sm mt-2 font-semibold px-4 py-2 rounded-xl inline-block" style={{ background: 'var(--color-primary)', color: '#fff' }}>
+              🛒 One step away — create your account to place your order
+            </p>
+          ) : (
+            <p className="text-gray-500 mt-1 text-sm">Join thousands of happy customers</p>
+          )}
         </div>
         <div className="rounded-2xl border border-gray-100 shadow-xl p-8" style={{ background: 'var(--card-bg)' }}>
           <form onSubmit={handleSubmit} className="space-y-4">
