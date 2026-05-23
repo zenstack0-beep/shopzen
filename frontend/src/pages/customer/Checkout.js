@@ -33,6 +33,15 @@ const PayHereForm = ({ data, onCancel }) => {
   );
 };
 
+// Field component defined OUTSIDE Checkout so it never remounts on re-render
+// (defining it inside would cause focus loss on every keystroke)
+const F = ({ label, value, onChange, type='text', required, placeholder, col2 }) => (
+  <div className={col2 ? 'sm:col-span-2' : ''}>
+    <label className="form-label">{label} {required && <span className="text-red-500">*</span>}</label>
+    <input type={type} value={value} onChange={onChange} required={required} placeholder={placeholder} className="form-input" />
+  </div>
+);
+
 export default function Checkout() {
   const { items, subtotal, clearCart } = useCart();
   useSEO({ title: 'Checkout', noindex: true });
@@ -189,13 +198,6 @@ export default function Checkout() {
       toast.error(err.response?.data?.message || 'Order failed. Please try again.');
     } finally { setLoading(false); }
   };
-
-  const F = ({ label, value, onChange, type='text', required, placeholder, col2 }) => (
-    <div className={col2 ? 'sm:col-span-2' : ''}>
-      <label className="form-label">{label} {required && <span className="text-red-500">*</span>}</label>
-      <input type={type} value={value} onChange={onChange} required={required} placeholder={placeholder} className="form-input" />
-    </div>
-  );
 
   const hasAnyPayment = settings?.bankTransferEnabled !== false || settings?.codEnabled !== false || gateways.length > 0;
 
