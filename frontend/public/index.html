@@ -4,28 +4,24 @@
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=5,viewport-fit=cover"/>
 
-    <!-- ── Favicons ──────────────────────────────────────────────────────── -->
     <link rel="icon"             href="%PUBLIC_URL%/favicon.ico"/>
     <link rel="icon"             href="%PUBLIC_URL%/favicon-32x32.png" sizes="32x32" type="image/png"/>
     <link rel="icon"             href="%PUBLIC_URL%/favicon-16x16.png" sizes="16x16" type="image/png"/>
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/apple-touch-icon.png"/>
     <link rel="manifest"         href="%PUBLIC_URL%/manifest.json"/>
 
-    <!-- ── Theme / brand colour ──────────────────────────────────────────── -->
-    <meta name="theme-color"                    content="#b5451b" id="meta-theme-color"/>
-    <meta name="mobile-web-app-capable"         content="yes"/>
-    <meta name="apple-mobile-web-app-capable"   content="yes"/>
+    <meta name="theme-color"                         content="#b5451b" id="meta-theme-color"/>
+    <meta name="mobile-web-app-capable"              content="yes"/>
+    <meta name="apple-mobile-web-app-capable"        content="yes"/>
     <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
-    <meta name="apple-mobile-web-app-title"     content="ShopZen"/>
-    <meta name="format-detection"               content="telephone=no"/>
+    <meta name="apple-mobile-web-app-title"          content="ShopZen"/>
+    <meta name="format-detection"                    content="telephone=no"/>
 
-    <!-- ── SEO baseline (overridden per-page by useSEO hook) ─────────────── -->
     <title>ShopZen</title>
-    <meta name="description"     content="Premium online store — quality products, delivered fast."/>
-    <meta name="robots"          content="index,follow,max-image-preview:large"/>
-    <link rel="canonical"        href="https://yourstore.com"/>
+    <meta name="description"  content="Premium online store — quality products, delivered fast."/>
+    <meta name="robots"       content="index,follow,max-image-preview:large"/>
+    <link rel="canonical"     href="https://yourstore.com"/>
 
-    <!-- ── Open Graph baseline ───────────────────────────────────────────── -->
     <meta property="og:type"        content="website"/>
     <meta property="og:title"       content="ShopZen"/>
     <meta property="og:description" content="Premium online store — quality products, delivered fast."/>
@@ -34,22 +30,66 @@
     <meta property="og:site_name"   content="ShopZen"/>
     <meta property="og:locale"      content="en_US"/>
 
-    <!-- ── Twitter Card baseline ─────────────────────────────────────────── -->
     <meta name="twitter:card"        content="summary_large_image"/>
     <meta name="twitter:title"       content="ShopZen"/>
     <meta name="twitter:description" content="Premium online store — quality products, delivered fast."/>
     <meta name="twitter:image"       content="https://yourstore.com/og-default.png"/>
 
-    <!-- ── Core Web Vitals: resource hints ───────────────────────────────── -->
     <link rel="preconnect"   href="https://fonts.googleapis.com"/>
     <link rel="preconnect"   href="https://fonts.gstatic.com" crossorigin/>
     <link rel="dns-prefetch" href="https://res.cloudinary.com"/>
     <link rel="dns-prefetch" href="https://www.googletagmanager.com"/>
     <link rel="dns-prefetch" href="https://connect.facebook.net"/>
 
+    <!-- ── Splash styles — intentionally theme-neutral ── -->
+    <style>
+      *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+      /* Neutral background — pure white or pure black based on OS preference.
+         No theme colour leaks here at all. */
+      #szl-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        background: #ffffff;
+        transition: opacity 0.4s ease, visibility 0.4s ease;
+      }
+      @media (prefers-color-scheme: dark) {
+        #szl-splash { background: #0f0f0f; }
+        #szl-wordmark { color: #f1f5f9 !important; }
+        #szl-spinner { border-color: rgba(255,255,255,0.12) !important; border-top-color: #ffffff !important; }
+      }
+      #szl-splash.szl-hide {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+      #szl-wordmark {
+        font-family: Georgia, 'Times New Roman', serif;
+        font-size: 28px;
+        font-weight: 700;
+        letter-spacing: -0.5px;
+        color: #111111;
+        user-select: none;
+      }
+      #szl-spinner {
+        width: 32px;
+        height: 32px;
+        border: 3px solid rgba(0,0,0,0.1);
+        border-top-color: #111111;
+        border-radius: 50%;
+        animation: szl-spin 0.7s linear infinite;
+      }
+      @keyframes szl-spin { to { transform: rotate(360deg); } }
+    </style>
+
     <script>
     (function(){
-      /* ── Full theme table ── */
       var T={
         default:   {p:'#b5451b',pd:'#8b3214',pl:'#e8643c',a:'#f0a500',d:'#0f172a',s:'#1e293b',g:'linear-gradient(135deg,#b5451b 0%,#e8643c 50%,#f0a500 100%)',hg:'linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#b5451b 100%)',cb:'#ffffff',bb:'#fafaf8',dcb:'#1e1e1e',dbb:'#0f0f0f'},
         coral:     {p:'#f97316',pd:'#ea580c',pl:'#fb923c',a:'#fcd34d',d:'#1c0a00',s:'#431407',g:'linear-gradient(135deg,#ea580c 0%,#f97316 50%,#fcd34d 100%)',hg:'linear-gradient(135deg,#1c0a00 0%,#431407 50%,#ea580c 100%)',cb:'#ffffff',bb:'#fff7ed',dcb:'#1a1000',dbb:'#0d0800'},
@@ -74,8 +114,6 @@
         lavender:  {p:'#7c3aed',pd:'#6d28d9',pl:'#8b5cf6',a:'#c084fc',d:'#1e1b4b',s:'#312e81',g:'linear-gradient(135deg,#6d28d9 0%,#7c3aed 50%,#c084fc 100%)',hg:'linear-gradient(135deg,#1e1b4b 0%,#312e81 50%,#6d28d9 100%)',cb:'#ffffff',bb:'#f5f3ff',dcb:'#0f0020',dbb:'#080010'},
         monochrome:{p:'#374151',pd:'#111827',pl:'#6b7280',a:'#9ca3af',d:'#030712',s:'#111827',g:'linear-gradient(135deg,#111827 0%,#374151 50%,#6b7280 100%)',hg:'linear-gradient(135deg,#030712 0%,#111827 50%,#1f2937 100%)',cb:'#ffffff',bb:'#f9fafb',dcb:'#1f2937',dbb:'#111827'}
       };
-
-      /* ── Full font table ── */
       var F={
         default:  {fd:"'Playfair Display',serif",  fb:"'DM Sans',sans-serif",      u:'https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700;900&family=DM+Sans:wght@300;400;500;600;700&display=swap'},
         modern:   {fd:"'Poppins',sans-serif",       fb:"'Inter',sans-serif",         u:'https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&family=Inter:wght@300;400;500;600&display=swap'},
@@ -89,9 +127,9 @@
         humanist: {fd:"'Nunito Sans',sans-serif",   fb:"'Mulish',sans-serif",        u:'https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@300;400;600;700;800&family=Mulish:wght@300;400;500;600&display=swap'}
       };
 
-      function applySettings(s) {
+      function applySettings(s){
         var tk=(s&&s.theme)||'default';
-        var t=T[tk]||T['default'];
+        var t=T[tk]||T.default;
         var isDark=!!(s&&s.darkMode);
         var pr=(s&&s.primaryColor)||t.p;
         var pd=(s&&s.primaryDarkColor)||t.pd;
@@ -104,155 +142,74 @@
         var textSecondary=isDark?'#94a3b8':'#64748b';
         var borderColor=isDark?'#1e293b':'#e5e7eb';
         var r=document.documentElement;
-        r.style.setProperty('--color-primary',       pr);
-        r.style.setProperty('--color-primary-dark',  pd);
-        r.style.setProperty('--color-primary-light', pl);
-        r.style.setProperty('--color-accent',        ac);
-        r.style.setProperty('--color-dark',          dk);
-        r.style.setProperty('--color-surface',       t.s);
-        r.style.setProperty('--theme-gradient',      t.g);
-        r.style.setProperty('--hero-gradient',       t.hg);
-        r.style.setProperty('--card-bg',             cardBg);
-        r.style.setProperty('--body-bg',             bodyBg);
-        r.style.setProperty('--glow-primary',        pr+'66');
-        r.style.setProperty('--glow-accent',         ac+'4d');
-        r.style.setProperty('--text-primary',        textPrimary);
-        r.style.setProperty('--text-secondary',      textSecondary);
-        r.style.setProperty('--border-color',        borderColor);
+        r.style.setProperty('--color-primary',pr);
+        r.style.setProperty('--color-primary-dark',pd);
+        r.style.setProperty('--color-primary-light',pl);
+        r.style.setProperty('--color-accent',ac);
+        r.style.setProperty('--color-dark',dk);
+        r.style.setProperty('--color-surface',t.s);
+        r.style.setProperty('--theme-gradient',t.g);
+        r.style.setProperty('--hero-gradient',t.hg);
+        r.style.setProperty('--card-bg',cardBg);
+        r.style.setProperty('--body-bg',bodyBg);
+        r.style.setProperty('--glow-primary',pr+'66');
+        r.style.setProperty('--glow-accent',ac+'4d');
+        r.style.setProperty('--text-primary',textPrimary);
+        r.style.setProperty('--text-secondary',textSecondary);
+        r.style.setProperty('--border-color',borderColor);
         var bs=document.getElementById('theme-bootstrap-bg');
         if(!bs){bs=document.createElement('style');bs.id='theme-bootstrap-bg';document.head.appendChild(bs);}
         bs.textContent='html,body{background:'+bodyBg+' !important;color:'+textPrimary+'}';
-        if(isDark) r.classList.add('dark-mode'); else r.classList.remove('dark-mode');
+        if(isDark)r.classList.add('dark-mode');else r.classList.remove('dark-mode');
         var fk=(s&&s.fontStyle)||'default';
-        var f=F[fk]||F['default'];
+        var f=F[fk]||F.default;
         r.style.setProperty('--font-display',f.fd);
         r.style.setProperty('--font-body',f.fb);
         var fl=document.getElementById('theme-font');
         if(!fl){fl=document.createElement('link');fl.id='theme-font';fl.rel='stylesheet';document.head.appendChild(fl);}
-        if(fl.href!==f.u) fl.href=f.u;
+        if(fl.href!==f.u)fl.href=f.u;
         if(s&&s.customCSS){
           var cs=document.getElementById('theme-custom-css');
           if(!cs){cs=document.createElement('style');cs.id='theme-custom-css';document.head.appendChild(cs);}
           cs.textContent=s.customCSS;
         }
         var mt=document.getElementById('meta-theme-color');
-        if(mt) mt.content=pr;
-        /* Update spinner colour to match theme */
-        var sp=document.getElementById('szl-spinner');
-        if(sp) sp.style.borderTopColor=pr;
-        var sl=document.getElementById('szl-logo-dot');
-        if(sl) sl.style.background=pr;
+        if(mt)mt.content=pr;
       }
 
-      /* 1. Apply from localStorage immediately (returning visitors) */
+      /* Apply localStorage cache immediately (returning visitors get correct theme instantly) */
       var cached=null;
       try{var raw=localStorage.getItem('shopzen_theme_v2');if(raw)cached=JSON.parse(raw);}catch(e){}
       applySettings(cached);
 
-      /* 2. Fetch theme from API for new devices, update everything before loader hides */
-      var apiBase = '';
-      /* Injected at build time by CRA — falls back to same-origin /api */
-      try {
-        /* window.SHOPZEN_API_URL can be set in a separate <script> before this one
-           if you need runtime configuration without a rebuild */
-        if(window.SHOPZEN_API_URL) apiBase = window.SHOPZEN_API_URL;
-      } catch(e){}
-
-      window.__szThemeReady = false;
-      var fetchDone = false;
-
-      function markReady(){
-        fetchDone = true;
-        /* If React already mounted, hide immediately */
-        if(window.__szReactMounted) hideSplash();
+      /* Fetch real theme from API — splash stays visible until this resolves */
+      var fetchDone=false;
+      function tryHide(){
+        if(fetchDone&&window.__szReactMounted)window.hideSplash&&window.hideSplash();
       }
-
-      fetch(apiBase+'/api/settings')
-        .then(function(r){ return r.ok ? r.json() : null; })
+      fetch('/api/settings')
+        .then(function(r){return r.ok?r.json():null;})
         .then(function(data){
-          if(data && typeof data==='object' && !Array.isArray(data)){
+          if(data&&typeof data==='object'&&!Array.isArray(data)){
             applySettings(data);
-            try{ localStorage.setItem('shopzen_theme_v2', JSON.stringify(data)); }catch(e){}
+            try{localStorage.setItem('shopzen_theme_v2',JSON.stringify(data));}catch(e){}
           }
-          markReady();
+          fetchDone=true;
+          tryHide();
         })
-        .catch(function(){ markReady(); });
+        .catch(function(){fetchDone=true;tryHide();});
 
-      /* Safety net: hide after 3 s no matter what */
-      setTimeout(function(){ markReady(); }, 3000);
+      /* Hard timeout — never block the user more than 4 s */
+      setTimeout(function(){fetchDone=true;tryHide();},4000);
 
-      window.__szFetchDone = function(){ return fetchDone; };
+      window.__szTryHide=tryHide;
     })();
     </script>
-
-    <style>
-      /* ── Splash / loading screen ── */
-      #szl-splash {
-        position: fixed;
-        inset: 0;
-        z-index: 99999;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 20px;
-        background: var(--body-bg, #fafaf8);
-        transition: opacity 0.35s ease, visibility 0.35s ease;
-      }
-      #szl-splash.szl-hide {
-        opacity: 0;
-        visibility: hidden;
-        pointer-events: none;
-      }
-      #szl-logo {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        font-family: 'Playfair Display', Georgia, serif;
-        font-size: 26px;
-        font-weight: 700;
-        color: var(--color-primary, #b5451b);
-        letter-spacing: -0.5px;
-        user-select: none;
-      }
-      #szl-logo-dot {
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-        background: var(--color-primary, #b5451b);
-        display: inline-block;
-        margin-bottom: 2px;
-      }
-      #szl-spinner {
-        width: 36px;
-        height: 36px;
-        border: 3px solid rgba(0,0,0,0.08);
-        border-top-color: var(--color-primary, #b5451b);
-        border-radius: 50%;
-        animation: szl-spin 0.75s linear infinite;
-      }
-      @keyframes szl-spin {
-        to { transform: rotate(360deg); }
-      }
-      /* dark mode for splash */
-      html.dark-mode #szl-splash {
-        background: var(--body-bg, #0f0f0f);
-      }
-      html.dark-mode #szl-spinner {
-        border-color: rgba(255,255,255,0.08);
-        border-top-color: var(--color-primary, #b5451b);
-      }
-      html.dark-mode #szl-logo {
-        color: var(--color-primary, #b5451b);
-      }
-    </style>
   </head>
   <body>
-    <!-- Splash screen — hidden once theme is fetched AND React has mounted -->
+    <!-- Neutral splash — no theme colours, just the store name + spinner -->
     <div id="szl-splash">
-      <div id="szl-logo">
-        ShopZen<span id="szl-logo-dot"></span>
-      </div>
+      <div id="szl-wordmark">ShopZen</div>
       <div id="szl-spinner"></div>
     </div>
 
@@ -260,31 +217,22 @@
     <div id="root"></div>
 
     <script>
-      /* Called by ThemeContext (or App) once React has fully mounted.
-         Add  window.__szReactMounted = true; window.hideSplash && window.hideSplash();
-         to the end of ThemeProvider's first useEffect, OR rely on the
-         MutationObserver below which detects when #root gets children. */
-      window.hideSplash = function(){
-        var el = document.getElementById('szl-splash');
-        if(el) el.classList.add('szl-hide');
+      window.hideSplash=function(){
+        var el=document.getElementById('szl-splash');
+        if(el)el.classList.add('szl-hide');
       };
-
-      /* Auto-detect React mount via MutationObserver — no changes to React code needed */
+      /* Detect React mount without touching any React file */
       (function(){
-        var root = document.getElementById('root');
-        if(!root) return;
-        var obs = new MutationObserver(function(){
-          if(root.children.length > 0){
+        var root=document.getElementById('root');
+        if(!root)return;
+        var obs=new MutationObserver(function(){
+          if(root.children.length>0){
             obs.disconnect();
-            window.__szReactMounted = true;
-            /* Wait for API fetch to finish too — if already done, hide now */
-            if(window.__szFetchDone && window.__szFetchDone()){
-              window.hideSplash();
-            }
-            /* Otherwise the fetch callback will call hideSplash when it finishes */
+            window.__szReactMounted=true;
+            window.__szTryHide&&window.__szTryHide();
           }
         });
-        obs.observe(root, { childList: true });
+        obs.observe(root,{childList:true});
       })();
     </script>
   </body>
