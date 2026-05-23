@@ -49,70 +49,103 @@
     <link rel="dns-prefetch" href="https://connect.facebook.net"/>
 
     <!--
-      ╔══════════════════════════════════════════════════════════╗
-      ║  THEME BOOTSTRAP  (runs synchronously before CSS loads)  ║
-      ║  Reads localStorage cache written by ThemeContext.js     ║
-      ║  on every API fetch, and by Settings.js on every save.   ║
-      ╚══════════════════════════════════════════════════════════╝
+      ╔══════════════════════════════════════════════════════════════════════╗
+      ║  THEME BOOTSTRAP  (runs synchronously before React / CSS loads)     ║
+      ║  Reads localStorage key 'shopzen_theme_v2' (written by             ║
+      ║  ThemeContext.js on every API fetch & Settings.js on every save).   ║
+      ║  On a brand-new device the key is absent → falls back to 'default'  ║
+      ║  palette so there is NEVER a flash of wrong colours.                ║
+      ╚══════════════════════════════════════════════════════════════════════╝
     -->
     <script>
     (function(){
-      /* Compact theme table — mirrors ThemeContext.js THEMES */
+      /* ── Full theme table — must stay in sync with ThemeContext.js THEMES ── */
       var T={
-        default: {p:'#b5451b',pd:'#8b3214',pl:'#e8643c',a:'#f0a500',d:'#0f172a',s:'#1e293b',g:'linear-gradient(135deg,#b5451b 0%,#e8643c 50%,#f0a500 100%)',hg:'linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#b5451b 100%)',cb:'#ffffff',bb:'#fafaf8'},
-        ocean:   {p:'#0369a1',pd:'#024f7a',pl:'#0ea5e9',a:'#06b6d4',d:'#0c1a2e',s:'#0f2744',g:'linear-gradient(135deg,#0369a1 0%,#0ea5e9 50%,#06b6d4 100%)',hg:'linear-gradient(135deg,#0c1a2e 0%,#0f2744 50%,#0369a1 100%)',cb:'#ffffff',bb:'#f0f9ff'},
-        forest:  {p:'#15803d',pd:'#0f5f2e',pl:'#22c55e',a:'#84cc16',d:'#052e16',s:'#0a3d20',g:'linear-gradient(135deg,#15803d 0%,#22c55e 50%,#84cc16 100%)',hg:'linear-gradient(135deg,#052e16 0%,#0a3d20 50%,#15803d 100%)',cb:'#ffffff',bb:'#f0fdf4'},
-        royal:   {p:'#7c3aed',pd:'#5b21b6',pl:'#a78bfa',a:'#f59e0b',d:'#1e1b4b',s:'#2e1065',g:'linear-gradient(135deg,#7c3aed 0%,#a78bfa 50%,#f59e0b 100%)',hg:'linear-gradient(135deg,#1e1b4b 0%,#2e1065 50%,#7c3aed 100%)',cb:'#ffffff',bb:'#faf5ff'},
-        rose:    {p:'#be185d',pd:'#9d174d',pl:'#f43f5e',a:'#fb7185',d:'#1f0a14',s:'#3b0a20',g:'linear-gradient(135deg,#be185d 0%,#f43f5e 50%,#fb7185 100%)',hg:'linear-gradient(135deg,#1f0a14 0%,#3b0a20 50%,#be185d 100%)',cb:'#ffffff',bb:'#fff1f2'},
-        amber:   {p:'#b45309',pd:'#92400e',pl:'#f59e0b',a:'#fbbf24',d:'#1c0a00',s:'#451a03',g:'linear-gradient(135deg,#b45309 0%,#f59e0b 50%,#fbbf24 100%)',hg:'linear-gradient(135deg,#1c0a00 0%,#451a03 50%,#b45309 100%)',cb:'#ffffff',bb:'#fffbeb'},
-        midnight:{p:'#6366f1',pd:'#4338ca',pl:'#818cf8',a:'#38bdf8',d:'#0a0a0f',s:'#111120',g:'linear-gradient(135deg,#4338ca 0%,#6366f1 50%,#38bdf8 100%)',hg:'linear-gradient(135deg,#0a0a0f 0%,#111120 50%,#4338ca 100%)',cb:'#1a1a2e',bb:'#0d0d1a'},
-        coral:   {p:'#f97316',pd:'#ea580c',pl:'#fb923c',a:'#fcd34d',d:'#1c0a00',s:'#431407',g:'linear-gradient(135deg,#ea580c 0%,#f97316 50%,#fcd34d 100%)',hg:'linear-gradient(135deg,#1c0a00 0%,#431407 50%,#ea580c 100%)',cb:'#ffffff',bb:'#fff7ed'},
-        slate:   {p:'#334155',pd:'#1e293b',pl:'#475569',a:'#38bdf8',d:'#0f172a',s:'#1e293b',g:'linear-gradient(135deg,#1e293b 0%,#334155 50%,#38bdf8 100%)',hg:'linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#334155 100%)',cb:'#ffffff',bb:'#f8fafc'},
-        sakura:  {p:'#db2777',pd:'#be185d',pl:'#f472b6',a:'#a78bfa',d:'#1a0a14',s:'#2d1020',g:'linear-gradient(135deg,#be185d 0%,#db2777 50%,#a78bfa 100%)',hg:'linear-gradient(135deg,#1a0a14 0%,#2d1020 50%,#db2777 100%)',cb:'#ffffff',bb:'#fdf2f8'},
-        emerald: {p:'#059669',pd:'#047857',pl:'#34d399',a:'#6ee7b7',d:'#022c22',s:'#064e3b',g:'linear-gradient(135deg,#047857 0%,#059669 50%,#34d399 100%)',hg:'linear-gradient(135deg,#022c22 0%,#064e3b 50%,#047857 100%)',cb:'#ffffff',bb:'#ecfdf5'},
-        neon:    {p:'#a855f7',pd:'#7c3aed',pl:'#c084fc',a:'#22d3ee',d:'#050010',s:'#0d001a',g:'linear-gradient(135deg,#7c3aed 0%,#a855f7 50%,#22d3ee 100%)',hg:'linear-gradient(135deg,#050010 0%,#0d001a 50%,#7c3aed 100%)',cb:'#0d001a',bb:'#080010'}
-      };
-      var F={
-        default:{fd:"'Playfair Display',serif", fb:"'DM Sans',sans-serif",         u:'https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700;900&family=DM+Sans:wght@300;400;500;600;700&display=swap'},
-        modern: {fd:"'Poppins',sans-serif",     fb:"'Inter',sans-serif",            u:'https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&family=Inter:wght@300;400;500;600&display=swap'},
-        elegant:{fd:"'Cormorant Garamond',serif",fb:"'Raleway',sans-serif",         u:'https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=Raleway:wght@300;400;500;600;700&display=swap'},
-        bold:   {fd:"'Syne',sans-serif",        fb:"'Work Sans',sans-serif",        u:'https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Work+Sans:wght@300;400;500;600&display=swap'},
-        luxury: {fd:"'Bodoni Moda',serif",      fb:"'Jost',sans-serif",             u:'https://fonts.googleapis.com/css2?family=Bodoni+Moda:wght@400;600;700&family=Jost:wght@300;400;500;600&display=swap'},
-        tech:   {fd:"'Space Grotesk',sans-serif",fb:"'IBM Plex Sans',sans-serif",   u:'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap'},
-        minimal:{fd:"'Outfit',sans-serif",      fb:"'Nunito',sans-serif",           u:'https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Nunito:wght@300;400;500;600&display=swap'},
-        classic:{fd:"'Libre Baskerville',serif", fb:"'Source Sans 3',sans-serif",   u:'https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@400;700&family=Source+Sans+3:wght@300;400;500;600&display=swap'}
+        default:   {p:'#b5451b',pd:'#8b3214',pl:'#e8643c',a:'#f0a500',d:'#0f172a',s:'#1e293b',g:'linear-gradient(135deg,#b5451b 0%,#e8643c 50%,#f0a500 100%)',hg:'linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#b5451b 100%)',cb:'#ffffff',bb:'#fafaf8',dcb:'#1e1e1e',dbb:'#0f0f0f'},
+        coral:     {p:'#f97316',pd:'#ea580c',pl:'#fb923c',a:'#fcd34d',d:'#1c0a00',s:'#431407',g:'linear-gradient(135deg,#ea580c 0%,#f97316 50%,#fcd34d 100%)',hg:'linear-gradient(135deg,#1c0a00 0%,#431407 50%,#ea580c 100%)',cb:'#ffffff',bb:'#fff7ed',dcb:'#1a1000',dbb:'#0d0800'},
+        amber:     {p:'#b45309',pd:'#92400e',pl:'#f59e0b',a:'#fbbf24',d:'#1c0a00',s:'#451a03',g:'linear-gradient(135deg,#b45309 0%,#f59e0b 50%,#fbbf24 100%)',hg:'linear-gradient(135deg,#1c0a00 0%,#451a03 50%,#b45309 100%)',cb:'#ffffff',bb:'#fffbeb',dcb:'#1a1200',dbb:'#0d0900'},
+        rose:      {p:'#be185d',pd:'#9d174d',pl:'#f43f5e',a:'#fb7185',d:'#1f0a14',s:'#3b0a20',g:'linear-gradient(135deg,#be185d 0%,#f43f5e 50%,#fb7185 100%)',hg:'linear-gradient(135deg,#1f0a14 0%,#3b0a20 50%,#be185d 100%)',cb:'#ffffff',bb:'#fff1f2',dcb:'#1a000a',dbb:'#0d0005'},
+        lava:      {p:'#dc2626',pd:'#b91c1c',pl:'#ef4444',a:'#f97316',d:'#1c0000',s:'#450a0a',g:'linear-gradient(135deg,#b91c1c 0%,#dc2626 50%,#f97316 100%)',hg:'linear-gradient(135deg,#1c0000 0%,#450a0a 50%,#b91c1c 100%)',cb:'#ffffff',bb:'#fff5f5',dcb:'#1a0000',dbb:'#0d0000'},
+        ocean:     {p:'#0369a1',pd:'#024f7a',pl:'#0ea5e9',a:'#06b6d4',d:'#0c1a2e',s:'#0f2744',g:'linear-gradient(135deg,#0369a1 0%,#0ea5e9 50%,#06b6d4 100%)',hg:'linear-gradient(135deg,#0c1a2e 0%,#0f2744 50%,#0369a1 100%)',cb:'#ffffff',bb:'#f0f9ff',dcb:'#001220',dbb:'#000c18'},
+        sky:       {p:'#0284c7',pd:'#0369a1',pl:'#38bdf8',a:'#7dd3fc',d:'#0c2340',s:'#0f3460',g:'linear-gradient(135deg,#0369a1 0%,#0284c7 50%,#38bdf8 100%)',hg:'linear-gradient(135deg,#0c2340 0%,#0f3460 50%,#0369a1 100%)',cb:'#ffffff',bb:'#f0f9ff',dcb:'#001830',dbb:'#000d1a'},
+        slate:     {p:'#334155',pd:'#1e293b',pl:'#475569',a:'#38bdf8',d:'#0f172a',s:'#1e293b',g:'linear-gradient(135deg,#1e293b 0%,#334155 50%,#38bdf8 100%)',hg:'linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#334155 100%)',cb:'#ffffff',bb:'#f8fafc',dcb:'#111827',dbb:'#0a0f1a'},
+        arctic:    {p:'#0891b2',pd:'#0e7490',pl:'#22d3ee',a:'#a5f3fc',d:'#082f49',s:'#0c4a6e',g:'linear-gradient(135deg,#0e7490 0%,#0891b2 50%,#22d3ee 100%)',hg:'linear-gradient(135deg,#082f49 0%,#0c4a6e 50%,#0e7490 100%)',cb:'#ffffff',bb:'#ecfeff',dcb:'#001520',dbb:'#000a12'},
+        forest:    {p:'#15803d',pd:'#0f5f2e',pl:'#22c55e',a:'#84cc16',d:'#052e16',s:'#0a3d20',g:'linear-gradient(135deg,#15803d 0%,#22c55e 50%,#84cc16 100%)',hg:'linear-gradient(135deg,#052e16 0%,#0a3d20 50%,#15803d 100%)',cb:'#ffffff',bb:'#f0fdf4',dcb:'#001a0a',dbb:'#000d05'},
+        emerald:   {p:'#059669',pd:'#047857',pl:'#34d399',a:'#6ee7b7',d:'#022c22',s:'#064e3b',g:'linear-gradient(135deg,#047857 0%,#059669 50%,#34d399 100%)',hg:'linear-gradient(135deg,#022c22 0%,#064e3b 50%,#047857 100%)',cb:'#ffffff',bb:'#ecfdf5',dcb:'#00150e',dbb:'#000d08'},
+        sage:      {p:'#4d7c0f',pd:'#3f6212',pl:'#84cc16',a:'#bef264',d:'#1a2e05',s:'#365314',g:'linear-gradient(135deg,#3f6212 0%,#4d7c0f 50%,#84cc16 100%)',hg:'linear-gradient(135deg,#1a2e05 0%,#365314 50%,#3f6212 100%)',cb:'#ffffff',bb:'#f7fee7',dcb:'#0d1600',dbb:'#080d00'},
+        royal:     {p:'#7c3aed',pd:'#5b21b6',pl:'#a78bfa',a:'#f59e0b',d:'#1e1b4b',s:'#2e1065',g:'linear-gradient(135deg,#7c3aed 0%,#a78bfa 50%,#f59e0b 100%)',hg:'linear-gradient(135deg,#1e1b4b 0%,#2e1065 50%,#7c3aed 100%)',cb:'#ffffff',bb:'#faf5ff',dcb:'#0f0020',dbb:'#080010'},
+        sakura:    {p:'#db2777',pd:'#be185d',pl:'#f472b6',a:'#a78bfa',d:'#1a0a14',s:'#2d1020',g:'linear-gradient(135deg,#be185d 0%,#db2777 50%,#a78bfa 100%)',hg:'linear-gradient(135deg,#1a0a14 0%,#2d1020 50%,#db2777 100%)',cb:'#ffffff',bb:'#fdf2f8',dcb:'#150010',dbb:'#0d000a'},
+        plum:      {p:'#6d28d9',pd:'#4c1d95',pl:'#8b5cf6',a:'#ec4899',d:'#1e0a3c',s:'#2d1b69',g:'linear-gradient(135deg,#4c1d95 0%,#6d28d9 50%,#ec4899 100%)',hg:'linear-gradient(135deg,#1e0a3c 0%,#2d1b69 50%,#4c1d95 100%)',cb:'#ffffff',bb:'#f5f3ff',dcb:'#10002e',dbb:'#08001a'},
+        midnight:  {p:'#6366f1',pd:'#4338ca',pl:'#818cf8',a:'#38bdf8',d:'#0a0a0f',s:'#111120',g:'linear-gradient(135deg,#4338ca 0%,#6366f1 50%,#38bdf8 100%)',hg:'linear-gradient(135deg,#0a0a0f 0%,#111120 50%,#4338ca 100%)',cb:'#1a1a2e',bb:'#0d0d1a',dcb:'#0d0d1a',dbb:'#050508'},
+        neon:      {p:'#a855f7',pd:'#7c3aed',pl:'#c084fc',a:'#22d3ee',d:'#050010',s:'#0d001a',g:'linear-gradient(135deg,#7c3aed 0%,#a855f7 50%,#22d3ee 100%)',hg:'linear-gradient(135deg,#050010 0%,#0d001a 50%,#7c3aed 100%)',cb:'#0d001a',bb:'#080010',dcb:'#0a0015',dbb:'#05000d'},
+        matrix:    {p:'#16a34a',pd:'#15803d',pl:'#4ade80',a:'#a3e635',d:'#000d00',s:'#001a00',g:'linear-gradient(135deg,#15803d 0%,#16a34a 50%,#4ade80 100%)',hg:'linear-gradient(135deg,#000d00 0%,#001a00 50%,#15803d 100%)',cb:'#001200',bb:'#000a00',dcb:'#001000',dbb:'#000800'},
+        obsidian:  {p:'#475569',pd:'#1e293b',pl:'#64748b',a:'#f59e0b',d:'#020617',s:'#0f172a',g:'linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#475569 100%)',hg:'linear-gradient(135deg,#020617 0%,#0f172a 50%,#1e293b 100%)',cb:'#1e293b',bb:'#0f172a',dcb:'#111827',dbb:'#030712'},
+        snow:      {p:'#18181b',pd:'#09090b',pl:'#3f3f46',a:'#f59e0b',d:'#09090b',s:'#18181b',g:'linear-gradient(135deg,#18181b 0%,#3f3f46 50%,#71717a 100%)',hg:'linear-gradient(135deg,#09090b 0%,#18181b 50%,#27272a 100%)',cb:'#ffffff',bb:'#fafafa',dcb:'#1c1c1e',dbb:'#000000'},
+        lavender:  {p:'#7c3aed',pd:'#6d28d9',pl:'#8b5cf6',a:'#c084fc',d:'#1e1b4b',s:'#312e81',g:'linear-gradient(135deg,#6d28d9 0%,#7c3aed 50%,#c084fc 100%)',hg:'linear-gradient(135deg,#1e1b4b 0%,#312e81 50%,#6d28d9 100%)',cb:'#ffffff',bb:'#f5f3ff',dcb:'#0f0020',dbb:'#080010'},
+        monochrome:{p:'#374151',pd:'#111827',pl:'#6b7280',a:'#9ca3af',d:'#030712',s:'#111827',g:'linear-gradient(135deg,#111827 0%,#374151 50%,#6b7280 100%)',hg:'linear-gradient(135deg,#030712 0%,#111827 50%,#1f2937 100%)',cb:'#ffffff',bb:'#f9fafb',dcb:'#1f2937',dbb:'#111827'}
       };
 
+      /* ── Full font table — must stay in sync with ThemeContext.js FONTS ── */
+      var F={
+        default:  {fd:"'Playfair Display',serif",  fb:"'DM Sans',sans-serif",       u:'https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700;900&family=DM+Sans:wght@300;400;500;600;700&display=swap'},
+        modern:   {fd:"'Poppins',sans-serif",       fb:"'Inter',sans-serif",          u:'https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&family=Inter:wght@300;400;500;600&display=swap'},
+        elegant:  {fd:"'Cormorant Garamond',serif", fb:"'Raleway',sans-serif",        u:'https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=Raleway:wght@300;400;500;600;700&display=swap'},
+        bold:     {fd:"'Syne',sans-serif",          fb:"'Work Sans',sans-serif",      u:'https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Work+Sans:wght@300;400;500;600&display=swap'},
+        luxury:   {fd:"'Bodoni Moda',serif",        fb:"'Jost',sans-serif",           u:'https://fonts.googleapis.com/css2?family=Bodoni+Moda:wght@400;600;700&family=Jost:wght@300;400;500;600&display=swap'},
+        tech:     {fd:"'Space Grotesk',sans-serif", fb:"'IBM Plex Sans',sans-serif",  u:'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap'},
+        minimal:  {fd:"'Outfit',sans-serif",        fb:"'Nunito',sans-serif",         u:'https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Nunito:wght@300;400;500;600&display=swap'},
+        classic:  {fd:"'Libre Baskerville',serif",  fb:"'Source Sans 3',sans-serif",  u:'https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@400;700&family=Source+Sans+3:wght@300;400;500;600&display=swap'},
+        geometric:{fd:"'Josefin Sans',sans-serif",  fb:"'Lato',sans-serif",           u:'https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@300;400;600;700&family=Lato:wght@300;400;700&display=swap'},
+        humanist: {fd:"'Nunito Sans',sans-serif",   fb:"'Mulish',sans-serif",         u:'https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@300;400;600;700;800&family=Mulish:wght@300;400;500;600&display=swap'}
+      };
+
+      /* ── Read cache — KEY MUST MATCH ThemeContext.js LS_KEY exactly ── */
       var s=null;
-      try{var raw=localStorage.getItem('shopzen_theme_v1');if(raw)s=JSON.parse(raw);}catch(e){}
+      try{var raw=localStorage.getItem('shopzen_theme_v2');if(raw)s=JSON.parse(raw);}catch(e){}
 
       var tk=(s&&s.theme)||'default';
       var t=T[tk]||T['default'];
+      var isDark=!!(s&&s.darkMode);
+
+      /* Resolve colours (custom overrides → theme palette) */
       var pr=(s&&s.primaryColor)||t.p;
       var pd=(s&&s.primaryDarkColor)||t.pd;
       var pl=(s&&s.primaryLightColor)||t.pl;
       var ac=(s&&s.secondaryColor)||t.a;
       var dk=(s&&s.darkBgColor)||t.d;
+      var cardBg = isDark ? (t.dcb||'#1a1a2e') : t.cb;
+      var bodyBg = isDark ? (t.dbb||'#0d0d1a') : t.bb;
+      var textPrimary   = isDark ? '#f1f5f9' : '#0f172a';
+      var textSecondary = isDark ? '#94a3b8' : '#64748b';
+      var borderColor   = isDark ? '#1e293b' : '#e5e7eb';
 
       var r=document.documentElement;
-      r.style.setProperty('--color-primary',       pr);
-      r.style.setProperty('--color-primary-dark',  pd);
-      r.style.setProperty('--color-primary-light', pl);
-      r.style.setProperty('--color-accent',        ac);
-      r.style.setProperty('--color-dark',          dk);
-      r.style.setProperty('--color-surface',       t.s);
-      r.style.setProperty('--theme-gradient',      t.g);
-      r.style.setProperty('--hero-gradient',       t.hg);
-      r.style.setProperty('--card-bg',             t.cb);
-      r.style.setProperty('--body-bg',             t.bb);
-      r.style.setProperty('--glow-primary',        pr+'66');
-      r.style.setProperty('--glow-accent',         ac+'4d');
+      r.style.setProperty('--color-primary',        pr);
+      r.style.setProperty('--color-primary-dark',   pd);
+      r.style.setProperty('--color-primary-light',  pl);
+      r.style.setProperty('--color-accent',         ac);
+      r.style.setProperty('--color-dark',           dk);
+      r.style.setProperty('--color-surface',        t.s);
+      r.style.setProperty('--theme-gradient',       t.g);
+      r.style.setProperty('--hero-gradient',        t.hg);
+      r.style.setProperty('--card-bg',              cardBg);
+      r.style.setProperty('--body-bg',              bodyBg);
+      r.style.setProperty('--glow-primary',         pr+'66');
+      r.style.setProperty('--glow-accent',          ac+'4d');
+      r.style.setProperty('--text-primary',         textPrimary);
+      r.style.setProperty('--text-secondary',       textSecondary);
+      r.style.setProperty('--border-color',         borderColor);
 
+      /* Apply background immediately — prevents white flash */
       var bodyStyle=document.createElement('style');
       bodyStyle.id='theme-bootstrap-bg';
-      bodyStyle.textContent='html,body{background:'+t.bb+' !important}';
+      bodyStyle.textContent='html,body{background:'+bodyBg+' !important;color:'+textPrimary+'}';
       document.head.appendChild(bodyStyle);
 
+      /* Apply dark-mode class so CSS selectors work before React mounts */
+      if(isDark) r.classList.add('dark-mode');
+
+      /* Font */
       var fk=(s&&s.fontStyle)||'default';
       var f=F[fk]||F['default'];
       r.style.setProperty('--font-display',f.fd);
@@ -121,6 +154,7 @@
       fl.id='theme-font';fl.rel='stylesheet';fl.href=f.u;
       document.head.appendChild(fl);
 
+      /* Custom CSS */
       if(s&&s.customCSS){
         var cs=document.createElement('style');
         cs.id='theme-custom-css';
@@ -128,6 +162,7 @@
         document.head.appendChild(cs);
       }
 
+      /* Update PWA theme-color meta */
       var mt=document.getElementById('meta-theme-color');
       if(mt) mt.content=pr;
     })();
