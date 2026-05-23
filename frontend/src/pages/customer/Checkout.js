@@ -68,16 +68,44 @@ export default function Checkout() {
   const [selectedDelivery, setSelectedDelivery] = useState('');
   const [payHereData, setPayHereData] = useState(null);
 
-  const [billing, setBilling] = useState({
-    firstName: user?.firstName || '', lastName: user?.lastName || '',
-    country: 'Sri Lanka', street: '', city: '',
-    phone: user?.phone || '', email: user?.email || '',
+  const [billing, setBilling] = useState(() => {
+    // Restore saved state if returning from register
+    try {
+      const saved = sessionStorage.getItem('checkout_state');
+      if (saved) return JSON.parse(saved).billing;
+    } catch {}
+    return {
+      firstName: user?.firstName || '', lastName: user?.lastName || '',
+      country: 'Sri Lanka', street: '', city: '',
+      phone: user?.phone || '', email: user?.email || '',
+    };
   });
-  const [shipping, setShipping] = useState({
-    firstName: '', lastName: '', country: 'Sri Lanka', street: '', city: '', phone: ''
+  const [shipping, setShipping] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('checkout_state');
+      if (saved) return JSON.parse(saved).shipping;
+    } catch {}
+    return { firstName: '', lastName: '', country: 'Sri Lanka', street: '', city: '', phone: '' };
   });
 
   useEffect(() => { if (items.length === 0) navigate('/cart'); }, [items, navigate]);
+
+  // Restore remaining saved state (coupon, notes, etc.) after returning from register
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('checkout_state');
+      if (!raw) return;
+      const s = JSON.parse(raw);
+      if (s.couponCode)      setCouponCode(s.couponCode);
+      if (s.couponData)      setCouponData(s.couponData);
+      if (s.notes)           setNotes(s.notes);
+      if (s.shipDiff)        setShipDiff(s.shipDiff);
+      if (s.paymentMethod)   setPaymentMethod(s.paymentMethod);
+      if (s.selectedDelivery) setSelectedDelivery(s.selectedDelivery);
+      if (s.agreedTerms)     setAgreedTerms(s.agreedTerms);
+    } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Load payment gateways and delivery services
   useEffect(() => {
@@ -154,6 +182,13 @@ export default function Checkout() {
 
     // ── Guest users must register before placing an order ──
     if (!user) {
+      // Save entire checkout state so it survives the register redirect
+      try {
+        sessionStorage.setItem('checkout_state', JSON.stringify({
+          billing, shipping, couponCode, couponData,
+          notes, shipDiff, paymentMethod, selectedDelivery, agreedTerms,
+        }));
+      } catch {}
       navigate('/register', {
         state: {
           fromCheckout: true,
@@ -197,6 +232,7 @@ export default function Checkout() {
           country: billing.country,
         });
         clearCart();
+        sessionStorage.removeItem('checkout_state');
         setPayHereData(phData.data);
         setLoading(false);
         return;
@@ -204,11 +240,13 @@ export default function Checkout() {
 
       if (paymentMethod === 'stripe') {
         clearCart();
+        sessionStorage.removeItem('checkout_state');
         navigate(`/order-success/${data.orderId}?gateway=stripe&total=${data.total}`);
         return;
       }
 
       clearCart();
+      sessionStorage.removeItem('checkout_state');
       navigate(`/order-success/${data.orderId}`);
     } catch (err) {
       toast.error(err.response?.data?.message || 'Order failed. Please try again.');
