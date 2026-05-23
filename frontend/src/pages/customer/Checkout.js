@@ -72,7 +72,6 @@ export default function Checkout() {
     firstName: user?.firstName || '', lastName: user?.lastName || '',
     country: 'Sri Lanka', street: '', city: '',
     phone: user?.phone || '', email: user?.email || '',
-    username: '', password: ''
   });
   const [shipping, setShipping] = useState({
     firstName: '', lastName: '', country: 'Sri Lanka', street: '', city: '', phone: ''
@@ -256,12 +255,7 @@ export default function Checkout() {
                   <input type="tel" value={billing.phone} onChange={e=>setBilling(p=>({...p,phone:e.target.value}))} required className="form-input" placeholder="+94 7X XXX XXXX" />
                 </div>
                 <F label="Email" type="email" value={billing.email} onChange={e=>setBilling(p=>({...p,email:e.target.value}))} required />
-                {!user && (
-                  <>
-                    <F label="Username" value={billing.username} onChange={e=>setBilling(p=>({...p,username:e.target.value}))} required placeholder="Choose a username" />
-                    <F label="Password" type="password" value={billing.password} onChange={e=>setBilling(p=>({...p,password:e.target.value}))} required />
-                  </>
-                )}
+
               </div>
             </div>
 

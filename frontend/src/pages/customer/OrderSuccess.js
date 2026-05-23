@@ -2,36 +2,140 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useSearchParams, Link } from 'react-router-dom';
 import API from '../../utils/api';
 import { useTheme } from '../../context/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
 import useSEO, { trackPurchase } from '../../hooks/useSEO';
+import toast from 'react-hot-toast';
+
+/* ── Inline guest registration shown on order success page ── */
+function GuestRegisterPrompt({ order, onDone }) {
+  const { register } = useAuth();
+  const b = order?.billing || {};
+
+  const [form, setForm] = useState({
+    firstName: b.firstName || '',
+    lastName:  b.lastName  || '',
+    email:     b.email     || '',
+    phone:     b.phone     || '',
+    username:  '',
+    password:  '',
+  });
+  const [loading, setLoading] = useState(false);
+  const [done, setDone]       = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (form.password.length < 6) { toast.error('Password must be at least 6 characters'); return; }
+    setLoading(true);
+    try {
+      // Register the account
+      await register(form);
+      // Link this guest order to the new account
+      try { await API.patch(`/orders/${order._id}/claim`); } catch {}
+      setDone(true);
+      toast.success('Account created! Your order is now linked. 🎉');
+      onDone && onDone();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Registration failed');
+    } finally { setLoading(false); }
+  };
+
+  if (done) return (
+    <div className="rounded-2xl border-2 border-green-200 bg-green-50 p-5 mb-4 text-center">
+      <div className="text-3xl mb-2">🎉</div>
+      <p className="font-bold text-green-800 mb-1">Account created successfully!</p>
+      <p className="text-sm text-green-700">Your order has been linked to your account. You can now track it anytime.</p>
+    </div>
+  );
+
+  return (
+    <div className="rounded-2xl border-2 p-5 mb-4" style={{ borderColor: 'var(--color-primary)', background: 'var(--card-bg)' }}>
+      {/* Header */}
+      <div className="flex items-start gap-3 mb-4">
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white flex-shrink-0 text-lg" style={{ background: 'var(--theme-gradient)' }}>👤</div>
+        <div>
+          <h3 className="font-bold text-gray-900 text-base" style={{ fontFamily: 'var(--font-display)' }}>Create an Account to Track Your Order</h3>
+          <p className="text-sm text-gray-500 mt-0.5">Your billing details are pre-filled. Just pick a username and password.</p>
+        </div>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-3">
+        {/* Name row */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="form-label">First Name *</label>
+            <input value={form.firstName} onChange={e => setForm(p => ({ ...p, firstName: e.target.value }))} required className="form-input" />
+          </div>
+          <div>
+            <label className="form-label">Last Name *</label>
+            <input value={form.lastName} onChange={e => setForm(p => ({ ...p, lastName: e.target.value }))} required className="form-input" />
+          </div>
+        </div>
+
+        {/* Email + Phone */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="form-label">Email *</label>
+            <input type="email" value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} required className="form-input" />
+          </div>
+          <div>
+            <label className="form-label">Phone</label>
+            <input type="tel" value={form.phone} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} className="form-input" />
+          </div>
+        </div>
+
+        {/* Username */}
+        <div>
+          <label className="form-label">Username *</label>
+          <input value={form.username} onChange={e => setForm(p => ({ ...p, username: e.target.value }))} required className="form-input" placeholder="Choose a username" />
+        </div>
+
+        {/* Password */}
+        <div>
+          <label className="form-label">Password * <span className="text-gray-400 font-normal">(min. 6 characters)</span></label>
+          <input type="password" value={form.password} onChange={e => setForm(p => ({ ...p, password: e.target.value }))} required minLength={6} className="form-input" placeholder="Choose a password" />
+        </div>
+
+        <button type="submit" disabled={loading}
+          className="btn-primary w-full py-3 flex items-center justify-center gap-2 mt-1">
+          {loading
+            ? <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Creating Account...</>
+            : '✓ Create Account & Track Order'}
+        </button>
+      </form>
+
+      <p className="text-center text-xs text-gray-400 mt-3">
+        Already have an account?{' '}
+        <Link to="/login" className="font-semibold hover:underline" style={{ color: 'var(--color-primary)' }}>Sign in</Link>
+      </p>
+    </div>
+  );
+}
 
 export function OrderSuccess() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
   const { settings } = useTheme();
+  const { user } = useAuth();
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [accountLinked, setAccountLinked] = useState(false);
   const sym = settings?.currencySymbol || 'Rs.';
   const gateway = searchParams.get('gateway');
 
   useSEO({ title: 'Order Confirmed', noindex: true });
 
   useEffect(() => {
-    // For gateway payments, poll until order is confirmed
     let attempts = 0;
     const fetchOrder = async () => {
       try {
         const { data } = await API.get(`/orders/${id}`);
         setOrder(data);
         setLoading(false);
-        // Fire purchase event once
         if (data && data.paymentStatus !== 'failed') {
           trackPurchase(data, data.items || []);
         }
-        // If gateway payment and still pending, notify backend
         if (gateway && data.paymentStatus === 'pending' && attempts === 0) {
           attempts++;
-          // For PayHere: payment confirmed via webhook automatically
-          // For Stripe: handled by webhook
         }
       } catch { setLoading(false); }
     };
@@ -41,20 +145,23 @@ export function OrderSuccess() {
   if (loading) return (
     <div className="min-h-[60vh] flex items-center justify-center">
       <div className="text-center">
-        <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" style={{ borderColor: 'var(--color-primary)', borderTopColor: 'transparent' }}/>
+        <div className="w-12 h-12 border-4 border-t-transparent rounded-full animate-spin mx-auto mb-4" style={{ borderColor: 'var(--color-primary)', borderTopColor: 'transparent' }}/>
         <p className="text-gray-500">Loading your order...</p>
       </div>
     </div>
   );
 
-  const isPaid = order?.paymentStatus === 'paid';
-  const isBankTransfer = order?.paymentMethod === 'bank_transfer';
-  const isCOD = order?.paymentMethod === 'cod';
-  const isGateway = ['payhere','stripe','paypal'].includes(order?.paymentMethod);
+  const isPaid          = order?.paymentStatus === 'paid';
+  const isBankTransfer  = order?.paymentMethod === 'bank_transfer';
+  const isCOD           = order?.paymentMethod === 'cod';
+  const isGateway       = ['payhere','stripe','paypal'].includes(order?.paymentMethod);
+  // Show register prompt if: guest (not logged in), order loaded, account not yet linked
+  const showRegister    = !user && order && !accountLinked;
 
   return (
     <div className="min-h-[70vh] flex items-center justify-center px-4 py-16" style={{ background: 'var(--body-bg)' }}>
       <div className="w-full max-w-lg fade-in">
+
         {/* Success Icon */}
         <div className="text-center mb-6">
           <div className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 bounce-in ${isPaid ? 'bg-green-100' : 'bg-amber-100'}`}>
@@ -101,15 +208,16 @@ export function OrderSuccess() {
           <div className="rounded-2xl border-2 border-amber-200 bg-amber-50 p-5 mb-4">
             <h3 className="font-bold text-amber-800 mb-3 flex items-center gap-2 text-base">🏦 Bank Transfer Instructions</h3>
             <p className="text-sm text-amber-700 mb-4">
-              Transfer <strong>{sym} {order.total?.toLocaleString()}</strong> using <span className="font-mono font-bold bg-amber-100 px-1.5 py-0.5 rounded">{order.orderNumber}</span> as reference.
+              Transfer <strong>{sym} {order.total?.toLocaleString()}</strong> using{' '}
+              <span className="font-mono font-bold bg-amber-100 px-1.5 py-0.5 rounded">{order.orderNumber}</span> as reference.
             </p>
             <div className="bg-white rounded-xl p-4 space-y-2.5 border border-amber-100">
               <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Bank Account Details</p>
               {[
-                ['Bank', settings?.bankName],
-                ['Account Name', settings?.bankAccountName],
+                ['Bank',           settings?.bankName],
+                ['Account Name',   settings?.bankAccountName],
                 ['Account Number', settings?.bankAccountNumber],
-                ['Branch', settings?.bankBranch],
+                ['Branch',         settings?.bankBranch],
               ].filter(([,v]) => v).map(([label, value]) => (
                 <div key={label} className="flex justify-between items-center">
                   <span className="text-sm text-gray-500">{label}</span>
@@ -135,6 +243,11 @@ export function OrderSuccess() {
             <p className="font-bold text-green-800 mb-1">💵 Cash on Delivery</p>
             <p className="text-sm text-green-700">Please have <strong>{sym} {order.total?.toLocaleString()}</strong> ready when your order arrives.</p>
           </div>
+        )}
+
+        {/* ── Guest Register Prompt ── shown only to guests */}
+        {showRegister && (
+          <GuestRegisterPrompt order={order} onDone={() => setAccountLinked(true)} />
         )}
 
         {/* Order Summary */}

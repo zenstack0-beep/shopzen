@@ -240,4 +240,24 @@ router.get('/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
+// Claim a guest order after registration — links order to the logged-in user
+// Called immediately after register() on the OrderSuccess page
+router.patch('/:id/claim', auth, async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ message: 'Order not found' });
+    // Only claim if still a guest order (no customer attached)
+    if (order.customer) return res.json({ message: 'Already linked' });
+    // Extra safety: billing email must match the logged-in user
+    if (order.billing?.email && order.billing.email.toLowerCase() !== req.user.email.toLowerCase()) {
+      return res.status(403).json({ message: 'Email does not match order' });
+    }
+    order.customer = req.user._id;
+    await order.save();
+    res.json({ message: 'Order linked to account' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 module.exports = router;
