@@ -21,7 +21,6 @@
     <meta name="description"  content="Premium online store — quality products, delivered fast."/>
     <meta name="robots"       content="index,follow,max-image-preview:large"/>
     <link rel="canonical"     href="https://yourstore.com"/>
-
     <meta property="og:type"        content="website"/>
     <meta property="og:title"       content="ShopZen"/>
     <meta property="og:description" content="Premium online store — quality products, delivered fast."/>
@@ -29,7 +28,6 @@
     <meta property="og:url"         content="https://yourstore.com"/>
     <meta property="og:site_name"   content="ShopZen"/>
     <meta property="og:locale"      content="en_US"/>
-
     <meta name="twitter:card"        content="summary_large_image"/>
     <meta name="twitter:title"       content="ShopZen"/>
     <meta name="twitter:description" content="Premium online store — quality products, delivered fast."/>
@@ -41,55 +39,39 @@
     <link rel="dns-prefetch" href="https://www.googletagmanager.com"/>
     <link rel="dns-prefetch" href="https://connect.facebook.net"/>
 
-    <!-- ── Splash styles — intentionally theme-neutral ── -->
+    <!-- Neutral splash styles — no theme colours leak here -->
     <style>
       *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-
-      /* Neutral background — pure white or pure black based on OS preference.
-         No theme colour leaks here at all. */
-      #szl-splash {
-        position: fixed;
-        inset: 0;
-        z-index: 99999;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 18px;
-        background: #ffffff;
-        transition: opacity 0.4s ease, visibility 0.4s ease;
+      #szl-splash{
+        position:fixed;inset:0;z-index:99999;
+        display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;
+        background:#ffffff;
+        transition:opacity 0.4s ease,visibility 0.4s ease;
       }
-      @media (prefers-color-scheme: dark) {
-        #szl-splash { background: #0f0f0f; }
-        #szl-wordmark { color: #f1f5f9 !important; }
-        #szl-spinner { border-color: rgba(255,255,255,0.12) !important; border-top-color: #ffffff !important; }
+      @media(prefers-color-scheme:dark){
+        #szl-splash{background:#0f0f0f;}
+        #szl-wordmark{color:#f1f5f9 !important;}
+        #szl-spinner{border-color:rgba(255,255,255,0.12)!important;border-top-color:#ffffff!important;}
       }
-      #szl-splash.szl-hide {
-        opacity: 0;
-        visibility: hidden;
-        pointer-events: none;
+      #szl-splash.szl-hide{opacity:0;visibility:hidden;pointer-events:none;}
+      #szl-wordmark{
+        font-family:Georgia,'Times New Roman',serif;
+        font-size:28px;font-weight:700;letter-spacing:-0.5px;
+        color:#111111;user-select:none;
       }
-      #szl-wordmark {
-        font-family: Georgia, 'Times New Roman', serif;
-        font-size: 28px;
-        font-weight: 700;
-        letter-spacing: -0.5px;
-        color: #111111;
-        user-select: none;
+      #szl-spinner{
+        width:32px;height:32px;
+        border:3px solid rgba(0,0,0,0.1);
+        border-top-color:#111111;
+        border-radius:50%;
+        animation:szl-spin 0.7s linear infinite;
       }
-      #szl-spinner {
-        width: 32px;
-        height: 32px;
-        border: 3px solid rgba(0,0,0,0.1);
-        border-top-color: #111111;
-        border-radius: 50%;
-        animation: szl-spin 0.7s linear infinite;
-      }
-      @keyframes szl-spin { to { transform: rotate(360deg); } }
+      @keyframes szl-spin{to{transform:rotate(360deg);}}
     </style>
 
     <script>
     (function(){
+      /* ── Theme + font tables (mirror ThemeContext.js exactly) ── */
       var T={
         default:   {p:'#b5451b',pd:'#8b3214',pl:'#e8643c',a:'#f0a500',d:'#0f172a',s:'#1e293b',g:'linear-gradient(135deg,#b5451b 0%,#e8643c 50%,#f0a500 100%)',hg:'linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#b5451b 100%)',cb:'#ffffff',bb:'#fafaf8',dcb:'#1e1e1e',dbb:'#0f0f0f'},
         coral:     {p:'#f97316',pd:'#ea580c',pl:'#fb923c',a:'#fcd34d',d:'#1c0a00',s:'#431407',g:'linear-gradient(135deg,#ea580c 0%,#f97316 50%,#fcd34d 100%)',hg:'linear-gradient(135deg,#1c0a00 0%,#431407 50%,#ea580c 100%)',cb:'#ffffff',bb:'#fff7ed',dcb:'#1a1000',dbb:'#0d0800'},
@@ -131,40 +113,27 @@
         var tk=(s&&s.theme)||'default';
         var t=T[tk]||T.default;
         var isDark=!!(s&&s.darkMode);
-        var pr=(s&&s.primaryColor)||t.p;
-        var pd=(s&&s.primaryDarkColor)||t.pd;
-        var pl=(s&&s.primaryLightColor)||t.pl;
-        var ac=(s&&s.secondaryColor)||t.a;
-        var dk=(s&&s.darkBgColor)||t.d;
+        var pr=(s&&s.primaryColor)||t.p, pd=(s&&s.primaryDarkColor)||t.pd,
+            pl=(s&&s.primaryLightColor)||t.pl, ac=(s&&s.secondaryColor)||t.a,
+            dk=(s&&s.darkBgColor)||t.d;
         var cardBg=isDark?(t.dcb||'#1a1a2e'):t.cb;
         var bodyBg=isDark?(t.dbb||'#0d0d1a'):t.bb;
-        var textPrimary=isDark?'#f1f5f9':'#0f172a';
-        var textSecondary=isDark?'#94a3b8':'#64748b';
-        var borderColor=isDark?'#1e293b':'#e5e7eb';
+        var tp=isDark?'#f1f5f9':'#0f172a', ts=isDark?'#94a3b8':'#64748b', bc=isDark?'#1e293b':'#e5e7eb';
         var r=document.documentElement;
-        r.style.setProperty('--color-primary',pr);
-        r.style.setProperty('--color-primary-dark',pd);
-        r.style.setProperty('--color-primary-light',pl);
-        r.style.setProperty('--color-accent',ac);
-        r.style.setProperty('--color-dark',dk);
-        r.style.setProperty('--color-surface',t.s);
-        r.style.setProperty('--theme-gradient',t.g);
-        r.style.setProperty('--hero-gradient',t.hg);
-        r.style.setProperty('--card-bg',cardBg);
-        r.style.setProperty('--body-bg',bodyBg);
-        r.style.setProperty('--glow-primary',pr+'66');
-        r.style.setProperty('--glow-accent',ac+'4d');
-        r.style.setProperty('--text-primary',textPrimary);
-        r.style.setProperty('--text-secondary',textSecondary);
-        r.style.setProperty('--border-color',borderColor);
+        r.style.setProperty('--color-primary',pr);r.style.setProperty('--color-primary-dark',pd);
+        r.style.setProperty('--color-primary-light',pl);r.style.setProperty('--color-accent',ac);
+        r.style.setProperty('--color-dark',dk);r.style.setProperty('--color-surface',t.s);
+        r.style.setProperty('--theme-gradient',t.g);r.style.setProperty('--hero-gradient',t.hg);
+        r.style.setProperty('--card-bg',cardBg);r.style.setProperty('--body-bg',bodyBg);
+        r.style.setProperty('--glow-primary',pr+'66');r.style.setProperty('--glow-accent',ac+'4d');
+        r.style.setProperty('--text-primary',tp);r.style.setProperty('--text-secondary',ts);
+        r.style.setProperty('--border-color',bc);
         var bs=document.getElementById('theme-bootstrap-bg');
         if(!bs){bs=document.createElement('style');bs.id='theme-bootstrap-bg';document.head.appendChild(bs);}
-        bs.textContent='html,body{background:'+bodyBg+' !important;color:'+textPrimary+'}';
+        bs.textContent='html,body{background:'+bodyBg+' !important;color:'+tp+'}';
         if(isDark)r.classList.add('dark-mode');else r.classList.remove('dark-mode');
-        var fk=(s&&s.fontStyle)||'default';
-        var f=F[fk]||F.default;
-        r.style.setProperty('--font-display',f.fd);
-        r.style.setProperty('--font-body',f.fb);
+        var fk=(s&&s.fontStyle)||'default', f=F[fk]||F.default;
+        r.style.setProperty('--font-display',f.fd);r.style.setProperty('--font-body',f.fb);
         var fl=document.getElementById('theme-font');
         if(!fl){fl=document.createElement('link');fl.id='theme-font';fl.rel='stylesheet';document.head.appendChild(fl);}
         if(fl.href!==f.u)fl.href=f.u;
@@ -177,37 +146,45 @@
         if(mt)mt.content=pr;
       }
 
-      /* Apply localStorage cache immediately (returning visitors get correct theme instantly) */
+      // Apply localStorage immediately for returning visitors (correct theme, no flash)
+      // On a new device this is null so applies default — that's fine, splash covers it
       var cached=null;
       try{var raw=localStorage.getItem('shopzen_theme_v2');if(raw)cached=JSON.parse(raw);}catch(e){}
       applySettings(cached);
 
-      /* Fetch real theme from API — splash stays visible until this resolves */
-      var fetchDone=false;
-      function tryHide(){
-        if(fetchDone&&window.__szReactMounted)window.hideSplash&&window.hideSplash();
-      }
+      // ── Pre-fetch theme from API while HTML is still parsing ──
+      // On success: apply real theme + set __szApiFetched so ThemeContext
+      // skips its own cache-apply steps (which would overwrite to default).
+      // Splash is controlled entirely by ThemeContext's loadAndApply via __szTryHide.
+      window.__szApiFetched = false;
       fetch('/api/settings')
         .then(function(r){return r.ok?r.json():null;})
         .then(function(data){
-          if(data&&typeof data==='object'&&!Array.isArray(data)){
+          if(data&&typeof data==='object'&&!Array.isArray(data)&&('theme' in data||'storeName' in data)){
             applySettings(data);
+            window.__szApiFetched = true;
             try{localStorage.setItem('shopzen_theme_v2',JSON.stringify(data));}catch(e){}
           }
-          fetchDone=true;
-          tryHide();
         })
-        .catch(function(){fetchDone=true;tryHide();});
+        .catch(function(){/* network error — ThemeContext will fetch again */});
 
-      /* Hard timeout — never block the user more than 4 s */
-      setTimeout(function(){fetchDone=true;tryHide();},4000);
-
-      window.__szTryHide=tryHide;
+      // Splash hide logic — called by ThemeContext after its own loadAndApply succeeds
+      window.__szReactMounted = false;
+      window.__szTryHide = function(){
+        if(window.__szReactMounted){
+          var el=document.getElementById('szl-splash');
+          if(el)el.classList.add('szl-hide');
+        }
+      };
+      // Hard safety net: never block user more than 5 s
+      setTimeout(function(){
+        var el=document.getElementById('szl-splash');
+        if(el)el.classList.add('szl-hide');
+      }, 5000);
     })();
     </script>
   </head>
   <body>
-    <!-- Neutral splash — no theme colours, just the store name + spinner -->
     <div id="szl-splash">
       <div id="szl-wordmark">ShopZen</div>
       <div id="szl-spinner"></div>
@@ -217,11 +194,7 @@
     <div id="root"></div>
 
     <script>
-      window.hideSplash=function(){
-        var el=document.getElementById('szl-splash');
-        if(el)el.classList.add('szl-hide');
-      };
-      /* Detect React mount without touching any React file */
+      // Detect React mount — set flag so __szTryHide knows React is ready
       (function(){
         var root=document.getElementById('root');
         if(!root)return;
@@ -229,7 +202,8 @@
           if(root.children.length>0){
             obs.disconnect();
             window.__szReactMounted=true;
-            window.__szTryHide&&window.__szTryHide();
+            // Don't hide yet — wait for ThemeContext.loadAndApply to call __szTryHide
+            // so the correct theme is applied before the splash disappears
           }
         });
         obs.observe(root,{childList:true});

@@ -138,7 +138,9 @@ export const applyTheme = (settings) => {
 };
 
 /* ── IIFE: runs before React ─────────────────────────────────────────── */
-try { applyTheme(readCache()); } catch {}
+// Only apply cache if index.html bootstrap hasn't already fetched the real
+// theme from the API (window.__szApiFetched is set by index.html on success).
+try { if (!window.__szApiFetched) { applyTheme(readCache()); } } catch {}
 
 /* ── ThemeProvider ───────────────────────────────────────────────────── */
 export const ThemeProvider = ({ children }) => {
@@ -146,7 +148,11 @@ export const ThemeProvider = ({ children }) => {
   const [themeKey, setThemeKey] = useState(() => readCache()?.theme || 'default');
   const [darkMode, setDarkModeState] = useState(() => readCache()?.darkMode || false);
 
-  useLayoutEffect(() => { applyTheme(readCache()); }, []);
+  useLayoutEffect(() => {
+    // Skip if index.html already fetched the real theme from API —
+    // applying cache here would overwrite it with stale/default data.
+    if (!window.__szApiFetched) { applyTheme(readCache()); }
+  }, []);
 
   const loadAndApply = useCallback(async () => {
     try {
@@ -158,6 +164,9 @@ export const ThemeProvider = ({ children }) => {
       setDarkModeState(data.darkMode || false);
       applyTheme(data);
       writeCache(data);
+      // Mark that React has the real theme — hide splash on first load
+      window.__szApiFetched = true;
+      if (window.__szTryHide) window.__szTryHide();
       if (data.seo_config && typeof data.seo_config === 'object') {
         window.__SHOPZEN_SEO__ = {
           siteName: data.storeName || data.seo_config.siteName,
