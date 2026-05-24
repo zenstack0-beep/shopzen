@@ -37,7 +37,11 @@ router.post('/', adminAuth, async (req, res) => {
 // Admin - Update product
 router.put('/:id', adminAuth, async (req, res) => {
   try {
-    const product = await Product.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const product = await Product.findByIdAndUpdate(
+      req.params.id,
+      { $set: req.body },
+      { new: true, runValidators: false }
+    );
     res.json(product);
   } catch (err) {
     res.status(500).json({ message: err.message });

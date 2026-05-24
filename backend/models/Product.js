@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 
 const variantOptionSchema = new mongoose.Schema({
   name: { type: String, required: true },       // e.g. "Size", "Color", "Material"
-  type: { type: String, enum: ['size','color','text','button'], default: 'button' },
+  type: { type: String, enum: ['size','color','text','button','material','style','storage','weight','flavor'], default: 'button' },
   required: { type: Boolean, default: true },
   values: [{
     label: String,      // e.g. "Large", "Red", "Cotton"
