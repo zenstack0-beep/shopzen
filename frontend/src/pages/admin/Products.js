@@ -196,20 +196,38 @@ function SpecsPanel({ specs, onChange }) {
   };
 
   const parseAndAdd = () => {
-    if (!pasteText.trim()) return;
+    if (!pasteText.trim()) { toast.error('Nothing to parse'); return; }
     const lines = pasteText.split('\n').map(l => l.trim()).filter(Boolean);
     const parsed = [];
     lines.forEach(line => {
-      // Supports: "Key: Value", "Key - Value", "Key | Value", "Key\tValue"
-      const m = line.match(/^(.+?)[\s]*[:|\-–\t][\s]*(.+)$/);
-      if (m) {
-        parsed.push({ key: m[1].trim(), value: m[2].trim() });
+      let key = '', value = '';
+      const colonIdx = line.indexOf(':');
+      const pipeIdx  = line.indexOf('|');
+      const dashIdx  = line.search(/\s[-]\s/);
+      const tabIdx   = line.indexOf('\t');
+      if (colonIdx > 0) {
+        key   = line.slice(0, colonIdx).trim();
+        value = line.slice(colonIdx + 1).trim();
+      } else if (pipeIdx > 0) {
+        key   = line.slice(0, pipeIdx).trim();
+        value = line.slice(pipeIdx + 1).trim();
+      } else if (dashIdx > 0) {
+        key   = line.slice(0, dashIdx).trim();
+        value = line.slice(dashIdx).replace(/^[\s-]+/, '').trim();
+      } else if (tabIdx > 0) {
+        key   = line.slice(0, tabIdx).trim();
+        value = line.slice(tabIdx + 1).trim();
       }
+      if (key && value) parsed.push({ key, value });
     });
-    if (parsed.length === 0) { toast.error('Could not parse any specs. Use format: Name: Value'); return; }
+    if (parsed.length === 0) {
+      toast.error('Could not parse. Use format: Name: Value (one per line)');
+      return;
+    }
     onChange([...specs, ...parsed]);
-    setPasteText(''); setShowPaste(false);
-    toast.success(`Added ${parsed.length} specification${parsed.length>1?'s':''}`);
+    setPasteText('');
+    setShowPaste(false);
+    toast.success(`Added ${parsed.length} specification${parsed.length > 1 ? 's' : ''}`);
   };
 
   const remove = (i) => onChange(specs.filter((_, si) => si !== i));
