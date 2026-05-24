@@ -14,6 +14,16 @@ import { WhatsAppProductInquiry } from '../../components/WhatsAppWidget';
 
 gsap.registerPlugin(ScrollTrigger);
 
+// Strip external inline styles and class names from pasted HTML so it
+// renders cleanly with the store theme instead of Sony/Apple/etc. styles.
+function sanitizeHtml(html) {
+  if (!html) return '';
+  return html
+    .replace(/\sstyle="[^"]*"/gi, '')
+    .replace(/\sclass="[^"]*"/gi, '')
+    .replace(/\sbis_skin_checked="[^"]*"/gi, '');
+}
+
 const Stars = ({ rating, count, interactive, selected, onSelect }) => (
   <div className="flex items-center gap-1">
     <div className="flex gap-0.5">
@@ -465,9 +475,8 @@ export default function ProductDetail() {
         </div>
 
         {tab === 'description' && (
-          <div className="prose max-w-none text-gray-600 leading-relaxed text-sm sm:text-base whitespace-pre-wrap">
-            {product.description}
-          </div>
+          <div className="prose max-w-none text-gray-600 leading-relaxed text-sm sm:text-base"
+            dangerouslySetInnerHTML={{ __html: sanitizeHtml(product.description) }} />
         )}
 
         {tab === 'specifications' && (
