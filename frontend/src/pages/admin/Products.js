@@ -49,15 +49,19 @@ const Modal = ({ title, onClose, children, wide }) => (
 ───────────────────────────────────────────── */
 function RichEditor({ value, onChange }) {
   const editorRef = useRef(null);
-  const isInternalChange = useRef(false);
 
-  // Sync external value → DOM only on first mount or external reset
+  // Track the value we initialised the editor with.
+  // Only overwrite innerHTML when value changes from OUTSIDE (e.g. opening a
+  // different product to edit), never as a feedback loop from our own typing.
+  const lastExternalValue = useRef(null);
   useEffect(() => {
     if (!editorRef.current) return;
-    if (editorRef.current.innerHTML !== value) {
-      isInternalChange.current = true;
+    // Only sync if the value changed externally (not from our own onInput)
+    if (value !== lastExternalValue.current) {
+      lastExternalValue.current = value;
       editorRef.current.innerHTML = value || '';
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
   const exec = (cmd, val = null) => {
@@ -67,7 +71,11 @@ function RichEditor({ value, onChange }) {
   };
 
   const fireChange = () => {
-    if (editorRef.current) onChange(editorRef.current.innerHTML);
+    if (editorRef.current) {
+      const html = editorRef.current.innerHTML;
+      lastExternalValue.current = html; // mark as internal so useEffect won't overwrite
+      onChange(html);
+    }
   };
 
   const insertTable = () => {
@@ -169,7 +177,6 @@ function RichEditor({ value, onChange }) {
         contentEditable
         suppressContentEditableWarning
         onInput={fireChange}
-        onBlur={fireChange}
         className="min-h-[180px] p-3 text-sm text-gray-800 outline-none overflow-y-auto"
         style={{ maxHeight: '340px', lineHeight: '1.7' }}
       />
@@ -745,7 +752,7 @@ export default function AdminProducts() {
           {activeTab === 'specs' && (
             <SpecsPanel
               specs={form.specifications || []}
-              onChange={specs => setForm(p => ({ ...p, specifications: specs }))}
+              onChange={newSpecs => setForm(p => ({ ...p, specifications: newSpecs }))}
             />
           )}
 
