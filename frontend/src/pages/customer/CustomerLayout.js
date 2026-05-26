@@ -176,7 +176,7 @@ const Header = ({ settings, campaign }) => {
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2 flex-shrink-0 group mr-2">
             {settings?.logoUrl ? (
-              <img src={settings.logoUrl} alt={settings.storeName||'ShopZen'} className="h-8 sm:h-9 object-contain max-w-[140px]"/>
+              <img src={settings.logoUrl} alt={settings.storeName||'ShopZen'} className="h-16 sm:h-18 object-contain max-w-[280px]"/>
             ) : (
               <>
                 <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white transition-transform group-hover:scale-110 group-hover:rotate-3"
@@ -354,7 +354,7 @@ const Footer = ({ settings }) => {
           <div className="col-span-2 sm:col-span-1">
             <div className="flex items-center gap-2 mb-3">
               {settings?.logoUrl
-                ? <img src={settings.logoUrl} alt={storeName} className="h-7 object-contain" style={{filter:'brightness(0) invert(1)'}}/>
+                ? <img src={settings.logoUrl} alt={storeName} className="h-14 object-contain" style={{filter:'brightness(0) invert(1)'}}/>
                 : <span className="font-bold text-white text-lg" style={{fontFamily:'var(--font-display)'}}>{storeName}</span>
               }
             </div>

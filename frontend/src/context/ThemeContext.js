@@ -135,6 +135,24 @@ export const applyTheme = (settings) => {
   let style = document.getElementById('theme-custom-css');
   if (!style) { style = document.createElement('style'); style.id = 'theme-custom-css'; document.head.appendChild(style); }
   style.textContent = settings?.customCSS || '';
+
+  // Apply favicon from settings
+  if (settings?.faviconUrl) {
+    ['icon', 'shortcut icon', 'apple-touch-icon'].forEach(rel => {
+      let fav = document.querySelector(`link[rel="${rel}"]`);
+      if (!fav) { fav = document.createElement('link'); fav.rel = rel; document.head.appendChild(fav); }
+      fav.href = settings.faviconUrl;
+    });
+  }
+
+  // Apply store name as page title prefix
+  if (settings?.storeName) {
+    const current = document.title;
+    // Only update if it's still the default title or another store name (not a page-specific title)
+    if (current === 'ShopZen' || current === settings.storeName) {
+      document.title = settings.storeName;
+    }
+  }
 };
 
 /* ── IIFE: runs before React ─────────────────────────────────────────── */
