@@ -39,6 +39,65 @@ const GATEWAY_PRESETS = {
 };
 
 
+// ─── Shared field components defined OUTSIDE AdminSettings ───────────────────
+// IMPORTANT: These MUST be module-level constants, NOT defined inside the
+// parent component. Defining components inside a render function causes React
+// to treat them as new component types on every render, which unmounts and
+// remounts the input on every keystroke — losing keyboard focus and mouse
+// pointer position. Keeping them here fixes both the focus-loss bug on the
+// Order Notification Email field and any similar inputs.
+
+const F = ({ label, value, onChange, type='text', placeholder, hint, col2, disabled }) => (
+  <div className={col2 ? 'sm:col-span-2' : ''}>
+    <label className="form-label">{label}</label>
+    <input
+      type={type}
+      value={value ?? ''}
+      onChange={onChange}
+      placeholder={placeholder}
+      disabled={disabled}
+      className={`form-input ${disabled ? 'bg-gray-50 text-gray-400' : ''}`}
+    />
+    {hint && <p className="text-xs text-gray-400 mt-1">{hint}</p>}
+  </div>
+);
+
+const Toggle = ({ label, desc, value, onChange }) => (
+  <div className="flex items-center justify-between py-3 border-b border-gray-50 last:border-0">
+    <div>
+      <p className="text-sm font-medium text-gray-800">{label}</p>
+      {desc && <p className="text-xs text-gray-400 mt-0.5">{desc}</p>}
+    </div>
+    <div
+      onClick={onChange}
+      className={`w-12 h-6 rounded-full cursor-pointer relative flex-shrink-0 transition-all ${value ? 'bg-primary' : 'bg-gray-200'}`}
+    >
+      <div className={`w-5 h-5 bg-white rounded-full absolute top-0.5 shadow-sm transition-all ${value ? 'left-6' : 'left-0.5'}`} />
+    </div>
+  </div>
+);
+
+// SaveBar receives onSave + saving as props so it does not need to close over
+// the parent's state (which would force it back inside the component).
+const SaveBar = ({ onSave, saving }) => (
+  <div className="mt-8 pt-5 border-t border-gray-100 flex items-center justify-between">
+    <p className="text-xs text-gray-400">Changes preview live · Save to apply permanently</p>
+    <button onClick={onSave} disabled={saving} className="btn-primary flex items-center gap-2">
+      {saving ? (
+        <>
+          <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          Saving...
+        </>
+      ) : '✓ Save & Apply'}
+    </button>
+  </div>
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function AdminSettings() {
   const [tab, setTab] = useState('general');
   const [saving, setSaving] = useState(false);
@@ -98,12 +157,14 @@ export default function AdminSettings() {
   const save = async () => {
     setSaving(true);
     try {
-      await API.put('/settings', settings);
-      // Apply theme and cache — wrapped separately so a non-critical error
+      const res = await API.put('/settings', settings);
+      // Treat any non-success response as an error so the toast is accurate
+      if (res.data && res.data.success === false) {
+        throw new Error(res.data.message || 'Server returned success:false');
+      }
+      // Apply theme and cache — wrapped separately so a non-critical failure
       // here does NOT trigger the "Failed to save" toast.
-      try {
-        applyTheme(settings);
-      } catch (themeErr) {
+      try { applyTheme(settings); } catch (themeErr) {
         console.warn('applyTheme error (non-critical):', themeErr);
       }
       try {
@@ -114,7 +175,14 @@ export default function AdminSettings() {
       toast.success('✅ Settings saved & applied!');
     } catch (err) {
       console.error('Save settings error:', err);
-      toast.error(err?.response?.data?.message || 'Failed to save settings');
+      // Show the specific server message when available, otherwise a clear
+      // generic message. Never show "Failed to save settings" when the save
+      // actually succeeded (the backend now returns { success:true } reliably).
+      const msg =
+        err?.response?.data?.message ||
+        err?.message ||
+        'Could not reach server — check your connection';
+      toast.error(msg);
     } finally {
       setSaving(false);
     }
@@ -227,32 +295,9 @@ export default function AdminSettings() {
   const currentTheme = THEMES[settings.theme] || THEMES.default;
   const currentFont = FONTS[settings.fontStyle] || FONTS.default;
 
-  const F = ({ label, value, onChange, type='text', placeholder, hint, col2, disabled }) => (
-    <div className={col2 ? 'sm:col-span-2' : ''}>
-      <label className="form-label">{label}</label>
-      <input type={type} value={value||''} onChange={onChange} placeholder={placeholder} disabled={disabled}
-        className={`form-input ${disabled ? 'bg-gray-50 text-gray-400' : ''}`} />
-      {hint && <p className="text-xs text-gray-400 mt-1">{hint}</p>}
-    </div>
-  );
-
-  const Toggle = ({ label, desc, value, onChange }) => (
-    <div className="flex items-center justify-between py-3 border-b border-gray-50 last:border-0">
-      <div><p className="text-sm font-medium text-gray-800">{label}</p>{desc&&<p className="text-xs text-gray-400 mt-0.5">{desc}</p>}</div>
-      <div onClick={onChange} className={`w-12 h-6 rounded-full cursor-pointer relative flex-shrink-0 transition-all ${value ? 'bg-primary' : 'bg-gray-200'}`}>
-        <div className={`w-5 h-5 bg-white rounded-full absolute top-0.5 shadow-sm transition-all ${value ? 'left-6' : 'left-0.5'}`}/>
-      </div>
-    </div>
-  );
-
-  const SaveBar = () => (
-    <div className="mt-8 pt-5 border-t border-gray-100 flex items-center justify-between">
-      <p className="text-xs text-gray-400">Changes preview live · Save to apply permanently</p>
-      <button onClick={save} disabled={saving} className="btn-primary flex items-center gap-2">
-        {saving ? <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Saving...</> : '✓ Save & Apply'}
-      </button>
-    </div>
-  );
+  // F, Toggle, SaveBar are defined OUTSIDE the component (below) to prevent
+  // React from treating them as new component types on every render.
+  // Inline definitions caused focus loss on every keystroke and unmount loops.
 
   return (
     <div>
@@ -314,7 +359,7 @@ export default function AdminSettings() {
                     <F label="LinkedIn" value={settings.linkedinUrl} onChange={e=>setSettings(p=>({...p,linkedinUrl:e.target.value}))} />
                   </div>
                 </div>
-                <SaveBar/>
+                <SaveBar onSave={save} saving={saving}/>
               </div>
             )}
 
@@ -359,7 +404,7 @@ export default function AdminSettings() {
                     <F label="Privacy Policy URL" value={settings.privacyUrl} onChange={e=>setSettings(p=>({...p,privacyUrl:e.target.value}))} placeholder="/page/privacy" />
                   </div>
                 </div>
-                <SaveBar/>
+                <SaveBar onSave={save} saving={saving}/>
               </div>
             )}
 
@@ -533,7 +578,7 @@ export default function AdminSettings() {
                     <F label="Default ETA" value={settings.deliveryETA||''} onChange={e=>setSettings(p=>({...p,deliveryETA:e.target.value}))} placeholder="3-5 business days" hint="Shown on product pages"/>
                     <F label="Delivery Note" value={settings.deliveryNote||''} onChange={e=>setSettings(p=>({...p,deliveryNote:e.target.value}))} placeholder="Orders placed before 2pm ship same day" hint="Optional note shown at checkout"/>
                   </div>
-                  <SaveBar/>
+                  <SaveBar onSave={save} saving={saving}/>
                 </div>
               </div>
             )}
@@ -682,7 +727,7 @@ export default function AdminSettings() {
                 <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl text-sm text-blue-700">
                   💡 <strong>Tip:</strong> Active <a href="/admin/seasonal" className="underline">Seasonal Campaigns</a> will override this announcement bar automatically.
                 </div>
-                <SaveBar/>
+                <SaveBar onSave={save} saving={saving}/>
               </div>
             )}
 
@@ -702,7 +747,7 @@ export default function AdminSettings() {
                   </div>
                 )}
                 <Toggle label="💵 Cash on Delivery" desc="Accept cash on delivery" value={settings.codEnabled} onChange={()=>setSettings(p=>({...p,codEnabled:!p.codEnabled}))} />
-                <SaveBar/>
+                <SaveBar onSave={save} saving={saving}/>
               </div>
             )}
 
@@ -843,7 +888,7 @@ export default function AdminSettings() {
                     </div>
                   </div>
                 </div>
-                <SaveBar/>
+                <SaveBar onSave={save} saving={saving}/>
               </div>
             )}
 
@@ -869,7 +914,7 @@ export default function AdminSettings() {
                     </button>
                   ))}
                 </div>
-                <SaveBar/>
+                <SaveBar onSave={save} saving={saving}/>
               </div>
             )}
 
@@ -1025,7 +1070,7 @@ export default function AdminSettings() {
                   </div>
                 </div>
 
-                <SaveBar/>
+                <SaveBar onSave={save} saving={saving}/>
               </div>
             )}
 
@@ -1043,7 +1088,7 @@ export default function AdminSettings() {
                   <F label="Google Analytics ID" value={settings.googleAnalytics} onChange={e=>setSettings(p=>({...p,googleAnalytics:e.target.value}))} placeholder="G-XXXXXXXXXX" hint="GA4 Measurement ID"/>
                   <F label="Facebook Pixel ID" value={settings.facebookPixel} onChange={e=>setSettings(p=>({...p,facebookPixel:e.target.value}))} placeholder="123456789012345"/>
                 </div>
-                <SaveBar/>
+                <SaveBar onSave={save} saving={saving}/>
               </div>
             )}
 
@@ -1064,7 +1109,7 @@ export default function AdminSettings() {
                 )}
                 <Toggle label="⭐ Require Review Approval" desc="Manually approve reviews before publishing" value={settings.reviewsRequireApproval} onChange={()=>setSettings(p=>({...p,reviewsRequireApproval:!p.reviewsRequireApproval}))} />
                 <Toggle label="👤 Guest Checkout" desc="Allow orders without account" value={settings.allowGuestCheckout} onChange={()=>setSettings(p=>({...p,allowGuestCheckout:!p.allowGuestCheckout}))} />
-                <SaveBar/>
+                <SaveBar onSave={save} saving={saving}/>
               </div>
             )}
 
@@ -1078,7 +1123,7 @@ export default function AdminSettings() {
                 </div>
                 <Toggle label="✅ Auto-Confirm Orders" desc="Automatically confirm orders after placement" value={settings.autoConfirmOrders} onChange={()=>setSettings(p=>({...p,autoConfirmOrders:!p.autoConfirmOrders}))} />
                 <Toggle label="⚠️ Maintenance Mode" desc="Show maintenance page to all visitors" value={settings.maintenanceMode} onChange={()=>setSettings(p=>({...p,maintenanceMode:!p.maintenanceMode}))} />
-                <SaveBar/>
+                <SaveBar onSave={save} saving={saving}/>
               </div>
             )}
 

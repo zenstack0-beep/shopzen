@@ -15,20 +15,28 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Save settings (admin) — pass an object of key:value pairs
+// Save settings (admin) — pass an object of key:value pairs.
+// Uses bulkWrite so all keys are saved in ONE round-trip to MongoDB instead of
+// one sequential await per key. This prevents axios timeout errors on large
+// settings objects and eliminates the false "Failed to save settings" toast.
 router.put('/', adminAuth, async (req, res) => {
   try {
-    const updates = Object.entries(req.body);
-    for (const [key, value] of updates) {
-      await Settings.findOneAndUpdate(
-        { key },
-        { key, value, updatedAt: Date.now() },
-        { upsert: true, new: true }
-      );
-    }
+    const entries = Object.entries(req.body);
+    if (entries.length === 0) return res.json({ success: true });
+
+    const ops = entries.map(([key, value]) => ({
+      updateOne: {
+        filter: { key },
+        update: { $set: { key, value, updatedAt: new Date() } },
+        upsert: true,
+      },
+    }));
+
+    await Settings.bulkWrite(ops, { ordered: false });
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error('Settings save error:', err);
+    res.status(500).json({ message: err.message || 'Failed to save settings' });
   }
 });
 
