@@ -172,7 +172,11 @@ export const ThemeProvider = ({ children }) => {
     if (!window.__szApiFetched) { applyTheme(readCache()); }
   }, []);
 
+  const lastSaveRef = React.useRef(0);
+
   const loadAndApply = useCallback(async () => {
+    // Don't overwrite a theme that was just saved (5s grace period)
+    if (Date.now() - lastSaveRef.current < 5000) return;
     try {
       const { data } = await API.get('/settings');
       if (!data || typeof data !== 'object' || Array.isArray(data)) return;
@@ -207,28 +211,65 @@ export const ThemeProvider = ({ children }) => {
         };
         window.dispatchEvent(new CustomEvent('shopzen:seo-ready'));
       }
-    } catch {}
+    } catch (err) {
+      // Silently ignore ECONNREFUSED / network errors (backend not yet started)
+      // The interval will retry automatically
+      if (err?.code !== 'ERR_NETWORK' && err?.response) {
+        console.warn('[ThemeContext] settings fetch error:', err.message);
+      }
+    }
   }, []);
 
   useEffect(() => {
     loadAndApply();
-    const id = setInterval(loadAndApply, 8000);
-    return () => clearInterval(id);
+    // Retry quickly at first (backend may be starting), then slow down
+    const retry = () => {
+      loadAndApply();
+    };
+    // Fast retries for first 30s (every 3s), then every 10s
+    const fast = setInterval(retry, 3000);
+    const slow = setTimeout(() => {
+      clearInterval(fast);
+      setInterval(loadAndApply, 10000);
+    }, 30000);
+    return () => { clearInterval(fast); clearTimeout(slow); };
   }, [loadAndApply]);
 
   const setDarkMode = useCallback((val) => {
-    const cached = readCache() || {};
-    const updated = { ...cached, darkMode: val };
+    setSettings(prev => {
+      const updated = { ...(prev || {}), darkMode: val };
+      applyTheme(updated);
+      writeCache(updated);
+      API.put('/settings', updated).catch(() => {});
+      return updated;
+    });
     setDarkModeState(val);
-    applyTheme(updated);
-    writeCache(updated);
-    API.put('/settings', { darkMode: val }).catch(() => {});
   }, []);
 
-  const refreshTheme = useCallback(() => loadAndApply(), [loadAndApply]);
+  const saveTheme = useCallback(async (updates) => {
+    lastSaveRef.current = Date.now();
+    setSettings(prev => {
+      const updated = { ...(prev || {}), ...updates };
+      setThemeKey(updated.theme || 'default');
+      setDarkModeState(updated.darkMode || false);
+      applyTheme(updated);
+      writeCache(updated);
+      return updated;
+    });
+    try {
+      await API.put('/settings', updates);
+    } catch (err) {
+      console.warn('[ThemeContext] saveTheme error:', err.message);
+    }
+  }, []);
+
+  const refreshTheme = useCallback(() => {
+    lastSaveRef.current = 0; // bypass grace period for explicit refresh
+    loadAndApply();
+  }, [loadAndApply]);
 
   return (
-    <ThemeContext.Provider value={{ settings, themeKey, darkMode, setDarkMode, THEMES, THEME_CATEGORIES, FONTS, refreshTheme, applyTheme }}>
+    <ThemeContext.Provider value={{ settings, themeKey, darkMode, setDarkMode, saveTheme, THEMES, THEME_CATEGORIES, FONTS, refreshTheme, applyTheme }}>
       {children}
     </ThemeContext.Provider>
   );

@@ -34,7 +34,6 @@ const PayHereForm = ({ data, onCancel }) => {
 };
 
 // Field component defined OUTSIDE Checkout so it never remounts on re-render
-// (defining it inside would cause focus loss on every keystroke)
 const F = ({ label, value, onChange, type='text', required, placeholder, col2 }) => (
   <div className={col2 ? 'sm:col-span-2' : ''}>
     <label className="form-label">{label} {required && <span className="text-red-500">*</span>}</label>
@@ -67,9 +66,12 @@ export default function Checkout() {
   const [deliveryServices, setDeliveryServices] = useState([]);
   const [selectedDelivery, setSelectedDelivery] = useState('');
   const [payHereData, setPayHereData] = useState(null);
+  const [pendingBankOrder, setPendingBankOrder] = useState(null);
+  const [slipFile, setSlipFile] = useState(null);
+  const [slipPreview, setSlipPreview] = useState(null);
+  const [slipUploading, setSlipUploading] = useState(false);
 
   const [billing, setBilling] = useState(() => {
-    // Restore saved state if returning from register
     try {
       const saved = sessionStorage.getItem('checkout_state');
       if (saved) return JSON.parse(saved).billing;
@@ -90,19 +92,19 @@ export default function Checkout() {
 
   useEffect(() => { if (items.length === 0) navigate('/cart'); }, [items, navigate]);
 
-  // Restore remaining saved state (coupon, notes, etc.) after returning from register
+  // Restore remaining saved state after returning from register
   useEffect(() => {
     try {
       const raw = sessionStorage.getItem('checkout_state');
       if (!raw) return;
       const s = JSON.parse(raw);
-      if (s.couponCode)      setCouponCode(s.couponCode);
-      if (s.couponData)      setCouponData(s.couponData);
-      if (s.notes)           setNotes(s.notes);
-      if (s.shipDiff)        setShipDiff(s.shipDiff);
-      if (s.paymentMethod)   setPaymentMethod(s.paymentMethod);
+      if (s.couponCode)       setCouponCode(s.couponCode);
+      if (s.couponData)       setCouponData(s.couponData);
+      if (s.notes)            setNotes(s.notes);
+      if (s.shipDiff)         setShipDiff(s.shipDiff);
+      if (s.paymentMethod)    setPaymentMethod(s.paymentMethod);
       if (s.selectedDelivery) setSelectedDelivery(s.selectedDelivery);
-      if (s.agreedTerms)     setAgreedTerms(s.agreedTerms);
+      if (s.agreedTerms)      setAgreedTerms(s.agreedTerms);
     } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -122,7 +124,7 @@ export default function Checkout() {
 
   // Set default payment method once gateways load
   useEffect(() => {
-    if (paymentMethod) return; // already set
+    if (paymentMethod) return;
     if (settings?.bankTransferEnabled !== false) { setPaymentMethod('bank_transfer'); return; }
     if (settings?.codEnabled !== false) { setPaymentMethod('cod'); return; }
     if (gateways.length > 0) setPaymentMethod(gateways[0].gateway);
@@ -180,9 +182,8 @@ export default function Checkout() {
     if (!agreedTerms) { toast.error('Please agree to terms and conditions'); return; }
     if (!paymentMethod) { toast.error('Please select a payment method'); return; }
 
-    // ── Guest users must register before placing an order ──
+    // Guest users must register before placing an order
     if (!user) {
-      // Save entire checkout state so it survives the register redirect
       try {
         sessionStorage.setItem('checkout_state', JSON.stringify({
           billing, shipping, couponCode, couponData,
@@ -218,7 +219,7 @@ export default function Checkout() {
 
       const { data } = await API.post('/orders', orderData);
 
-      // Handle gateway payments
+      // Handle PayHere
       if (paymentMethod === 'payhere') {
         const phData = await API.post('/payments/payhere/init', {
           orderId: data.orderId,
@@ -238,22 +239,130 @@ export default function Checkout() {
         return;
       }
 
+      // Handle Stripe / other gateways — go to My Orders with new order highlighted
       if (paymentMethod === 'stripe') {
         clearCart();
         sessionStorage.removeItem('checkout_state');
-        navigate(`/order-success/${data.orderId}?gateway=stripe&total=${data.total}`);
+        navigate(`/account?new=${data.orderId}`);
         return;
       }
 
       clearCart();
       sessionStorage.removeItem('checkout_state');
-      navigate(`/order-success/${data.orderId}`);
+
+      // Bank transfer — show inline slip upload step first
+      if (paymentMethod === 'bank_transfer') {
+        setPendingBankOrder({ orderId: data.orderId, orderNumber: data.orderNumber, total: data.total });
+        setLoading(false);
+        return;
+      }
+
+      // COD and everything else — go straight to My Orders
+      navigate(`/account?new=${data.orderId}`);
     } catch (err) {
       toast.error(err.response?.data?.message || 'Order failed. Please try again.');
     } finally { setLoading(false); }
   };
 
   const hasAnyPayment = settings?.bankTransferEnabled !== false || settings?.codEnabled !== false || gateways.length > 0;
+
+  // Bank Transfer Slip Upload
+  const handleSlipChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setSlipFile(file);
+    const reader = new FileReader();
+    reader.onload = (ev) => setSlipPreview(ev.target.result);
+    reader.readAsDataURL(file);
+  };
+
+  const handleSlipUpload = async (skip = false) => {
+    if (!pendingBankOrder) return;
+    if (!skip && slipFile) {
+      setSlipUploading(true);
+      try {
+        const formData = new FormData();
+        formData.append('slip', slipFile);
+        await API.post(`/orders/${pendingBankOrder.orderId}/payment-slip`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        toast.success('✅ Payment slip uploaded! We\'ll verify it shortly.');
+      } catch (err) {
+        const msg = err.response?.data?.message || 'Slip upload failed. You can upload it later from your account.';
+        toast.error(msg);
+        // Still navigate even if upload fails — it's optional
+      } finally {
+        setSlipUploading(false);
+      }
+    }
+    // Navigate to My Orders (Account page) with the new order highlighted
+    navigate(`/account?new=${pendingBankOrder.orderId}`);
+  };
+
+  if (pendingBankOrder) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4" style={{ background: 'var(--body-bg)' }}>
+        <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-8" style={{ background: 'var(--card-bg)' }}>
+          <div className="text-center mb-6">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ background: 'var(--theme-gradient)' }}>
+              <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            </div>
+            <h2 className="text-2xl font-bold mb-1" style={{ color: 'var(--text-primary)' }}>Order Placed!</h2>
+            <p className="text-sm mb-1" style={{ color: 'var(--text-secondary)' }}>Order #{pendingBankOrder.orderNumber}</p>
+            <p className="text-sm font-semibold" style={{ color: 'var(--color-primary)' }}>
+              Total: {settings?.currencySymbol || 'Rs.'} {pendingBankOrder.total?.toLocaleString()}
+            </p>
+          </div>
+
+          <div className="rounded-2xl p-4 mb-6 text-sm space-y-1" style={{ background: 'var(--body-bg)', border: '1px solid var(--border-color)' }}>
+            <p className="font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>📋 Bank Transfer Details</p>
+            {settings?.bankName && <p style={{ color: 'var(--text-secondary)' }}><span className="font-medium" style={{ color: 'var(--text-primary)' }}>Bank:</span> {settings.bankName}</p>}
+            {settings?.bankAccountName && <p style={{ color: 'var(--text-secondary)' }}><span className="font-medium" style={{ color: 'var(--text-primary)' }}>Account:</span> {settings.bankAccountName}</p>}
+            {settings?.bankAccountNumber && <p style={{ color: 'var(--text-secondary)' }}><span className="font-medium" style={{ color: 'var(--text-primary)' }}>Number:</span> <span className="font-mono font-black">{settings.bankAccountNumber}</span></p>}
+            {settings?.bankBranch && <p style={{ color: 'var(--text-secondary)' }}><span className="font-medium" style={{ color: 'var(--text-primary)' }}>Branch:</span> {settings.bankBranch}</p>}
+            <p className="mt-2 pt-2" style={{ borderTop: '1px solid var(--border-color)', color: 'var(--text-secondary)' }}>
+              Use <strong style={{ color: 'var(--text-primary)' }}>{pendingBankOrder.orderNumber}</strong> as the transfer reference.
+            </p>
+          </div>
+
+          <div className="mb-6">
+            <p className="text-sm font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>📎 Upload Payment Slip <span className="font-normal" style={{ color: 'var(--text-secondary)' }}>(optional — speeds up confirmation)</span></p>
+            {slipPreview ? (
+              <div className="relative rounded-2xl overflow-hidden border-2 mb-3" style={{ borderColor: 'var(--color-primary)' }}>
+                <img src={slipPreview} alt="Payment slip" className="w-full object-contain max-h-48"/>
+                <button
+                  onClick={() => { setSlipFile(null); setSlipPreview(null); }}
+                  className="absolute top-2 right-2 w-7 h-7 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold hover:bg-red-600"
+                >✕</button>
+              </div>
+            ) : (
+              <label className="flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed p-6 cursor-pointer transition-colors hover:opacity-80" style={{ borderColor: 'var(--border-color)', background: 'var(--body-bg)' }}>
+                <svg className="w-8 h-8" style={{ color: 'var(--text-secondary)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                <span className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>Click to select image or PDF</span>
+                <input type="file" accept="image/*,application/pdf" onChange={handleSlipChange} className="hidden"/>
+              </label>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-3">
+            <button
+              onClick={() => handleSlipUpload(false)}
+              disabled={slipUploading}
+              className="w-full py-3.5 rounded-2xl text-white font-bold text-sm transition-opacity disabled:opacity-60"
+              style={{ background: 'var(--theme-gradient)' }}
+            >
+              {slipUploading ? 'Uploading…' : slipFile ? '📤 Upload Slip & Continue' : 'Continue Without Slip'}
+            </button>
+            {slipFile && (
+              <button onClick={() => handleSlipUpload(true)} className="w-full py-3 rounded-2xl text-sm font-medium" style={{ color: 'var(--text-secondary)', background: 'var(--body-bg)' }}>
+                Skip — I'll send it later
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8" style={{ background: 'var(--body-bg)' }}>
@@ -310,7 +419,6 @@ export default function Checkout() {
                   <input type="tel" value={billing.phone} onChange={e=>setBilling(p=>({...p,phone:e.target.value}))} required className="form-input" placeholder="+94 7X XXX XXXX" />
                 </div>
                 <F label="Email" type="email" value={billing.email} onChange={e=>setBilling(p=>({...p,email:e.target.value}))} required />
-
               </div>
             </div>
 

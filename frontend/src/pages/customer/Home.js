@@ -606,6 +606,7 @@ const NewsletterSection = ({ settings }) => {
   useScrollReveal(ref, {
     from:{ opacity:0, y:60, rotateX:14, transformPerspective:900 },
     to:{ opacity:1, y:0, rotateX:0 }, duration:1,
+    start: 'top 90%',
   });
 
   const title      = settings?.newsletterTitle      || 'Stay Updated';
@@ -691,8 +692,18 @@ export default function Home() {
       setHeroBanners(hero.data||[]);
       setPromoBanners(promo.data||[]);
     }).catch(()=>{}).finally(()=>setLoading(false));
-    return () => ScrollTrigger.getAll().forEach(t=>t.kill());
   },[]);
+
+  // Kill stale ScrollTriggers from previous page so GSAP recalculates from top
+  useEffect(() => {
+    ScrollTrigger.getAll().forEach(t => t.kill());
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    const raf = requestAnimationFrame(() => { ScrollTrigger.refresh(); });
+    return () => {
+      cancelAnimationFrame(raf);
+      ScrollTrigger.getAll().forEach(t => t.kill());
+    };
+  }, []);
 
   const S = (key, fallback) => settings?.[key] || fallback;
 
@@ -794,29 +805,35 @@ export default function Home() {
       {isOn('hero') && SECTIONS.hero}
       <TrustBar settings={settings}/>
 
-      {/* Render sections in admin-defined order */}
-      {orderedIds.filter(id=>id!=='hero').map(id => SECTIONS[id] || null)}
+      {/* Only render below-fold sections once hero/product data has loaded.
+          This prevents newsletter from appearing before hero, causing a jump. */}
+      {!loading && (
+        <>
+          {/* Render sections in admin-defined order */}
+          {orderedIds.filter(id=>id!=='hero').map(id => SECTIONS[id] || null)}
 
-      {/* Payment badges always at bottom */}
-      {settingsReady && (settings?.bankTransferEnabled!==false||settings?.codEnabled!==false) && (
-        <section className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-6">
-          <div className="flex flex-wrap gap-3 items-center">
-            {settings?.bankTransferEnabled!==false && (
-              <div className="flex items-center gap-2 rounded-2xl px-4 py-2.5 border hover:-translate-y-0.5 transition-transform"
-                style={{ background:'var(--card-bg)', borderColor:'var(--card-border)' }}>
-                <span>🏦</span>
-                <div><p className="text-xs font-bold" style={{ color:'var(--color-dark)' }}>Bank Transfer</p>{settings?.bankName&&<p className="text-[11px] text-gray-400">{settings.bankName}</p>}</div>
+          {/* Payment badges always at bottom */}
+          {settingsReady && (settings?.bankTransferEnabled!==false||settings?.codEnabled!==false) && (
+            <section className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-6">
+              <div className="flex flex-wrap gap-3 items-center">
+                {settings?.bankTransferEnabled!==false && (
+                  <div className="flex items-center gap-2 rounded-2xl px-4 py-2.5 border hover:-translate-y-0.5 transition-transform"
+                    style={{ background:'var(--card-bg)', borderColor:'var(--card-border)' }}>
+                    <span>🏦</span>
+                    <div><p className="text-xs font-bold" style={{ color:'var(--color-dark)' }}>Bank Transfer</p>{settings?.bankName&&<p className="text-[11px] text-gray-400">{settings.bankName}</p>}</div>
+                  </div>
+                )}
+                {settings?.codEnabled!==false && (
+                  <div className="flex items-center gap-2 rounded-2xl px-4 py-2.5 border hover:-translate-y-0.5 transition-transform"
+                    style={{ background:'var(--card-bg)', borderColor:'var(--card-border)' }}>
+                    <span>💵</span>
+                    <p className="text-xs font-bold" style={{ color:'var(--color-dark)' }}>Cash on Delivery</p>
+                  </div>
+                )}
               </div>
-            )}
-            {settings?.codEnabled!==false && (
-              <div className="flex items-center gap-2 rounded-2xl px-4 py-2.5 border hover:-translate-y-0.5 transition-transform"
-                style={{ background:'var(--card-bg)', borderColor:'var(--card-border)' }}>
-                <span>💵</span>
-                <p className="text-xs font-bold" style={{ color:'var(--color-dark)' }}>Cash on Delivery</p>
-              </div>
-            )}
-          </div>
-        </section>
+            </section>
+          )}
+        </>
       )}
       <div className="h-6"/>
     </div>

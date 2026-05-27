@@ -99,13 +99,25 @@ export default function AdminSettings() {
     setSaving(true);
     try {
       await API.put('/settings', settings);
-      applyTheme(settings);
-      // Write to localStorage so bootstrap script + ThemeContext
-      // use the new theme instantly on next page load (production fix)
-      try { localStorage.setItem('shopzen_theme_v2', JSON.stringify(settings)); } catch {}
+      // Apply theme and cache — wrapped separately so a non-critical error
+      // here does NOT trigger the "Failed to save" toast.
+      try {
+        applyTheme(settings);
+      } catch (themeErr) {
+        console.warn('applyTheme error (non-critical):', themeErr);
+      }
+      try {
+        localStorage.setItem('shopzen_theme_v2', JSON.stringify(settings));
+      } catch (lsErr) {
+        console.warn('localStorage error (non-critical):', lsErr);
+      }
       toast.success('✅ Settings saved & applied!');
-    } catch { toast.error('Failed to save'); }
-    finally { setSaving(false); }
+    } catch (err) {
+      console.error('Save settings error:', err);
+      toast.error(err?.response?.data?.message || 'Failed to save settings');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const saveGateway = async (gateway) => {
@@ -117,7 +129,10 @@ export default function AdminSettings() {
         config: Object.fromEntries(Object.entries(cfg).filter(([k]) => !['isEnabled','isLive','displayName'].includes(k)))
       });
       toast.success(`${GATEWAY_PRESETS[gateway]?.name} settings saved!`);
-    } catch { toast.error('Failed to save gateway'); }
+    } catch (err) {
+      console.error('Save gateway error:', err);
+      toast.error(err?.response?.data?.message || 'Failed to save gateway');
+    }
   };
 
   const toggleGateway = async (gateway) => {
@@ -125,7 +140,10 @@ export default function AdminSettings() {
       const { data } = await API.put(`/payments/admin/${gateway}/toggle`);
       setGwConfigs(p => ({ ...p, [gateway]: { ...p[gateway], isEnabled: data.isEnabled } }));
       toast.success(data.isEnabled ? 'Gateway enabled!' : 'Gateway disabled');
-    } catch { toast.error('Failed'); }
+    } catch (err) {
+      console.error('Toggle gateway error:', err);
+      toast.error(err?.response?.data?.message || 'Failed to toggle gateway');
+    }
   };
 
   const saveDelivery = async () => {
@@ -134,14 +152,20 @@ export default function AdminSettings() {
       const { data } = await API.get('/delivery/admin/all');
       setDeliveryServices(data); setEditingDelivery(null);
       toast.success('Delivery service saved!');
-    } catch { toast.error('Failed'); }
+    } catch (err) {
+      console.error('Save delivery error:', err);
+      toast.error(err?.response?.data?.message || 'Failed to save delivery service');
+    }
   };
 
   const toggleDelivery = async (code) => {
     try {
       const { data } = await API.put(`/delivery/admin/${code}/toggle`);
       setDeliveryServices(p => p.map(s => s.code === code ? data : s));
-    } catch { toast.error('Failed'); }
+    } catch (err) {
+      console.error('Toggle delivery error:', err);
+      toast.error(err?.response?.data?.message || 'Failed to toggle delivery');
+    }
   };
 
   const savePage = async () => {
@@ -151,13 +175,21 @@ export default function AdminSettings() {
       const { data } = await API.get('/pages/admin/all');
       setPages(data); setEditingPage(null);
       toast.success('Page saved!');
-    } catch { toast.error('Failed'); }
+    } catch (err) {
+      console.error('Save page error:', err);
+      toast.error(err?.response?.data?.message || 'Failed to save page');
+    }
   };
 
   const deletePage = async (id) => {
     if (!window.confirm('Delete this page?')) return;
-    await API.delete(`/pages/admin/${id}`);
-    setPages(p => p.filter(x => x._id !== id));
+    try {
+      await API.delete(`/pages/admin/${id}`);
+      setPages(p => p.filter(x => x._id !== id));
+    } catch (err) {
+      console.error('Delete page error:', err);
+      toast.error(err?.response?.data?.message || 'Failed to delete page');
+    }
   };
 
   const createAdmin = async () => {
@@ -167,18 +199,30 @@ export default function AdminSettings() {
       await API.post('/admin/create-admin', { ...adminForm, username: adminForm.email.split('@')[0] + '_admin' });
       toast.success('Admin created!');
       setAdminForm({ firstName:'', lastName:'', email:'', password:'', confirmPassword:'' });
-    } catch (err) { toast.error(err.response?.data?.message || 'Failed'); }
-    finally { setCreatingAdmin(false); }
+    } catch (err) {
+      console.error('Create admin error:', err);
+      toast.error(err.response?.data?.message || 'Failed to create admin');
+    } finally { setCreatingAdmin(false); }
   };
 
   const applyPreset = (key) => {
     const t = THEMES[key]; if (!t) return;
     const next = { ...settings, theme: key, primaryColor: t.primary, secondaryColor: t.accent, darkBgColor: t.dark };
-    setSettings(next); applyTheme(next);
+    setSettings(next);
+    try { applyTheme(next); } catch (e) { console.warn('applyTheme error:', e); }
   };
 
-  const applyFont = (key) => { const next = { ...settings, fontStyle: key }; setSettings(next); applyTheme(next); };
-  const handleColor = (key, val) => { const next = { ...settings, [key]: val }; setSettings(next); applyTheme(next); };
+  const applyFont = (key) => {
+    const next = { ...settings, fontStyle: key };
+    setSettings(next);
+    try { applyTheme(next); } catch (e) { console.warn('applyTheme error:', e); }
+  };
+
+  const handleColor = (key, val) => {
+    const next = { ...settings, [key]: val };
+    setSettings(next);
+    try { applyTheme(next); } catch (e) { console.warn('applyTheme error:', e); }
+  };
 
   const currentTheme = THEMES[settings.theme] || THEMES.default;
   const currentFont = FONTS[settings.fontStyle] || FONTS.default;
@@ -586,9 +630,15 @@ export default function AdminSettings() {
                 <div className="pt-4 border-t">
                   <button onClick={async()=>{
                     setSavingWA(true);
-                    try{ await API.put('/whatsapp/config', whatsappConfig); toast.success('✅ WhatsApp settings saved!'); }
-                    catch{ toast.error('Failed to save'); }
-                    finally{ setSavingWA(false); }
+                    try {
+                      await API.put('/whatsapp/config', whatsappConfig);
+                      toast.success('✅ WhatsApp settings saved!');
+                    } catch (err) {
+                      console.error('Save WhatsApp error:', err);
+                      toast.error(err?.response?.data?.message || 'Failed to save WhatsApp settings');
+                    } finally {
+                      setSavingWA(false);
+                    }
                   }} disabled={savingWA} className="btn-primary">
                     {savingWA ? 'Saving...' : '💾 Save WhatsApp Settings'}
                   </button>
@@ -823,9 +873,6 @@ export default function AdminSettings() {
               </div>
             )}
 
-
-
-
             {/* ── BANNERS REDIRECT ── */}
             {tab === 'banners_link' && (
               <div className="space-y-4">
@@ -884,7 +931,6 @@ export default function AdminSettings() {
                 )}
               </div>
             )}
-
 
             {/* ── CONTENT CUSTOMIZER ── */}
             {tab === 'content' && (
@@ -982,6 +1028,7 @@ export default function AdminSettings() {
                 <SaveBar/>
               </div>
             )}
+
             {/* ── SEO ── */}
             {tab === 'seo' && (
               <div className="space-y-4">

@@ -53,6 +53,8 @@ const orderSchema = new mongoose.Schema({
   isRead: { type: Boolean, default: false },
   giftCard: { type: String },
   giftCardDiscount: { type: Number, default: 0 },
+  paymentSlip: { type: String }, // URL to uploaded bank transfer slip
+  paymentSlipUploadedAt: { type: Date },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
 });

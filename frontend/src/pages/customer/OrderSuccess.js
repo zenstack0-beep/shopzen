@@ -177,13 +177,59 @@ export function OrderTracking() {
   const { settings } = useTheme();
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [slipFile, setSlipFile] = useState(null);
+  const [slipPreview, setSlipPreview] = useState(null);
+  const [slipUploading, setSlipUploading] = useState(false);
+  const [slipDone, setSlipDone] = useState(false);
   const sym = settings?.currencySymbol || 'Rs.';
 
-  useEffect(() => { API.get(`/orders/${id}`).then(r => setOrder(r.data)).finally(() => setLoading(false)); }, [id]);
+  useEffect(() => {
+    API.get(`/orders/${id}`)
+      .then(r => {
+        setOrder(r.data);
+        // If slip already uploaded, show done state
+        if (r.data.paymentSlip) setSlipDone(true);
+      })
+      .finally(() => setLoading(false));
+  }, [id]);
+
+  const handleSlipChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setSlipFile(file);
+    const reader = new FileReader();
+    reader.onload = (ev) => setSlipPreview(ev.target.result);
+    reader.readAsDataURL(file);
+  };
+
+  const handleSlipUpload = async () => {
+    if (!slipFile || !id) return;
+    setSlipUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('slip', slipFile);
+      await API.post(`/orders/${id}/payment-slip`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setSlipDone(true);
+      setSlipFile(null);
+      setSlipPreview(null);
+      // Refresh order to get updated paymentSlip field
+      const { data } = await API.get(`/orders/${id}`);
+      setOrder(data);
+      alert('✅ Payment slip uploaded! We\'ll verify it shortly and email you confirmation.');
+    } catch (err) {
+      alert(err.response?.data?.message || '❌ Upload failed. Please try again or contact support.');
+    } finally {
+      setSlipUploading(false);
+    }
+  };
 
   const steps = ['pending','confirmed','processing','shipped','out_for_delivery','delivered'];
   const statusLabels = { pending:'Order Placed', confirmed:'Confirmed', processing:'Processing', shipped:'Shipped', out_for_delivery:'Out for Delivery', delivered:'Delivered', cancelled:'Cancelled' };
   const currentStep = steps.indexOf(order?.orderStatus);
+
+  const isBankPending = order?.paymentMethod === 'bank_transfer' && order?.paymentStatus !== 'paid';
 
   if (loading) return <div className="text-center py-20 text-gray-400">Loading...</div>;
   if (!order) return <div className="text-center py-20 text-gray-500">Order not found</div>;
@@ -199,6 +245,7 @@ export function OrderTracking() {
         </span>
       </p>
 
+      {/* Progress */}
       <div className="rounded-2xl border border-gray-100 p-6 mb-6" style={{ background: 'var(--card-bg)' }}>
         {order.orderStatus === 'cancelled' ? (
           <div className="text-center py-4">
@@ -230,19 +277,85 @@ export function OrderTracking() {
         )}
       </div>
 
-      {order.paymentMethod==='bank_transfer' && order.paymentStatus==='pending' && (
+      {/* Bank Transfer: payment details + slip upload */}
+      {isBankPending && (
         <div className="rounded-2xl border-2 border-amber-200 bg-amber-50 p-5 mb-6">
-          <h3 className="font-bold text-amber-800 mb-2">🏦 Payment Required</h3>
-          <p className="text-sm text-amber-700 mb-3">Transfer <strong>{sym} {order.total?.toLocaleString()}</strong> with reference <strong className="font-mono">{order.orderNumber}</strong></p>
+          <h3 className="font-bold text-amber-800 mb-2 text-base">🏦 Payment Required</h3>
+          <p className="text-sm text-amber-700 mb-4">
+            Transfer <strong>{sym} {order.total?.toLocaleString()}</strong> with reference{' '}
+            <strong className="font-mono bg-amber-100 px-1.5 py-0.5 rounded">{order.orderNumber}</strong>
+          </p>
           {settings?.bankAccountNumber && (
-            <div className="bg-white rounded-xl p-3 text-sm space-y-1 border border-amber-100">
-              {settings.bankName && <p><span className="text-gray-400">Bank:</span> <span className="font-semibold ml-2">{settings.bankName}</span></p>}
-              {settings.bankAccountNumber && <p><span className="text-gray-400">Account:</span> <span className="font-mono font-bold ml-2">{settings.bankAccountNumber}</span></p>}
+            <div className="bg-white rounded-xl p-3 text-sm space-y-1.5 border border-amber-100 mb-5">
+              {settings.bankName        && <div className="flex justify-between"><span className="text-gray-400">Bank</span><span className="font-semibold text-gray-800">{settings.bankName}</span></div>}
+              {settings.bankAccountName && <div className="flex justify-between"><span className="text-gray-400">Account Name</span><span className="font-semibold text-gray-800">{settings.bankAccountName}</span></div>}
+              {settings.bankAccountNumber && <div className="flex justify-between"><span className="text-gray-400">Account No.</span><span className="font-mono font-black text-gray-900 bg-gray-50 px-2 py-0.5 rounded border border-gray-200">{settings.bankAccountNumber}</span></div>}
+              {settings.bankBranch      && <div className="flex justify-between"><span className="text-gray-400">Branch</span><span className="font-semibold text-gray-800">{settings.bankBranch}</span></div>}
             </div>
           )}
+
+          {/* ── Slip Upload ── */}
+          <div className="border-t border-amber-200 pt-4">
+            <p className="text-sm font-bold text-amber-800 mb-3">
+              📎 Upload Payment Slip
+            </p>
+
+            {slipDone ? (
+              <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl p-3">
+                <svg className="w-5 h-5 text-green-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <div>
+                  <p className="text-sm font-semibold text-green-700">Slip uploaded successfully!</p>
+                  <p className="text-xs text-green-600">We'll verify and confirm your order within 1–2 hours.</p>
+                </div>
+              </div>
+            ) : (
+              <>
+                {slipPreview ? (
+                  <div className="relative rounded-xl overflow-hidden border-2 border-amber-400 mb-3">
+                    <img src={slipPreview} alt="Payment slip preview" className="w-full object-contain max-h-48 bg-white"/>
+                    <button
+                      onClick={() => { setSlipFile(null); setSlipPreview(null); }}
+                      className="absolute top-2 right-2 w-7 h-7 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold hover:bg-red-600"
+                    >✕</button>
+                  </div>
+                ) : (
+                  <label className="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-amber-300 bg-white p-5 cursor-pointer hover:bg-amber-50 transition-colors mb-3">
+                    <svg className="w-8 h-8 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                    </svg>
+                    <span className="text-sm font-medium text-amber-700">Click to select your payment slip</span>
+                    <span className="text-xs text-amber-500">Image (JPG, PNG) or PDF — max 10MB</span>
+                    <input type="file" accept="image/*,application/pdf" onChange={handleSlipChange} className="hidden"/>
+                  </label>
+                )}
+
+                <button
+                  onClick={handleSlipUpload}
+                  disabled={!slipFile || slipUploading}
+                  className="w-full py-3 rounded-xl text-white text-sm font-bold transition-opacity disabled:opacity-50"
+                  style={{ background: slipFile ? 'var(--theme-gradient)' : '#9ca3af', cursor: slipFile ? 'pointer' : 'not-allowed' }}
+                >
+                  {slipUploading ? '⏳ Uploading…' : slipFile ? '📤 Upload Payment Slip' : 'Select a file first'}
+                </button>
+                <p className="text-xs text-amber-600 text-center mt-2">Uploading speeds up order confirmation ✓</p>
+              </>
+            )}
+          </div>
         </div>
       )}
 
+      {/* Bank Transfer paid — show slip already uploaded note */}
+      {order.paymentMethod === 'bank_transfer' && order.paymentStatus === 'paid' && (
+        <div className="rounded-2xl border border-green-200 bg-green-50 p-4 mb-6 flex items-center gap-3">
+          <svg className="w-6 h-6 text-green-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          <div>
+            <p className="font-bold text-green-800 text-sm">Payment Verified ✓</p>
+            <p className="text-xs text-green-600">Your bank transfer has been confirmed by our team.</p>
+          </div>
+        </div>
+      )}
+
+      {/* Items */}
       <div className="rounded-2xl border border-gray-100 p-6 mb-6" style={{ background: 'var(--card-bg)' }}>
         <h2 className="font-semibold text-gray-900 mb-4">Items</h2>
         <div className="space-y-3">
@@ -262,6 +375,7 @@ export function OrderTracking() {
         </div>
       </div>
 
+      {/* History */}
       {order.statusHistory?.length > 0 && (
         <div className="rounded-2xl border border-gray-100 p-6" style={{ background: 'var(--card-bg)' }}>
           <h2 className="font-semibold text-gray-900 mb-4">History</h2>

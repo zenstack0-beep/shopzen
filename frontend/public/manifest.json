@@ -1,0 +1,26 @@
+{
+    "short_name": "ShopZen",
+    "name": "ShopZen Store",
+    "icons": [
+      {
+        "src": "favicon.ico",
+        "sizes": "64x64 32x32 24x24 16x16",
+        "type": "image/x-icon"
+      },
+      {
+        "src": "favicon-32x32.png",
+        "sizes": "32x32",
+        "type": "image/png"
+      },
+      {
+        "src": "apple-touch-icon.png",
+        "sizes": "180x180",
+        "type": "image/png"
+      }
+    ],
+    "start_url": ".",
+    "display": "standalone",
+    "theme_color": "#b5451b",
+    "background_color": "#ffffff",
+    "description": "ShopZen - Your online store"
+  }

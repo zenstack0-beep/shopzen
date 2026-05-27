@@ -190,9 +190,14 @@ export default function AdminOrderDetail() {
               <div className="flex justify-between items-center">
                 <span className="text-gray-500">Status</span>
                 <select value={paymentStatus} onChange={async (e) => {
-                  setPaymentStatus(e.target.value);
-                  await API.put(`/products/admin/${id}`, { paymentStatus: e.target.value }).catch(() => {});
-                  toast.success('Payment status updated');
+                  const newStatus = e.target.value;
+                  setPaymentStatus(newStatus);
+                  try {
+                    await API.put(`/orders/admin/${id}/status`, { status: order.orderStatus, note: `Payment status manually set to ${newStatus}` });
+                    // Patch local order state so paymentStatus badge refreshes
+                    setOrder(prev => prev ? { ...prev, paymentStatus: newStatus } : prev);
+                    toast.success('Payment status updated');
+                  } catch { toast.error('Failed to update payment status'); }
                 }} className="text-xs border border-gray-200 rounded-lg px-2 py-1 font-medium capitalize">
                   {['pending','paid','failed','refunded'].map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
@@ -200,6 +205,88 @@ export default function AdminOrderDetail() {
               {order.trackingNumber && <div className="flex justify-between"><span className="text-gray-500">Tracking</span><span className="font-mono text-xs">{order.trackingNumber}</span></div>}
               {order.deliveryPartner && <div className="flex justify-between"><span className="text-gray-500">Courier</span><span>{order.deliveryPartner}</span></div>}
             </div>
+
+            {/* Payment Slip Section */}
+            {order.paymentMethod === 'bank_transfer' && (
+              <div className="mt-4 pt-4 border-t border-gray-100">
+                <p className="text-sm font-semibold text-gray-700 mb-3">📎 Payment Slip</p>
+                {order.paymentSlip ? (
+                  <div className="space-y-3">
+                    {order.paymentSlipUploadedAt && (
+                      <p className="text-xs text-gray-400">Uploaded {new Date(order.paymentSlipUploadedAt).toLocaleString()}</p>
+                    )}
+                    {(() => {
+                      // Build absolute URL: works both locally and in production
+                      const apiBase = process.env.REACT_APP_API_URL || `${window.location.protocol}//${window.location.hostname}:5001`;
+                      const slipUrl = order.paymentSlip.startsWith('http') ? order.paymentSlip : `${apiBase}${order.paymentSlip}`;
+                      const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(order.paymentSlip);
+                      return isImage ? (
+                        <a href={slipUrl} target="_blank" rel="noopener noreferrer">
+                          <img
+                            src={slipUrl}
+                            alt="Payment slip"
+                            className="w-full rounded-xl border border-gray-200 object-contain max-h-64 cursor-pointer hover:opacity-90 transition-opacity"
+                            onError={e => { e.target.style.display='none'; e.target.nextSibling.style.display='block'; }}
+                          />
+                          <p style={{display:'none'}} className="text-xs text-red-400 mt-1">⚠ Image could not load. <a href={slipUrl} className="underline text-blue-500" target="_blank" rel="noopener noreferrer">Open directly →</a></p>
+                          <p className="text-xs text-center text-blue-500 mt-1">Click to open full size ↗</p>
+                        </a>
+                      ) : (
+                        <a
+                          href={slipUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 p-3 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors"
+                        >
+                          <svg className="w-5 h-5 text-red-500" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>
+                          <span className="text-sm text-blue-600 underline">View Payment Slip PDF ↗</span>
+                        </a>
+                      );
+                    })()}
+                    {order.paymentStatus !== 'paid' && (
+                      <button
+                        onClick={async () => {
+                          try {
+                            const { data } = await API.put(`/orders/admin/${id}/confirm-slip`, {});
+                            setOrder(data);
+                            setPaymentStatus('paid');
+                            toast.success('✅ Payment confirmed! Customer has been emailed.');
+                          } catch { toast.error('Failed to confirm payment'); }
+                        }}
+                        className="w-full py-2.5 rounded-xl text-white text-sm font-bold bg-green-500 hover:bg-green-600 transition-colors"
+                      >
+                        ✅ Confirm Payment from Slip
+                      </button>
+                    )}
+                    {order.paymentStatus === 'paid' && (
+                      <div className="flex items-center gap-2 text-green-600 text-sm font-medium">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        Payment Verified ✓
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-xs text-gray-400 italic">No slip uploaded yet by customer.</p>
+                    {order.paymentStatus !== 'paid' && (
+                      <button
+                        onClick={async () => {
+                          try {
+                            const { data } = await API.put(`/orders/admin/${id}/confirm-slip`, {});
+                            setOrder(data);
+                            setPaymentStatus('paid');
+                            toast.success('✅ Payment confirmed manually! Customer emailed.');
+                          } catch { toast.error('Failed to confirm payment'); }
+                        }}
+                        className="w-full py-2 rounded-xl text-white text-xs font-bold bg-green-500 hover:bg-green-600 transition-colors"
+                      >
+                        ✅ Mark as Paid Manually
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Notes */}

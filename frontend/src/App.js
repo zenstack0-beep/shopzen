@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useLayoutEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -9,6 +9,7 @@ import { AnimationProvider } from './context/AnimationContext';
 import { ScrollProgressBar, FloatingShapes } from './components/Cinematic';
 import AnalyticsBootstrap from './hooks/useAnalytics';
 
+// Customer Pages
 import Home from './pages/customer/Home';
 import Shop from './pages/customer/Shop';
 import ProductDetail from './pages/customer/ProductDetail';
@@ -18,6 +19,7 @@ import { OrderSuccess, OrderTracking } from './pages/customer/OrderSuccess';
 import { Login, Register } from './pages/customer/Login';
 import ForgotPassword from './pages/customer/ForgotPassword';
 import Account from './pages/customer/Account';
+import MyOrders from './pages/customer/MyOrders';
 import Wishlist from './pages/customer/Wishlist';
 import GiftCards from './pages/customer/GiftCards';
 import Returns from './pages/customer/Returns';
@@ -25,7 +27,7 @@ import BusinessPage from './pages/customer/BusinessPage';
 import CampaignPage from './pages/customer/CampaignPage';
 import CustomerLayout from './pages/customer/CustomerLayout';
 
-import AdminLayout from './pages/admin/AdminLayout';
+// Admin Pages
 import Dashboard from './pages/admin/Dashboard';
 import AdminProducts from './pages/admin/Products';
 import AdminOrders from './pages/admin/Orders';
@@ -41,12 +43,17 @@ import AdminSEO from './pages/admin/SEO';
 import AnimationSettings from './pages/admin/AnimationSettings';
 import ThemeBuilder from './pages/admin/ThemeBuilder';
 import LayoutEditor from './pages/admin/LayoutEditor';
+import AdminLayout from './pages/admin/AdminLayout';
 
-// Scrolls window to top on every route change — fixes "loads at footer" bug
+// Scrolls to top on every route change — fires before browser restores position
 function ScrollToTop() {
   const { pathname } = useLocation();
-  useEffect(() => {
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  useLayoutEffect(() => {
+    // Disable browser scroll restoration so it never fights us
+    if ('scrollRestoration' in window.history) {
+      window.history.scrollRestoration = 'manual';
+    }
+    window.scrollTo(0, 0);
   }, [pathname]);
   return null;
 }
@@ -97,6 +104,7 @@ export default function App() {
                     <Route path="/gift-cards" element={<GiftCards/>}/>
                     <Route path="/returns" element={<ProtectedRoute><Returns/></ProtectedRoute>}/>
                     <Route path="/account" element={<ProtectedRoute><Account/></ProtectedRoute>}/>
+                    <Route path="/my-orders" element={<ProtectedRoute><MyOrders/></ProtectedRoute>}/>
                     <Route path="/page/:slug" element={<BusinessPage/>}/>
                     <Route path="/campaign/:slug" element={<CampaignPage/>}/>
                   </Route>
@@ -105,21 +113,21 @@ export default function App() {
                   <Route path="/forgot-password" element={<ForgotPassword/>}/>
                   <Route path="/admin" element={<AdminRoute><AdminLayout/></AdminRoute>}>
                     <Route index element={<Dashboard/>}/>
-                    <Route path="products"     element={<AdminProducts/>}/>
-                    <Route path="orders"       element={<AdminOrders/>}/>
-                    <Route path="orders/:id"   element={<AdminOrderDetail/>}/>
-                    <Route path="categories"   element={<AdminCategories/>}/>
-                    <Route path="customers"    element={<AdminCustomers/>}/>
-                    <Route path="coupons"      element={<AdminCoupons/>}/>
-                    <Route path="banners"      element={<AdminBanners/>}/>
-                    <Route path="seasonal"     element={<AdminSeasonal/>}/>
-                    <Route path="reviews"      element={<AdminReviews/>}/>
-                    <Route path="returns"      element={<AdminReturns/>}/>
-                    <Route path="gift-cards"   element={<AdminGiftCards/>}/>
-                    <Route path="subscribers"  element={<AdminSubscribers/>}/>
-                    <Route path="seo"          element={<AdminSEO/>}/>
-                    <Route path="settings"     element={<AdminSettings/>}/>
-                    <Route path="layout"       element={<LayoutEditor/>}/>
+                    <Route path="products"    element={<AdminProducts/>}/>
+                    <Route path="orders"      element={<AdminOrders/>}/>
+                    <Route path="orders/:id"  element={<AdminOrderDetail/>}/>
+                    <Route path="categories"  element={<AdminCategories/>}/>
+                    <Route path="customers"   element={<AdminCustomers/>}/>
+                    <Route path="coupons"     element={<AdminCoupons/>}/>
+                    <Route path="banners"     element={<AdminBanners/>}/>
+                    <Route path="seasonal"    element={<AdminSeasonal/>}/>
+                    <Route path="reviews"     element={<AdminReviews/>}/>
+                    <Route path="returns"     element={<AdminReturns/>}/>
+                    <Route path="gift-cards"  element={<AdminGiftCards/>}/>
+                    <Route path="subscribers" element={<AdminSubscribers/>}/>
+                    <Route path="seo"         element={<AdminSEO/>}/>
+                    <Route path="settings"    element={<AdminSettings/>}/>
+                    <Route path="layout"      element={<LayoutEditor/>}/>
                     <Route path="animations"   element={<AnimationSettings/>}/>
                     <Route path="theme-builder" element={<ThemeBuilder/>}/>
                   </Route>

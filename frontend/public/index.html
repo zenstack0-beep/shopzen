@@ -6,7 +6,7 @@
 
     <link rel="icon"             href="%PUBLIC_URL%/favicon.ico"/>
     <link rel="icon"             href="%PUBLIC_URL%/favicon-32x32.png" sizes="32x32" type="image/png"/>
-    <link rel="icon"             href="%PUBLIC_URL%/favicon-16x16.png" sizes="16x16" type="image/png"/>
+    <link rel="icon"             href="%PUBLIC_URL%/apple-touch-icon.png"/>
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/apple-touch-icon.png"/>
     <link rel="manifest"         href="%PUBLIC_URL%/manifest.json"/>
 
@@ -39,34 +39,120 @@
     <link rel="dns-prefetch" href="https://www.googletagmanager.com"/>
     <link rel="dns-prefetch" href="https://connect.facebook.net"/>
 
-    <!-- Neutral splash styles — no theme colours leak here -->
+    <!-- Premium animated splash — colours matched to admin theme -->
     <style>
       *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
       #szl-splash{
         position:fixed;inset:0;z-index:99999;
-        display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;
-        background:#ffffff;
-        transition:opacity 0.4s ease,visibility 0.4s ease;
-      }
-      @media(prefers-color-scheme:dark){
-        #szl-splash{background:#0f0f0f;}
-        #szl-wordmark{color:#f1f5f9 !important;}
-        #szl-spinner{border-color:rgba(255,255,255,0.12)!important;border-top-color:#ffffff!important;}
+        display:flex;flex-direction:column;align-items:center;justify-content:center;
+        overflow:hidden;
+        background:var(--szl-bg,#0a0a0a);
+        transition:opacity 0.6s cubic-bezier(.4,0,.2,1),visibility 0.6s ease;
       }
       #szl-splash.szl-hide{opacity:0;visibility:hidden;pointer-events:none;}
+
+      /* Floating orbs */
+      .szl-bg{position:absolute;inset:0;overflow:hidden;}
+      .szl-orb{position:absolute;border-radius:50%;filter:blur(70px);opacity:0.25;animation:szl-float linear infinite;}
+      .szl-orb-1{width:320px;height:320px;background:var(--szl-p,#374151);top:-100px;left:-100px;animation-duration:18s;}
+      .szl-orb-2{width:260px;height:260px;background:var(--szl-a,#6b7280);bottom:-80px;right:-80px;animation-duration:22s;animation-delay:-8s;}
+      .szl-orb-3{width:180px;height:180px;background:var(--szl-p,#4b5563);top:45%;left:65%;animation-duration:15s;animation-delay:-4s;opacity:0.15;}
+      .szl-orb-4{width:130px;height:130px;background:var(--szl-a,#9ca3af);top:15%;left:15%;animation-duration:20s;animation-delay:-12s;opacity:0.18;}
+      @keyframes szl-float{
+        0%{transform:translate(0,0) scale(1);}
+        25%{transform:translate(30px,-25px) scale(1.08);}
+        50%{transform:translate(-20px,30px) scale(0.92);}
+        75%{transform:translate(20px,12px) scale(1.04);}
+        100%{transform:translate(0,0) scale(1);}
+      }
+
+      /* Stars */
+      .szl-stars{position:absolute;inset:0;pointer-events:none;}
+      .szl-star{position:absolute;background:#fff;border-radius:50%;opacity:0;animation:szl-twinkle ease-in-out infinite;}
+      @keyframes szl-twinkle{0%,100%{opacity:0;transform:scale(0.4);}50%{opacity:0.6;transform:scale(1.3);}}
+
+      /* Content */
+      .szl-content{
+        position:relative;z-index:2;
+        display:flex;flex-direction:column;align-items:center;gap:0;
+        animation:szl-rise 0.9s cubic-bezier(.34,1.56,.64,1) both;
+      }
+      @keyframes szl-rise{
+        from{opacity:0;transform:translateY(32px) scale(0.9);}
+        to{opacity:1;transform:translateY(0) scale(1);}
+      }
+
+      /* Admin logo (shown if set) */
+      #szl-logo-img{
+        height:64px;max-width:220px;object-fit:contain;
+        margin-bottom:22px;
+        filter:brightness(0) invert(1);
+        opacity:0;animation:szl-fade-up 0.7s ease 0.1s both;
+      }
+
+      /* Default icon (shown if no logo) */
+      .szl-icon-wrap{
+        width:76px;height:76px;border-radius:24px;margin-bottom:22px;
+        background:var(--szl-g,linear-gradient(135deg,#1f2937,#374151,#6b7280));
+        display:flex;align-items:center;justify-content:center;
+        box-shadow:0 20px 60px var(--szl-glow,rgba(55,65,81,0.55)),0 0 0 1px rgba(255,255,255,0.12);
+        animation:szl-glow-pulse 2.5s ease-in-out infinite,szl-fade-up 0.7s ease 0.1s both;
+        position:relative;overflow:hidden;opacity:0;
+      }
+      .szl-icon-wrap::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(255,255,255,0.25),transparent);border-radius:inherit;}
+      .szl-icon-wrap::after{
+        content:'';position:absolute;inset:-50%;
+        background:linear-gradient(90deg,transparent,rgba(255,255,255,0.15),transparent);
+        animation:szl-sheen 3s ease-in-out infinite;
+      }
+      @keyframes szl-sheen{0%,100%{transform:translateX(-100%) rotate(45deg);}50%{transform:translateX(100%) rotate(45deg);}}
+      .szl-icon-wrap svg{width:36px;height:36px;fill:none;stroke:#fff;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;position:relative;z-index:1;}
+      @keyframes szl-glow-pulse{
+        0%,100%{box-shadow:0 20px 60px var(--szl-glow,rgba(55,65,81,0.55)),0 0 0 1px rgba(255,255,255,0.12);}
+        50%{box-shadow:0 24px 80px var(--szl-glow,rgba(55,65,81,0.85)),0 0 0 2px rgba(255,255,255,0.18);}
+      }
+
+      /* Store name */
       #szl-wordmark{
-        font-family:Georgia,'Times New Roman',serif;
-        font-size:28px;font-weight:700;letter-spacing:-0.5px;
-        color:#111111;user-select:none;
+        font-family:var(--szl-font,Georgia,serif);
+        font-size:44px;font-weight:700;letter-spacing:-1.5px;
+        user-select:none;line-height:1;
+        background:linear-gradient(90deg,#ffffff 0%,var(--szl-a,#d1d5db) 40%,var(--szl-p,#9ca3af) 60%,#ffffff 90%);
+        background-size:250% auto;
+        -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+        animation:szl-shimmer 3.5s linear infinite,szl-fade-up 0.7s ease 0.2s both;
+        opacity:0;
       }
-      #szl-spinner{
-        width:32px;height:32px;
-        border:3px solid rgba(0,0,0,0.1);
-        border-top-color:#111111;
-        border-radius:50%;
-        animation:szl-spin 0.7s linear infinite;
+      @keyframes szl-shimmer{0%{background-position:0% center;}100%{background-position:250% center;}}
+
+      /* Tagline */
+      #szl-tagline{
+        font-family:var(--szl-font,Georgia,serif);
+        font-size:11px;font-weight:400;letter-spacing:0.25em;text-transform:uppercase;
+        color:rgba(255,255,255,0.45);user-select:none;
+        margin-top:8px;margin-bottom:34px;
+        opacity:0;animation:szl-fade-up 0.8s ease 0.35s both;
       }
-      @keyframes szl-spin{to{transform:rotate(360deg);}}
+
+      /* Progress bar */
+      .szl-progress-wrap{
+        width:200px;height:2px;background:rgba(255,255,255,0.1);
+        border-radius:99px;overflow:hidden;
+        opacity:0;animation:szl-fade-up 0.6s ease 0.5s both;
+      }
+      .szl-progress-bar{
+        height:100%;border-radius:99px;width:0%;
+        background:var(--szl-g,linear-gradient(90deg,#374151,#6b7280,#9ca3af));
+        animation:szl-progress 3s cubic-bezier(.4,0,.2,1) 0.6s forwards;
+        box-shadow:0 0 12px var(--szl-glow,rgba(107,114,128,0.5));
+      }
+      @keyframes szl-progress{0%{width:0%;}25%{width:40%;}55%{width:70%;}80%{width:86%;}100%{width:95%;}}
+
+      @keyframes szl-fade-up{
+        from{opacity:0;transform:translateY(10px);}
+        to{opacity:1;transform:translateY(0);}
+      }
     </style>
 
     <script>
@@ -144,58 +230,160 @@
         }
         var mt=document.getElementById('meta-theme-color');
         if(mt)mt.content=pr;
+
+        /* ── Apply theme colours to splash ── */
+        var splash=document.getElementById('szl-splash');
+        if(splash){
+          splash.style.setProperty('--szl-p',pr);
+          splash.style.setProperty('--szl-a',ac);
+          splash.style.setProperty('--szl-g',t.g);
+          splash.style.setProperty('--szl-glow',pr+'88');
+          splash.style.setProperty('--szl-bg',t.d);
+          splash.style.background=t.d;
+
+          /* Update shimmer on wordmark */
+          var wm=document.getElementById('szl-wordmark');
+          if(wm){
+            if(s&&s.storeName) wm.textContent=s.storeName;
+            wm.style.backgroundImage='linear-gradient(90deg,#ffffff 0%,'+ac+' 40%,'+pr+' 60%,#ffffff 90%)';
+            wm.style.visibility='visible';
+            wm.style.fontFamily=f.fd;
+          }
+
+          /* Tagline from settings */
+          var tg=document.getElementById('szl-tagline');
+          if(tg){
+            if(s&&s.storeTagline) tg.textContent=s.storeTagline;
+            tg.style.visibility='visible';
+            tg.style.fontFamily=f.fd;
+          }
+
+          /* Show logo if set, otherwise colour the icon */
+          var li=document.getElementById('szl-logo-img');
+          var iw=document.getElementById('szl-icon-wrap');
+          if(li&&iw&&s&&s.logoUrl){
+            li.src=s.logoUrl;li.style.display='block';
+            iw.style.display='none';
+          } else if(iw){
+            iw.style.background=t.g;
+          }
+
+          /* Colour the progress bar */
+          var pb=splash.querySelector('.szl-progress-bar');
+          if(pb) pb.style.background=t.g;
+        }
       }
 
-      // Apply localStorage immediately for returning visitors (correct theme, no flash)
-      // On a new device this is null so applies default — that's fine, splash covers it
+      // ── Splash: show neutral UI immediately, then apply real theme from cache/API ──
+
+      // Show neutral splash content straight away (no hardcoded brand colors)
+      function showNeutralSplash(){
+        var splash=document.getElementById('szl-splash');
+        if(!splash)return;
+        // Neutral dark background
+        splash.style.background='#0a0a0a';
+        // Neutral orb & icon colors already set via CSS defaults (gray fallbacks)
+        // Show wordmark with neutral shimmer
+        var wm=document.getElementById('szl-wordmark');
+        if(wm){
+          wm.style.backgroundImage='linear-gradient(90deg,#ffffff 0%,#d1d5db 40%,#9ca3af 60%,#ffffff 90%)';
+          wm.style.visibility='visible';
+        }
+        var tg=document.getElementById('szl-tagline');
+        if(tg){tg.style.visibility='visible';}
+        var iw=document.getElementById('szl-icon-wrap');
+        if(iw){iw.style.background='linear-gradient(135deg,#1f2937,#374151,#6b7280)';}
+        var pb=splash.querySelector('.szl-progress-bar');
+        if(pb){pb.style.background='linear-gradient(90deg,#374151,#6b7280,#9ca3af)';}
+      }
+      showNeutralSplash();
+
+      // Apply from localStorage immediately (returning visitors get correct theme instantly)
       var cached=null;
       try{var raw=localStorage.getItem('shopzen_theme_v2');if(raw)cached=JSON.parse(raw);}catch(e){}
-      applySettings(cached);
+      if(cached) applySettings(cached);
 
-      // ── Pre-fetch theme from API while HTML is still parsing ──
-      // On success: apply real theme + set __szApiFetched so ThemeContext
-      // skips its own cache-apply steps (which would overwrite to default).
-      // Splash is controlled entirely by ThemeContext's loadAndApply via __szTryHide.
-      window.__szApiFetched = false;
+      // Pre-fetch theme from API (always — to get latest store name/theme)
+      window.__szApiFetched=false;
       fetch('/api/settings')
         .then(function(r){return r.ok?r.json():null;})
         .then(function(data){
           if(data&&typeof data==='object'&&!Array.isArray(data)&&('theme' in data||'storeName' in data)){
             applySettings(data);
-            window.__szApiFetched = true;
+            window.__szApiFetched=true;
             try{localStorage.setItem('shopzen_theme_v2',JSON.stringify(data));}catch(e){}
           }
         })
-        .catch(function(){/* network error — ThemeContext will fetch again */});
+        .catch(function(){
+          // API unreachable — if we have cached theme use it, otherwise neutral is already shown
+          if(cached) applySettings(cached);
+        });
 
-      // Splash hide logic — called by ThemeContext after its own loadAndApply succeeds
-      window.__szReactMounted = false;
-      window.__szTryHide = function(){
+      // Splash hide — called by ThemeContext after loadAndApply succeeds
+      window.__szReactMounted=false;
+      window.__szTryHide=function(){
         if(window.__szReactMounted){
           var el=document.getElementById('szl-splash');
           if(el)el.classList.add('szl-hide');
         }
       };
-      // Hard safety net: never block user more than 5 s
+      // Safety net: hide after 4s no matter what (covers API-down scenario)
       setTimeout(function(){
         var el=document.getElementById('szl-splash');
         if(el)el.classList.add('szl-hide');
-      }, 5000);
+      },4000);
     })();
     </script>
   </head>
   <body>
+    <script>
+      // Disable browser scroll restoration BEFORE React loads
+      // This prevents the browser from jumping to the previous scroll position
+      // when navigating between pages (the "loads at footer" bug)
+      if('scrollRestoration' in history) history.scrollRestoration='manual';
+      window.scrollTo(0,0);
+    </script>
+
+    <!-- Animated splash screen -->
     <div id="szl-splash">
-      <div id="szl-wordmark">Welcome to ShopZen</div>
-      
-      <div id="szl-spinner"></div>
+      <div class="szl-bg">
+        <div class="szl-orb szl-orb-1"></div>
+        <div class="szl-orb szl-orb-2"></div>
+        <div class="szl-orb szl-orb-3"></div>
+        <div class="szl-orb szl-orb-4"></div>
+      </div>
+      <div class="szl-stars" id="szl-stars"></div>
+      <div class="szl-content">
+        <img id="szl-logo-img" alt="logo" style="display:none"/>
+        <div class="szl-icon-wrap" id="szl-icon-wrap">
+          <svg viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
+        </div>
+        <div id="szl-wordmark" style="visibility:hidden">ShopZen</div>
+        <div id="szl-tagline" style="visibility:hidden">Premium Shopping Starts Here</div>
+        <div class="szl-progress-wrap">
+          <div class="szl-progress-bar"></div>
+        </div>
+      </div>
     </div>
 
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
 
     <script>
-      // Detect React mount — set flag so __szTryHide knows React is ready
+      // Generate twinkling stars
+      (function(){
+        var s=document.getElementById('szl-stars');
+        if(!s)return;
+        for(var i=0;i<55;i++){
+          var d=document.createElement('div');
+          d.className='szl-star';
+          var sz=Math.random()*2+1;
+          d.style.cssText='width:'+sz+'px;height:'+sz+'px;top:'+Math.random()*100+'%;left:'+Math.random()*100+'%;animation-duration:'+(Math.random()*3+2)+'s;animation-delay:'+(Math.random()*5)+'s;';
+          s.appendChild(d);
+        }
+      })();
+
+      // Detect React mount
       (function(){
         var root=document.getElementById('root');
         if(!root)return;
@@ -203,8 +391,8 @@
           if(root.children.length>0){
             obs.disconnect();
             window.__szReactMounted=true;
-            // Don't hide yet — wait for ThemeContext.loadAndApply to call __szTryHide
-            // so the correct theme is applied before the splash disappears
+            // Wait for ThemeContext.loadAndApply to call __szTryHide
+            // so correct theme is applied before splash disappears
           }
         });
         obs.observe(root,{childList:true});
