@@ -90,9 +90,38 @@ router.get('/me', auth, async (req, res) => { res.json(req.user); });
 // Update profile
 router.put('/profile', auth, async (req, res) => {
   try {
-    const { firstName, lastName, phone, addresses } = req.body;
-    const user = await User.findByIdAndUpdate(req.user._id, { firstName, lastName, phone, addresses }, { new: true }).select('-password');
-    res.json(user);
+    const { firstName, lastName, phone, addresses, defaultAddress } = req.body;
+    const update = {};
+    if (firstName !== undefined) update.firstName = firstName;
+    if (lastName  !== undefined) update.lastName  = lastName;
+    if (phone     !== undefined) update.phone     = phone;
+
+    if (defaultAddress) {
+      // Save billing address as the user's default address for checkout pre-fill
+      const user = await User.findById(req.user._id);
+      const addr = {
+        label: 'Default',
+        country: defaultAddress.country || '',
+        street:  defaultAddress.street  || '',
+        city:    defaultAddress.city    || '',
+        isDefault: true,
+      };
+      const idx = user.addresses.findIndex(a => a.isDefault);
+      if (idx > -1) {
+        user.addresses[idx] = addr;
+      } else {
+        user.addresses.push(addr);
+      }
+      // Ensure only one default
+      const defaultIdx = idx > -1 ? idx : user.addresses.length - 1;
+      user.addresses.forEach((a, i) => { if (i !== defaultIdx) a.isDefault = false; });
+      update.addresses = user.addresses;
+    } else if (addresses !== undefined) {
+      update.addresses = addresses;
+    }
+
+    const updated = await User.findByIdAndUpdate(req.user._id, update, { new: true }).select('-password');
+    res.json(updated);
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 

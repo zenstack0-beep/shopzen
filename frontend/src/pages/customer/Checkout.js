@@ -130,6 +130,29 @@ export default function Checkout() {
     if (gateways.length > 0) setPaymentMethod(gateways[0].gateway);
   }, [settings, gateways, paymentMethod]);
 
+  // Pre-fill billing from saved default address on first visit (skip if session already has data)
+  useEffect(() => {
+    if (!user) return;
+    const hasSessionData = !!sessionStorage.getItem('checkout_state');
+    if (hasSessionData) return; // fields already restored from session — don't overwrite
+    API.get('/auth/me').then(r => {
+      const profile = r.data;
+      const defaultAddr = profile?.addresses?.find(a => a.isDefault) || profile?.addresses?.[0];
+      setBilling(prev => ({
+        ...prev,
+        // Only fill fields that are still empty so manual edits are preserved
+        firstName: prev.firstName || profile.firstName || '',
+        lastName:  prev.lastName  || profile.lastName  || '',
+        phone:     prev.phone     || profile.phone      || '',
+        email:     prev.email     || profile.email      || '',
+        country:   defaultAddr?.country || prev.country,
+        street:    prev.street || defaultAddr?.street   || '',
+        city:      prev.city   || defaultAddr?.city     || '',
+      }));
+    }).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
   // Pre-fill coupon from seasonal campaign
   useEffect(() => {
     if (campaign?.couponCode && !couponCode) setCouponCode(campaign.couponCode);
@@ -218,6 +241,11 @@ export default function Checkout() {
       };
 
       const { data } = await API.post('/orders', orderData);
+
+      // Save billing as default address for future checkout pre-fill (fire & forget)
+      if (user) {
+        API.put('/auth/profile', { defaultAddress: { country: billing.country, street: billing.street, city: billing.city } }).catch(() => {});
+      }
 
       // Handle PayHere
       if (paymentMethod === 'payhere') {

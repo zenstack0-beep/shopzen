@@ -16,56 +16,121 @@ const statusColors = {
   cancelled: 'status-cancelled',
 };
 
-// Countdown timer hook — returns { minutes, seconds, expired }
-function useCancelCountdown(order, windowMinutes) {
+// ── Countdown timer hook ──────────────────────────────────────────────────────
+function useCancelCountdown(orderId, orderCreatedAt, orderStatus, cancelRequested, windowMinutes) {
   const [timeLeft, setTimeLeft] = useState(null);
-  useEffect(() => {
-    if (!order || !windowMinutes) return;
-    const cancellableStatuses = ['pending', 'confirmed'];
-    if (!cancellableStatuses.includes(order.orderStatus)) return;
-    if (order.cancelRequest?.requested) return;
 
-    const deadline = new Date(order.createdAt).getTime() + windowMinutes * 60 * 1000;
+  useEffect(() => {
+    console.log('[CancelCountdown]', { orderId, orderStatus, cancelRequested, windowMinutes, orderCreatedAt });
+
+    if (windowMinutes === null) {
+      setTimeLeft(null);
+      return;
+    }
+    if (windowMinutes === 0) {
+      console.log('[CancelCountdown] disabled (window=0)');
+      setTimeLeft({ expired: true });
+      return;
+    }
+
+    const cancellableStatuses = ['pending', 'confirmed'];
+    if (!cancellableStatuses.includes(orderStatus)) {
+      console.log('[CancelCountdown] not cancellable status:', orderStatus);
+      setTimeLeft({ expired: true });
+      return;
+    }
+    if (cancelRequested) {
+      console.log('[CancelCountdown] already requested');
+      setTimeLeft({ expired: true });
+      return;
+    }
+
+    const deadline = new Date(orderCreatedAt).getTime() + windowMinutes * 60 * 1000;
+    console.log('[CancelCountdown] deadline in minutes from now:', (deadline - Date.now()) / 60000);
+
     const tick = () => {
       const diff = deadline - Date.now();
-      if (diff <= 0) { setTimeLeft({ expired: true }); return; }
+      if (isNaN(diff) || diff <= 0) {
+        console.log('[CancelCountdown] expired, diff=', diff);
+        setTimeLeft({ expired: true });
+        return;
+      }
       setTimeLeft({
         expired: false,
         minutes: Math.floor(diff / 60000),
         seconds: Math.floor((diff % 60000) / 1000),
       });
     };
+
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [order, windowMinutes]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderId, orderCreatedAt, orderStatus, cancelRequested, windowMinutes]);
+
   return timeLeft;
 }
 
+// ── Cancel button + modal ─────────────────────────────────────────────────────
 function CancelButton({ order, windowMinutes, onCancelled }) {
-  const [open, setOpen] = useState(false);
-  const [reason, setReason] = useState('');
+  const [open, setOpen]       = useState(false);
+  const [reason, setReason]   = useState('');
   const [loading, setLoading] = useState(false);
-  const timeLeft = useCancelCountdown(order, windowMinutes);
+
+  const timeLeft = useCancelCountdown(
+    order._id,
+    order.createdAt,
+    order.orderStatus,
+    !!order.cancelRequest?.requested,
+    windowMinutes,
+  );
+
+  console.log('[CancelButton]', order.orderNumber, { windowMinutes, timeLeft, status: order.orderStatus, cancelRequest: order.cancelRequest });
 
   const cancellableStatuses = ['pending', 'confirmed'];
-  if (!cancellableStatuses.includes(order.orderStatus)) return null;
-  if (order.orderStatus === 'cancelled') return null;
 
-  // Already requested
+  // Not cancellable status
+  if (!cancellableStatuses.includes(order.orderStatus) || order.orderStatus === 'cancelled') {
+    return null;
+  }
+
+  // Already submitted a cancel request — show its status
   if (order.cancelRequest?.requested) {
     const s = order.cancelRequest.status;
     return (
       <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
         s === 'pending'  ? 'bg-yellow-100 text-yellow-700' :
-        s === 'approved' ? 'bg-red-100 text-red-600' :
+        s === 'approved' ? 'bg-red-100 text-red-600'       :
                            'bg-gray-100 text-gray-500'}`}>
-        {s === 'pending' ? '⏳ Cancel Requested' : s === 'approved' ? '🚫 Cancelled' : '❌ Cancel Rejected'}
+        {s === 'pending'  ? '⏳ Cancel Requested' :
+         s === 'approved' ? '🚫 Cancelled'        :
+                            '❌ Cancel Rejected'}
       </span>
     );
   }
 
-  if (!timeLeft || timeLeft.expired) return null;
+  // Settings still loading
+  if (windowMinutes === null) {
+    return <span className="inline-block w-24 h-6 rounded-lg bg-gray-100 animate-pulse" />;
+  }
+
+  // Admin disabled cancellations
+  if (windowMinutes === 0) {
+    return null;
+  }
+
+  // Window expired
+  if (!timeLeft || timeLeft.expired) {
+    return (
+      <span className="text-xs text-gray-400 px-2 py-1 rounded-lg border border-gray-100 bg-gray-50">
+        🔒 Cancel window closed
+      </span>
+    );
+  }
+
+  // Active — show button with countdown
+  const mm = String(timeLeft.minutes).padStart(2, '0');
+  const ss = String(timeLeft.seconds).padStart(2, '0');
 
   const handleRequest = async () => {
     setLoading(true);
@@ -76,7 +141,9 @@ function CancelButton({ order, windowMinutes, onCancelled }) {
       onCancelled();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Could not submit cancel request');
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -85,20 +152,16 @@ function CancelButton({ order, windowMinutes, onCancelled }) {
         onClick={() => setOpen(true)}
         className="text-xs font-semibold text-red-500 hover:text-red-700 border border-red-200 hover:border-red-400 px-2 py-1 rounded-lg transition-colors"
       >
-        Cancel Order
-        {!timeLeft.expired && (
-          <span className="ml-1 text-gray-400">
-            ({String(timeLeft.minutes).padStart(2,'0')}:{String(timeLeft.seconds).padStart(2,'0')})
-          </span>
-        )}
+        Cancel Order&nbsp;
+        <span className="font-mono text-gray-400">{mm}:{ss}</span>
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{background:'rgba(0,0,0,0.5)'}}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
           <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl">
             <h3 className="font-bold text-gray-900 text-lg mb-1">Cancel Order?</h3>
             <p className="text-sm text-gray-500 mb-4">
-              <span className="font-mono font-bold" style={{color:'var(--color-primary)'}}>{order.orderNumber}</span>
+              <span className="font-mono font-bold" style={{ color: 'var(--color-primary)' }}>{order.orderNumber}</span>
               {' — '}Rs. {order.total?.toLocaleString()}
             </p>
             <label className="form-label">Reason (optional)</label>
@@ -131,15 +194,17 @@ function CancelButton({ order, windowMinutes, onCancelled }) {
   );
 }
 
+// ── Main page ─────────────────────────────────────────────────────────────────
 export default function MyOrders() {
-  const { user } = useAuth();
+  const { user }           = useAuth();
   useSEO({ title: 'My Orders', noindex: true });
-  const { settings } = useTheme();
-  const [searchParams] = useSearchParams();
-  const [orders, setOrders] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [cancelWindowMinutes, setCancelWindowMinutes] = useState(60);
-  const sym = settings?.currencySymbol || 'Rs.';
+  const { settings }       = useTheme();
+  const [searchParams]     = useSearchParams();
+  const [orders, setOrders]       = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [cancelWindowMinutes, setCancelWindowMinutes] = useState(null);
+
+  const sym     = settings?.currencySymbol || 'Rs.';
   const primary = 'var(--color-primary)';
   const newOrderId = searchParams.get('new');
 
@@ -152,11 +217,21 @@ export default function MyOrders() {
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
 
-  // Load cancel window from settings
   useEffect(() => {
-    API.get('/settings').then(r => {
-      if (r.data?.cancelWindowMinutes) setCancelWindowMinutes(Number(r.data.cancelWindowMinutes));
-    }).catch(() => {});
+    API.get('/settings')
+      .then(r => {
+        console.log('[MyOrders] settings response:', r.data);
+        const raw = r.data?.cancelWindowMinutes;
+        console.log('[MyOrders] cancelWindowMinutes raw:', raw, typeof raw);
+        const parsed = (raw !== undefined && raw !== null && raw !== '') ? Number(raw) : 60;
+        const final  = isNaN(parsed) ? 60 : parsed;
+        console.log('[MyOrders] cancelWindowMinutes final:', final);
+        setCancelWindowMinutes(final);
+      })
+      .catch(err => {
+        console.error('[MyOrders] settings fetch failed:', err);
+        setCancelWindowMinutes(60);
+      });
   }, []);
 
   const pendingPaymentOrders = orders.filter(
@@ -165,6 +240,7 @@ export default function MyOrders() {
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8" style={{ background: 'var(--body-bg)' }}>
+
       {/* Profile header */}
       <div className="flex items-center gap-4 mb-6">
         <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-white text-xl font-bold shadow-lg"
@@ -189,7 +265,7 @@ export default function MyOrders() {
               <p className="font-bold text-amber-800 text-base mb-1">
                 Payment Required — {pendingPaymentOrders.length} order{pendingPaymentOrders.length > 1 ? 's' : ''} awaiting payment
               </p>
-              <p className="text-sm text-amber-700 mb-3">Please complete your bank transfer and upload the payment slip.</p>
+              <p className="text-sm text-amber-700 mb-3">Please complete your bank transfer and upload the payment slip to confirm your order.</p>
               <div className="space-y-2">
                 {pendingPaymentOrders.map(order => (
                   <div key={order._id} className="flex items-center justify-between bg-white rounded-xl px-4 py-3 border border-amber-200">
@@ -208,7 +284,7 @@ export default function MyOrders() {
         </div>
       )}
 
-      {/* New order highlight */}
+      {/* New order success banner */}
       {newOrderId && (
         <div className="rounded-2xl border-2 border-green-200 bg-green-50 p-4 mb-6 flex items-center gap-3">
           <svg className="w-6 h-6 text-green-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -218,7 +294,7 @@ export default function MyOrders() {
             <p className="font-bold text-green-800 text-sm">Order placed successfully!</p>
             <p className="text-xs text-green-600">A confirmation email has been sent to you.</p>
           </div>
-          <Link to={`/track-order/${newOrderId}`} className="text-xs font-semibold hover:underline" style={{ color: 'var(--color-primary)' }}>
+          <Link to={`/track-order/${newOrderId}`} className="text-xs font-semibold hover:underline" style={{ color: primary }}>
             Track →
           </Link>
         </div>
@@ -240,12 +316,12 @@ export default function MyOrders() {
       ) : (
         <div className="space-y-4">
           {orders.map(order => {
-            const isNew = order._id === newOrderId;
+            const isNew        = order._id === newOrderId;
             const needsPayment = order.paymentMethod === 'bank_transfer' && order.paymentStatus !== 'paid';
             return (
               <div key={order._id} className="rounded-2xl border p-5 hover-lift transition-all"
                 style={{
-                  background: 'var(--card-bg)',
+                  background:  'var(--card-bg)',
                   borderColor: isNew ? 'var(--color-primary)' : needsPayment ? '#fcd34d' : 'transparent',
                   borderWidth: (isNew || needsPayment) ? '2px' : '1px',
                 }}>
@@ -279,7 +355,9 @@ export default function MyOrders() {
                       {item.name} ×{item.quantity}
                     </div>
                   ))}
-                  {order.items?.length > 3 && <span className="text-xs text-gray-400 self-center">+{order.items.length - 3} more</span>}
+                  {order.items?.length > 3 && (
+                    <span className="text-xs text-gray-400 self-center">+{order.items.length - 3} more</span>
+                  )}
                 </div>
 
                 {/* Footer */}
@@ -293,8 +371,12 @@ export default function MyOrders() {
                       </span>
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <CancelButton order={order} windowMinutes={cancelWindowMinutes} onCancelled={fetchOrders} />
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <CancelButton
+                      order={order}
+                      windowMinutes={cancelWindowMinutes}
+                      onCancelled={fetchOrders}
+                    />
                     <Link to={`/track-order/${order._id}`} className="text-sm font-semibold hover:underline" style={{ color: primary }}>
                       {needsPayment ? '📤 Upload Slip →' : 'Track Order →'}
                     </Link>

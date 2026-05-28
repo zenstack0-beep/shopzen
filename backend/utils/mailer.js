@@ -43,7 +43,7 @@ const getTheme = async () => {
 
   try {
     // Lazy-require so mailer can be loaded before mongoose connects
-    const { Settings } = require('./models/index');
+    const { Settings } = require('../models/index');
     const rows = await Settings.find(
       { key: { $in: ['primaryColor', 'storeName'] } },
       'key value'
