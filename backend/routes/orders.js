@@ -10,6 +10,10 @@ const {
   slipUploadedAdminHtml,
   slipReceivedCustomerHtml,
   paymentConfirmedHtml,
+  orderCancelledHtml,
+  cancelRequestAdminHtml,
+  cancelRejectedHtml,
+  orderStatusUpdateHtml,
 } = require('../utils/mailer');
 const multer = require('multer');
 const path = require('path');
@@ -134,6 +138,15 @@ router.put('/admin/:id/status', adminAuth, async (req, res) => {
       },
       { new: true }
     );
+    // Email customer on every meaningful status change
+    const notifyStatuses = ['confirmed','processing','shipped','out_for_delivery','delivered','cancelled'];
+    if (order?.billing?.email && notifyStatuses.includes(status)) {
+      sendMail({
+        to: order.billing.email,
+        subject: `Order Update — ${order.orderNumber} | ShopZen`,
+        html: await orderStatusUpdateHtml(order, status, note),
+      }).catch(() => {});
+    }
     res.json(order);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -203,7 +216,7 @@ router.put('/admin/:id/confirm-slip', adminAuth, async (req, res) => {
       sendMail({
         to: order.billing.email,
         subject: `✅ Payment Confirmed — Order ${order.orderNumber} | ShopZen`,
-        html: paymentConfirmedHtml(order),
+        html: await paymentConfirmedHtml(order),
       }).catch(() => {});
     }
 
@@ -383,7 +396,7 @@ router.post('/', async (req, res) => {
       sendMail({
         to: billing.email,
         subject: `Order Confirmed — ${order.orderNumber} | ShopZen`,
-        html: orderConfirmHtml(order),
+        html: await orderConfirmHtml(order),
       }).catch(() => {});
     }
 
@@ -464,7 +477,7 @@ router.post('/:id/payment-slip', uploadSlip.single('slip'), async (req, res) => 
       sendMail({
         to: adminEmail,
         subject: `📎 Payment Slip Uploaded — ${order.orderNumber} | ShopZen`,
-        html: slipUploadedAdminHtml(order, slipUrl),
+        html: await slipUploadedAdminHtml(order, slipUrl),
       }).catch(() => {});
     }
 
@@ -473,7 +486,7 @@ router.post('/:id/payment-slip', uploadSlip.single('slip'), async (req, res) => 
       sendMail({
         to: order.billing.email,
         subject: `Payment Slip Received — ${order.orderNumber} | ShopZen`,
-        html: slipReceivedCustomerHtml(order),
+        html: await slipReceivedCustomerHtml(order),
       }).catch(() => {});
     }
 
@@ -485,6 +498,97 @@ router.post('/:id/payment-slip', uploadSlip.single('slip'), async (req, res) => 
 });
 
 // Get single order by ID — MUST be LAST
+// Customer — Request order cancellation
+router.post('/:id/cancel-request', auth, async (req, res) => {
+  try {
+    const { reason } = req.body;
+    const order = await Order.findOne({ _id: req.params.id, customer: req.user._id });
+    if (!order) return res.status(404).json({ message: 'Order not found' });
+
+    // Check if order is in a cancellable state
+    const cancellableStatuses = ['pending', 'confirmed'];
+    if (!cancellableStatuses.includes(order.orderStatus)) {
+      return res.status(400).json({ message: 'Order cannot be cancelled at this stage' });
+    }
+    if (order.cancelRequest?.requested) {
+      return res.status(400).json({ message: 'Cancellation already requested' });
+    }
+
+    // Check cancel window from settings
+    const windowSetting = await Settings.findOne({ key: 'cancelWindowMinutes' });
+    const windowMinutes = windowSetting?.value || 60;
+    const minutesElapsed = (Date.now() - new Date(order.createdAt).getTime()) / 60000;
+    if (minutesElapsed > windowMinutes) {
+      return res.status(400).json({ message: `Cancellation window of ${windowMinutes} minutes has passed` });
+    }
+
+    order.cancelRequest = { requested: true, requestedAt: new Date(), reason, status: 'pending' };
+    await order.save();
+
+    // Notify admin by email
+    const adminEmail = process.env.ADMIN_EMAIL || process.env.EMAIL_USER;
+    if (adminEmail) {
+      sendMail({
+        to: adminEmail,
+        subject: `🚫 Cancel Request — ${order.orderNumber} | ShopZen`,
+        html: await cancelRequestAdminHtml(order),
+      }).catch(() => {});
+    }
+
+    res.json({ success: true, order });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Admin — Approve or reject a cancel request
+router.put('/admin/:id/cancel-decision', adminAuth, async (req, res) => {
+  try {
+    const { decision } = req.body; // 'approved' | 'rejected'
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ message: 'Order not found' });
+    if (!order.cancelRequest?.requested) return res.status(400).json({ message: 'No cancel request on this order' });
+
+    order.cancelRequest.status = decision;
+    order.cancelRequest.resolvedAt = new Date();
+    order.cancelRequest.resolvedBy = req.user.email;
+
+    if (decision === 'approved') {
+      order.orderStatus = 'cancelled';
+      order.statusHistory.push({
+        status: 'cancelled',
+        note: `Cancelled by admin. Customer reason: ${order.cancelRequest.reason || 'None'}`,
+        updatedBy: req.user.email,
+      });
+      // Restore stock
+      for (const item of order.items) {
+        await Product.findByIdAndUpdate(item.product, { $inc: { stock: item.quantity, soldCount: -item.quantity } }).catch(() => {});
+      }
+      if (order.billing?.email) {
+        sendMail({
+          to: order.billing.email,
+          subject: `Order Cancelled — ${order.orderNumber} | ShopZen`,
+          html: await orderCancelledHtml(order),
+        }).catch(() => {});
+      }
+    } else {
+      if (order.billing?.email) {
+        sendMail({
+          to: order.billing.email,
+          subject: `Cancellation Update — ${order.orderNumber} | ShopZen`,
+          html: await cancelRejectedHtml(order),
+        }).catch(() => {});
+      }
+    }
+
+    await order.save();
+    res.json(order);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Get single order (public — works for guest and logged-in)
 router.get('/:id', async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)

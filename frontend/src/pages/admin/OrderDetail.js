@@ -36,6 +36,14 @@ export default function AdminOrderDetail() {
     finally { setSaving(false); }
   };
 
+  const handleCancelDecision = async (decision) => {
+    try {
+      const { data } = await API.put(`/orders/admin/${id}/cancel-decision`, { decision });
+      setOrder(data);
+      toast.success(decision === 'approved' ? '🚫 Order cancelled & customer notified' : '✅ Cancellation rejected & customer notified');
+    } catch { toast.error('Action failed'); }
+  };
+
   if (loading) return <div className="text-center py-20 text-gray-400">Loading order...</div>;
   if (!order) return <div className="text-center py-20">Order not found. <Link to="/admin/orders" className="text-primary hover:underline">Back to orders</Link></div>;
 
@@ -143,6 +151,40 @@ export default function AdminOrderDetail() {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Cancel Request Panel */}
+          {order.cancelRequest?.requested && (
+            <div className={`bg-white rounded-2xl border-2 p-5 ${
+              order.cancelRequest.status === 'pending' ? 'border-red-300' :
+              order.cancelRequest.status === 'approved' ? 'border-red-200' : 'border-gray-200'}`}>
+              <h2 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                🚫 Cancellation Request
+                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                  order.cancelRequest.status === 'pending'  ? 'bg-yellow-100 text-yellow-700' :
+                  order.cancelRequest.status === 'approved' ? 'bg-red-100 text-red-600' :
+                                                               'bg-gray-100 text-gray-500'}`}>
+                  {order.cancelRequest.status}
+                </span>
+              </h2>
+              <div className="space-y-2 text-sm mb-4">
+                <p className="text-gray-500">Requested: <span className="text-gray-800">{new Date(order.cancelRequest.requestedAt).toLocaleString()}</span></p>
+                {order.cancelRequest.reason && <p className="text-gray-500">Reason: <span className="text-gray-800">{order.cancelRequest.reason}</span></p>}
+                {order.cancelRequest.resolvedBy && <p className="text-gray-500">Resolved by: <span className="text-gray-800">{order.cancelRequest.resolvedBy}</span></p>}
+              </div>
+              {order.cancelRequest.status === 'pending' && (
+                <div className="flex gap-3">
+                  <button onClick={() => handleCancelDecision('approved')}
+                    className="flex-1 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-bold transition-colors">
+                    ✅ Approve Cancellation
+                  </button>
+                  <button onClick={() => handleCancelDecision('rejected')}
+                    className="flex-1 py-2 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors">
+                    ❌ Reject Request
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

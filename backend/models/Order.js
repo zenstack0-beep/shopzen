@@ -55,6 +55,14 @@ const orderSchema = new mongoose.Schema({
   giftCardDiscount: { type: Number, default: 0 },
   paymentSlip: { type: String }, // URL to uploaded bank transfer slip
   paymentSlipUploadedAt: { type: Date },
+  cancelRequest: {
+    requested:   { type: Boolean, default: false },
+    requestedAt: { type: Date },
+    reason:      { type: String },
+    status:      { type: String, enum: ['pending','approved','rejected'], default: 'pending' },
+    resolvedAt:  { type: Date },
+    resolvedBy:  { type: String },
+  },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
 });

@@ -110,7 +110,7 @@ export default function AdminSettings() {
     theme:'default', primaryColor:'', secondaryColor:'', darkBgColor:'', darkMode:false,
     fontStyle:'default', logoUrl:'', faviconUrl:'', customCSS:'',
     metaTitle:'', metaDescription:'', googleAnalytics:'', facebookPixel:'',
-    lowStockAlert:5, orderNotificationEmail:'', autoConfirmOrders:false,
+    lowStockAlert:5, orderNotificationEmail:'', cancelWindowMinutes:60, autoConfirmOrders:false,
     reviewsRequireApproval:true, allowGuestCheckout:true, maintenanceMode:false,
     facebookUrl:'', instagramUrl:'', twitterUrl:'', whatsappNumber:'', youtubeUrl:'', linkedinUrl:'',
     businessType:'ecommerce', enableNewsletter:true, enableWishlist:true,
@@ -1120,6 +1120,7 @@ export default function AdminSettings() {
                 <div className="grid sm:grid-cols-2 gap-4">
                   <F label="Low Stock Alert Threshold" type="number" value={settings.lowStockAlert} onChange={e=>setSettings(p=>({...p,lowStockAlert:Number(e.target.value)}))} hint="Alert when stock falls below this"/>
                   <F label="Order Notification Email" type="email" value={settings.orderNotificationEmail} onChange={e=>setSettings(p=>({...p,orderNotificationEmail:e.target.value}))} hint="Receive order alerts here"/>
+                  <F label="Cancel Window (minutes)" type="number" value={settings.cancelWindowMinutes} onChange={e=>setSettings(p=>({...p,cancelWindowMinutes:Number(e.target.value)}))} hint="How long customers can request cancellation after placing an order (e.g. 60 = 1 hour)"/>
                 </div>
                 <Toggle label="✅ Auto-Confirm Orders" desc="Automatically confirm orders after placement" value={settings.autoConfirmOrders} onChange={()=>setSettings(p=>({...p,autoConfirmOrders:!p.autoConfirmOrders}))} />
                 <Toggle label="⚠️ Maintenance Mode" desc="Show maintenance page to all visitors" value={settings.maintenanceMode} onChange={()=>setSettings(p=>({...p,maintenanceMode:!p.maintenanceMode}))} />

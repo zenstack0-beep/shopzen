@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { Settings } = require('../models/index');
 const { adminAuth } = require('../middleware/auth');
+const { clearThemeCache } = require('../utils/mailer');
 
 // Get all settings as a flat key→value object (public — needed for store name etc.)
 router.get('/', async (req, res) => {
@@ -33,6 +34,7 @@ router.put('/', adminAuth, async (req, res) => {
     }));
 
     await Settings.bulkWrite(ops, { ordered: false });
+    clearThemeCache(); // invalidate email theme cache so next mail uses new colours
     res.json({ success: true });
   } catch (err) {
     console.error('Settings save error:', err);

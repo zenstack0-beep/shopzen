@@ -48,7 +48,7 @@ router.post('/forgot-password', async (req, res) => {
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
     await OTP.deleteMany({ email }); // remove old OTPs
     await OTP.create({ email, otp, expiresAt });
-    await sendMail({ to: email, subject: 'ShopZen Password Reset OTP', html: otpEmailHtml(otp, user.firstName) });
+    await sendMail({ to: email, subject: 'ShopZen Password Reset OTP', html: await otpEmailHtml(otp, user.firstName) });
     res.json({ message: 'OTP sent to your email address' });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
