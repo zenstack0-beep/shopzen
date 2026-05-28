@@ -370,6 +370,61 @@ const orderStatusUpdateHtml = async (order, newStatus, note) => {
     </div>`, t);
 };
 
+
+// ── Auto cancel-decision notification to admin ────────────────────────────────
+const cancelAutoDecisionAdminHtml = async (order, decision) => {
+  const t = await getTheme();
+  const isApproved = decision === 'approved';
+  return wrapper(`
+    ${header(isApproved ? 'Auto-Cancellation Approved' : 'Auto-Cancellation Rejected', t)}
+    <div style="padding:32px">
+      <p style="color:#374151;margin:0 0 12px">The system has automatically <strong>${isApproved ? 'approved' : 'rejected'}</strong> a cancellation request.</p>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+        <tr><td style="padding:8px 0;color:#6b7280;font-size:13px;width:40%">Order</td><td style="padding:8px 0;font-size:13px;font-weight:700;color:${t.primary};font-family:monospace">${order.orderNumber}</td></tr>
+        <tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Customer</td><td style="padding:8px 0;font-size:13px;font-weight:600;color:#111">${order.billing?.firstName} ${order.billing?.lastName}</td></tr>
+        <tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Email</td><td style="padding:8px 0;font-size:13px;color:#111">${order.billing?.email}</td></tr>
+        <tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Order Total</td><td style="padding:8px 0;font-size:13px;font-weight:700;color:${t.primary}">Rs. ${order.total?.toLocaleString()}</td></tr>
+        ${order.cancelRequest?.reason ? `<tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Reason</td><td style="padding:8px 0;font-size:13px;color:#111">${order.cancelRequest.reason}</td></tr>` : ''}
+        <tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Decision</td><td style="padding:8px 0;font-size:13px;font-weight:700;color:${isApproved ? '#dc2626' : '#16a34a'}">${isApproved ? '✅ Auto-Approved & Cancelled' : '❌ Auto-Rejected'}</td></tr>
+      </table>
+      <a href="${process.env.ADMIN_URL || process.env.FRONTEND_URL || ''}/admin/orders/${order._id}"
+         style="display:inline-block;background:linear-gradient(135deg,${t.primary},${lighten(t.primary)});color:white;padding:12px 24px;border-radius:10px;font-weight:700;font-size:14px;text-decoration:none">
+        View Order →
+      </a>
+    </div>`, t);
+};
+
+// ── Cancel approved notification to admin (manual) ────────────────────────────
+const cancelApprovedAdminHtml = async (order) => {
+  const t = await getTheme();
+  return wrapper(`
+    ${header('Cancellation Approved', t)}
+    <div style="padding:32px">
+      <p style="color:#374151;margin:0 0 12px">You approved the cancellation request for order <strong style="color:${t.primary}">${order.orderNumber}</strong>. The customer has been notified.</p>
+      <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:16px;margin-bottom:20px">
+        <p style="margin:0 0 4px;font-size:12px;color:#991b1b">Cancelled Order</p>
+        <p style="margin:0;font-size:20px;font-weight:800;color:#dc2626;font-family:monospace">${order.orderNumber}</p>
+        <p style="margin:8px 0 0;font-size:13px;color:#991b1b">Total: Rs. ${order.total?.toLocaleString()} · Stock restored</p>
+      </div>
+      ${order.cancelRequest?.reason ? `<div style="background:#f8fafc;border-radius:10px;padding:14px;font-size:13px;color:#374151;margin-bottom:16px"><strong>Customer reason:</strong> ${order.cancelRequest.reason}</div>` : ''}
+    </div>`, t);
+};
+
+// ── Cancel rejected notification to admin (manual) ────────────────────────────
+const cancelRejectedAdminHtml = async (order) => {
+  const t = await getTheme();
+  return wrapper(`
+    ${header('Cancellation Rejected', t)}
+    <div style="padding:32px">
+      <p style="color:#374151;margin:0 0 12px">You rejected the cancellation request for order <strong style="color:${t.primary}">${order.orderNumber}</strong>. The customer has been notified and the order will continue.</p>
+      <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:16px;margin-bottom:20px">
+        <p style="margin:0 0 4px;font-size:12px;color:#166534">Order Continuing</p>
+        <p style="margin:0;font-size:20px;font-weight:800;color:#16a34a;font-family:monospace">${order.orderNumber}</p>
+        <p style="margin:8px 0 0;font-size:13px;color:#166534">Status: ${order.orderStatus}</p>
+      </div>
+    </div>`, t);
+};
+
 module.exports = {
   sendMail,
   clearThemeCache,
@@ -381,5 +436,8 @@ module.exports = {
   orderCancelledHtml,
   cancelRequestAdminHtml,
   cancelRejectedHtml,
+  cancelApprovedAdminHtml,
+  cancelRejectedAdminHtml,
+  cancelAutoDecisionAdminHtml,
   orderStatusUpdateHtml,
 };

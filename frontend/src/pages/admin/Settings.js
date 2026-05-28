@@ -111,6 +111,7 @@ export default function AdminSettings() {
     fontStyle:'default', logoUrl:'', faviconUrl:'', customCSS:'',
     metaTitle:'', metaDescription:'', googleAnalytics:'', facebookPixel:'',
     lowStockAlert:5, orderNotificationEmail:'', cancelWindowMinutes:60, autoConfirmOrders:false,
+    autoDecisionEnabled:false, autoDecisionMinutes:60, autoDecisionAction:'approve',
     reviewsRequireApproval:true, allowGuestCheckout:true, maintenanceMode:false,
     facebookUrl:'', instagramUrl:'', twitterUrl:'', whatsappNumber:'', youtubeUrl:'', linkedinUrl:'',
     businessType:'ecommerce', enableNewsletter:true, enableWishlist:true,
@@ -1121,6 +1122,39 @@ export default function AdminSettings() {
                   <F label="Low Stock Alert Threshold" type="number" value={settings.lowStockAlert} onChange={e=>setSettings(p=>({...p,lowStockAlert:Number(e.target.value)}))} hint="Alert when stock falls below this"/>
                   <F label="Order Notification Email" type="email" value={settings.orderNotificationEmail} onChange={e=>setSettings(p=>({...p,orderNotificationEmail:e.target.value}))} hint="Receive order alerts here"/>
                   <F label="Cancel Window (minutes)" type="number" value={settings.cancelWindowMinutes} onChange={e=>setSettings(p=>({...p,cancelWindowMinutes:Number(e.target.value)}))} hint="How long customers can request cancellation after placing an order (e.g. 60 = 1 hour)"/>
+                  <F label="Auto-Decision Delay (minutes)" type="number" value={settings.autoDecisionMinutes} onChange={e=>setSettings(p=>({...p,autoDecisionMinutes:Number(e.target.value)}))} hint="After this many minutes, pending cancel requests are auto-decided (only if Auto-Decision is enabled below)"/>
+                </div>
+                {/* ── Cancel Auto-Decision ── */}
+                <div className="rounded-xl border border-gray-200 p-4 space-y-3 bg-gray-50">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-semibold text-gray-800 text-sm">🤖 Auto Cancel Decision</p>
+                      <p className="text-xs text-gray-500 mt-0.5">Automatically approve or reject cancel requests after the delay above — no manual review needed</p>
+                    </div>
+                    <button
+                      onClick={()=>setSettings(p=>({...p,autoDecisionEnabled:!p.autoDecisionEnabled}))}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.autoDecisionEnabled?'bg-green-500':'bg-gray-300'}`}>
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.autoDecisionEnabled?'translate-x-6':'translate-x-1'}`}/>
+                    </button>
+                  </div>
+                  {settings.autoDecisionEnabled && (
+                    <div className="flex gap-3 pt-1">
+                      {[['approve','✅ Auto-Approve (cancel the order)'],['reject','❌ Auto-Reject (keep the order)']].map(([val,label])=>(
+                        <label key={val} className={`flex items-center gap-2 flex-1 cursor-pointer rounded-lg border-2 px-3 py-2 text-sm transition-all ${settings.autoDecisionAction===val?'border-blue-500 bg-blue-50 font-semibold text-blue-800':'border-gray-200 bg-white text-gray-600'}`}>
+                          <input type="radio" name="autoDecisionAction" value={val}
+                            checked={settings.autoDecisionAction===val}
+                            onChange={()=>setSettings(p=>({...p,autoDecisionAction:val}))}
+                            className="accent-blue-500"/>
+                          {label}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {settings.autoDecisionEnabled && (
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      ⚠️ Both the customer and admin will receive an email when an auto-decision is made. The system checks every 60 seconds.
+                    </p>
+                  )}
                 </div>
                 <Toggle label="✅ Auto-Confirm Orders" desc="Automatically confirm orders after placement" value={settings.autoConfirmOrders} onChange={()=>setSettings(p=>({...p,autoConfirmOrders:!p.autoConfirmOrders}))} />
                 <Toggle label="⚠️ Maintenance Mode" desc="Show maintenance page to all visitors" value={settings.maintenanceMode} onChange={()=>setSettings(p=>({...p,maintenanceMode:!p.maintenanceMode}))} />

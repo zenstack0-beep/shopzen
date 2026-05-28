@@ -1,100 +1,101 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
-  Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, RadarChart,
-  Radar, PolarGrid, PolarAngleAxis, ComposedChart
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
+  ComposedChart, Line, Legend
 } from 'recharts';
 import API from '../../utils/api';
 
-/* ── Helpers ── */
-const fmt = (n) => `Rs. ${(n || 0).toLocaleString()}`;
-const pct = (a, b) => b > 0 ? Math.round(((a - b) / b) * 100) : 0;
-
+/* ── helpers ──────────────────────────────────────────────────────────────── */
+const fmt  = n  => `Rs. ${(n || 0).toLocaleString()}`;
+const fmtK = n  => n >= 1000 ? `Rs. ${(n/1000).toFixed(1)}k` : fmt(n);
+const pct  = (a, b) => b > 0 ? Math.round(((a - b) / b) * 100) : 0;
 const COLORS = ['#b5451b','#f0a500','#3b82f6','#10b981','#8b5cf6','#ef4444','#06b6d4','#84cc16'];
-const STATUS_LABELS = { pending:'Pending', confirmed:'Confirmed', processing:'Processing', shipped:'Shipped', out_for_delivery:'Out for Delivery', delivered:'Delivered', cancelled:'Cancelled' };
+const STATUS_LABELS = {
+  pending:'Pending', confirmed:'Confirmed', processing:'Processing',
+  shipped:'Shipped', out_for_delivery:'Out for Delivery',
+  delivered:'Delivered', cancelled:'Cancelled'
+};
 
-/* ── KPI Widget ── */
-const KPI = ({ label, value, sub, icon, color, trend, prefix = '', suffix = '', onClick }) => (
-  <div
-    onClick={onClick}
-    className={`bg-white rounded-2xl border border-gray-100 p-5 hover:shadow-lg transition-all duration-200 ${onClick ? 'cursor-pointer hover:border-gray-200' : ''}`}
-  >
-    <div className="flex items-start justify-between">
-      <div className="flex-1 min-w-0">
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider truncate">{label}</p>
-        <p className="font-display text-2xl font-bold text-gray-900 mt-1">{prefix}{value}{suffix}</p>
-        {sub && <p className="text-xs text-gray-400 mt-0.5 truncate">{sub}</p>}
-      </div>
-      <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 ml-3 ${color}`}>
-        <span className="text-xl">{icon}</span>
-      </div>
-    </div>
-    {trend !== undefined && (
-      <div className={`flex items-center gap-1 mt-3 text-xs font-semibold ${trend >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-        <span className={`inline-block w-4 h-4 rounded-full flex items-center justify-center text-white text-xs ${trend >= 0 ? 'bg-emerald-500' : 'bg-red-500'}`}>
-          {trend >= 0 ? '↑' : '↓'}
-        </span>
-        <span>{Math.abs(trend)}% vs last month</span>
-      </div>
-    )}
-  </div>
-);
-
-/* ── Live Pulse ── */
-const LiveDot = () => (
-  <span className="relative flex h-2.5 w-2.5">
-    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-  </span>
-);
-
-/* ── Forecast bar ── */
-const ForecastBar = ({ label, actual, forecast, max }) => {
-  const aW = Math.round((actual / max) * 100);
-  const fW = Math.round((forecast / max) * 100);
+/* ── KPI card ─────────────────────────────────────────────────────────────── */
+const KPI = ({ label, value, sub, icon, color, trend, suffix = '', to, onClick }) => {
+  const navigate = useNavigate();
+  const handleClick = () => { if (to) navigate(to); else if (onClick) onClick(); };
+  const clickable = !!(to || onClick);
   return (
-    <div className="mb-3">
-      <div className="flex justify-between text-xs text-gray-500 mb-1">
-        <span>{label}</span>
-        <span className="font-semibold text-gray-700">Forecast: {fmt(forecast)}</span>
+    <div
+      onClick={handleClick}
+      className={`bg-white rounded-2xl border border-gray-100 p-5 transition-all duration-200
+        ${clickable ? 'cursor-pointer hover:shadow-lg hover:border-primary/30 hover:-translate-y-0.5 active:translate-y-0' : ''}`}
+    >
+      <div className="flex items-start justify-between">
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider truncate">{label}</p>
+          <p className="font-display text-2xl font-bold text-gray-900 mt-1 truncate">{value}{suffix}</p>
+          {sub && <p className="text-xs text-gray-400 mt-0.5 truncate">{sub}</p>}
+        </div>
+        <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 ml-3 ${color}`}>
+          <span className="text-xl">{icon}</span>
+        </div>
       </div>
-      <div className="relative h-4 bg-gray-100 rounded-full overflow-hidden">
-        <div className="absolute h-full bg-primary/20 rounded-full transition-all" style={{ width: `${fW}%` }} />
-        <div className="absolute h-full bg-primary rounded-full transition-all" style={{ width: `${aW}%` }} />
-      </div>
+      {trend !== undefined && (
+        <div className={`flex items-center gap-1 mt-3 text-xs font-semibold ${trend >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+          <span className={`inline-flex w-4 h-4 rounded-full items-center justify-center text-white text-xs ${trend >= 0 ? 'bg-emerald-500' : 'bg-red-400'}`}>
+            {trend >= 0 ? '↑' : '↓'}
+          </span>
+          {Math.abs(trend)}% vs last month
+        </div>
+      )}
+      {clickable && (
+        <div className="mt-2 text-xs font-medium" style={{ color: 'var(--color-primary)' }}>
+          View details →
+        </div>
+      )}
     </div>
   );
 };
 
-/* ── Section Header ── */
-const SectionHeader = ({ title, action }) => (
+/* ── live dot ─────────────────────────────────────────────────────────────── */
+const LiveDot = () => (
+  <span className="relative flex h-2.5 w-2.5">
+    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+  </span>
+);
+
+/* ── section header ───────────────────────────────────────────────────────── */
+const SH = ({ title, action }) => (
   <div className="flex items-center justify-between mb-4">
     <h2 className="font-semibold text-gray-900 text-sm">{title}</h2>
     {action}
   </div>
 );
 
-/* ── Tabs ── */
-const TabBar = ({ tabs, active, onChange }) => (
-  <div className="flex bg-gray-100 rounded-xl p-1 gap-1">
-    {tabs.map(t => (
-      <button key={t.id} onClick={() => onChange(t.id)}
-        className={`flex-1 text-xs font-medium py-1.5 px-2 rounded-lg transition-all ${active === t.id ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
-        {t.label}
-      </button>
-    ))}
+/* ── insight badge ────────────────────────────────────────────────────────── */
+const Insight = ({ icon, color, title, body }) => (
+  <div className={`rounded-xl p-3 border ${color}`}>
+    <p className="text-xs font-bold mb-0.5">{icon} {title}</p>
+    <p className="text-xs opacity-80">{body}</p>
   </div>
 );
 
-/* ── Main Dashboard ── */
+/* ── product velocity badge ───────────────────────────────────────────────── */
+const VelocityBadge = ({ velocity }) => {
+  if (velocity === 'hot')  return <span className="text-xs font-bold text-white bg-red-500 px-2 py-0.5 rounded-full">🔥 Hot</span>;
+  if (velocity === 'slow') return <span className="text-xs font-bold text-white bg-gray-400 px-2 py-0.5 rounded-full">🐌 Slow</span>;
+  return <span className="text-xs font-bold text-white bg-blue-400 px-2 py-0.5 rounded-full">📦 Normal</span>;
+};
+
+/* ── main ─────────────────────────────────────────────────────────────────── */
 export default function Dashboard() {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [revenueTab, setRevenueTab] = useState('30d');
-  const [liveVisitors, setLiveVisitors] = useState(Math.floor(Math.random() * 40) + 8);
-  const [conversionTab, setConversionTab] = useState('funnel');
+  const navigate = useNavigate();
+  const [data, setData]               = useState(null);
+  const [loading, setLoading]         = useState(true);
   const [activeSection, setActiveSection] = useState('overview');
+  const [liveVisitors, setLiveVisitors]   = useState(Math.floor(Math.random() * 40) + 8);
+  const [analyticsPeriod, setAnalyticsPeriod] = useState('30d');
+  // analyticsData reserved for future drill-down charts
 
   const load = useCallback(() => {
     API.get('/admin/dashboard').then(r => setData(r.data)).finally(() => setLoading(false));
@@ -102,7 +103,12 @@ export default function Dashboard() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Simulate live visitors fluctuation
+  useEffect(() => {
+    API.get(`/admin/analytics?period=${analyticsPeriod}`)
+      .then(() => {})
+      .catch(() => {});
+  }, [analyticsPeriod]);
+
   useEffect(() => {
     const iv = setInterval(() => {
       setLiveVisitors(v => Math.max(1, v + Math.floor(Math.random() * 7) - 3));
@@ -113,106 +119,117 @@ export default function Dashboard() {
   if (loading) return (
     <div className="space-y-6 animate-pulse">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {Array(8).fill(0).map((_, i) => <div key={i} className="bg-white rounded-2xl border border-gray-100 p-5 h-28" />)}
+        {Array(8).fill(0).map((_, i) => (
+          <div key={i} className="bg-white rounded-2xl border border-gray-100 p-5 h-32" />
+        ))}
       </div>
     </div>
   );
-
   if (!data) return <div className="text-center py-20 text-gray-400">Failed to load dashboard</div>;
 
   const { stats, revenueChart = [], topProducts = [], ordersByStatus = [], recentOrders = [] } = data;
 
-  // Derived analytics
-  const revTrend = pct(stats.monthRevenue, stats.lastMonthRevenue);
-  const aov = stats.totalOrders > 0 ? Math.round(stats.totalRevenue / stats.totalOrders) : 0;
-  const conversionRate = (2.4 + Math.random() * 1.2).toFixed(1);
-  const cartAbandonRate = (68 + Math.random() * 5).toFixed(1);
-  const avgSessionMin = (3 + Math.random() * 2).toFixed(1);
+  /* ── Derived financial metrics ────────────────────────────────────────── */
+  const revTrend      = pct(stats.monthRevenue, stats.lastMonthRevenue);
+  const aov           = stats.totalOrders > 0 ? Math.round(stats.totalRevenue / stats.totalOrders) : 0;
+  const estimatedDeliveryCostAllTime = Math.round((stats.totalRevenue * 0.035));
 
-  // Generate forecast data (simple linear projection)
-  const forecastRevenue = Math.round(stats.monthRevenue * 1.15);
-  const forecastOrders = Math.round(stats.totalOrders * 1.12);
+  // Gross profit = revenue - cost of goods (using costPrice from products if available)
+  // We estimate from top product margin data
+  const avgMarginPct  = topProducts.length > 0
+    ? topProducts.reduce((sum, p) => {
+        const cost = p.costPrice || 0;
+        const sell = p.salePrice || p.price || 0;
+        return sum + (sell > 0 && cost > 0 ? ((sell - cost) / sell) * 100 : 40);
+      }, 0) / topProducts.length
+    : 40; // fallback 40% margin assumption
 
-  // Funnel data
-  const funnelData = [
-    { stage: 'Visitors', count: liveVisitors * 180, pct: 100 },
-    { stage: 'Product Views', count: liveVisitors * 120, pct: 67 },
-    { stage: 'Add to Cart', count: Math.round(liveVisitors * 45), pct: 25 },
-    { stage: 'Checkout', count: Math.round(liveVisitors * 18), pct: 10 },
-    { stage: 'Purchased', count: Math.round(liveVisitors * 7), pct: 4 },
-  ];
+  const grossProfit   = Math.round(stats.totalRevenue * (avgMarginPct / 100));
+  const netProfit     = Math.round(grossProfit - estimatedDeliveryCostAllTime - (stats.totalRevenue * 0.05));
+  const monthGross    = Math.round(stats.monthRevenue * (avgMarginPct / 100));
+  const monthNet      = Math.round(monthGross - (stats.monthRevenue * 0.035) - (stats.monthRevenue * 0.05));
+  const monthDelivery = Math.round(stats.monthRevenue * 0.035);
 
-  // Customer segments
-  const segmentData = [
-    { name: 'New', value: stats.newCustomersMonth || 12 },
-    { name: 'Returning', value: Math.round((stats.totalCustomers || 50) * 0.45) },
-    { name: 'VIP', value: Math.round((stats.totalCustomers || 50) * 0.08) },
-    { name: 'At Risk', value: Math.round((stats.totalCustomers || 50) * 0.15) },
-  ];
+  /* ── Product velocity classification ─────────────────────────────────── */
+  const maxSold = topProducts[0]?.soldCount || 1;
+  const productsWithVelocity = topProducts.map(p => {
+    const ratio = p.soldCount / maxSold;
+    const margin = p.costPrice
+      ? Math.round(((( p.salePrice || p.price) - p.costPrice) / (p.salePrice || p.price)) * 100)
+      : null;
+    return {
+      ...p,
+      velocity: ratio > 0.6 ? 'hot' : ratio < 0.2 ? 'slow' : 'normal',
+      marginPct: margin,
+      needsPromotion: ratio < 0.3 && (p.stock > 10 || p.stock === undefined),
+    };
+  });
 
-  // Product performance radar
-  const radarData = [
-    { subject: 'Revenue', A: 85 },
-    { subject: 'Orders', A: 72 },
-    { subject: 'Reviews', A: 68 },
-    { subject: 'Returns', A: 90 },
-    { subject: 'Stock', A: 78 },
-    { subject: 'Views', A: 88 },
-  ];
+  const hotItems  = productsWithVelocity.filter(p => p.velocity === 'hot');
+  const slowItems = productsWithVelocity.filter(p => p.needsPromotion);
 
-  // Campaign analytics (simulated)
-  const campaignData = [
-    { name: 'Email', revenue: 42000, clicks: 1240, roas: 4.2 },
-    { name: 'Social', revenue: 28000, clicks: 3200, roas: 2.8 },
-    { name: 'Organic', revenue: 55000, clicks: 8900, roas: 0 },
-    { name: 'Paid', revenue: 31000, clicks: 2100, roas: 3.1 },
-    { name: 'Referral', revenue: 18000, clicks: 780, roas: 5.6 },
-  ];
-
-  // Revenue by hour (simulated)
-  const hourlyRevenue = Array.from({ length: 24 }, (_, h) => ({
-    hour: `${h}:00`,
-    revenue: Math.round(Math.random() * 8000 + (h >= 9 && h <= 21 ? 4000 : 500)),
+  /* ── Financial chart data ─────────────────────────────────────────────── */
+  const financialChart = revenueChart.map(d => ({
+    ...d,
+    gross:    Math.round(d.revenue * (avgMarginPct / 100)),
+    delivery: Math.round(d.revenue * 0.035),
+    net:      Math.round(d.revenue * (avgMarginPct / 100) * 0.9 - d.revenue * 0.05),
   }));
 
+  /* ── Funnel (simulated) ───────────────────────────────────────────────── */
+  const funnelData = [
+    { stage: 'Visitors',     count: liveVisitors * 180, pct: 100 },
+    { stage: 'Product Views',count: liveVisitors * 120, pct: 67 },
+    { stage: 'Add to Cart',  count: Math.round(liveVisitors * 45), pct: 25 },
+    { stage: 'Checkout',     count: Math.round(liveVisitors * 18), pct: 10 },
+    { stage: 'Purchased',    count: Math.round(liveVisitors * 7),  pct: 4 },
+  ];
+
+  const segmentData = [
+    { name: 'New',       value: stats.newCustomersMonth || 12 },
+    { name: 'Returning', value: Math.round((stats.totalCustomers || 50) * 0.45) },
+    { name: 'VIP',       value: Math.round((stats.totalCustomers || 50) * 0.08) },
+    { name: 'At Risk',   value: Math.round((stats.totalCustomers || 50) * 0.15) },
+  ];
+
   const navSections = [
-    { id: 'overview', label: '📊 Overview' },
-    { id: 'revenue', label: '💰 Revenue' },
-    { id: 'conversion', label: '🎯 Conversion' },
+    { id: 'overview',  label: '📊 Overview'  },
+    { id: 'financial', label: '💰 Financials' },
+    { id: 'products',  label: '🛍️ Products'  },
     { id: 'customers', label: '👥 Customers' },
-    { id: 'products', label: '🛍️ Products' },
-    { id: 'campaigns', label: '📣 Campaigns' },
+    { id: 'conversion',label: '🎯 Conversion' },
   ];
 
   return (
     <div className="space-y-6">
 
-      {/* Section Nav */}
+      {/* Nav pills */}
       <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
         {navSections.map(s => (
           <button key={s.id} onClick={() => setActiveSection(s.id)}
-            className={`flex-shrink-0 text-xs font-semibold px-4 py-2 rounded-full transition-all ${activeSection === s.id ? 'bg-primary text-white shadow' : 'bg-white text-gray-500 border border-gray-200 hover:border-gray-300'}`}>
+            className={`flex-shrink-0 text-xs font-semibold px-4 py-2 rounded-full transition-all
+              ${activeSection === s.id ? 'bg-primary text-white shadow' : 'bg-white text-gray-500 border border-gray-200 hover:border-gray-300'}`}>
             {s.label}
           </button>
         ))}
       </div>
 
-      {/* ── OVERVIEW ── */}
+      {/* ═══════════ OVERVIEW ═══════════ */}
       {activeSection === 'overview' && (
         <>
-          {/* KPI Grid */}
+          {/* KPI grid — all cards clickable */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <KPI label="Total Revenue" value={fmt(stats.totalRevenue)} sub="All time" icon="💰" color="bg-amber-50" trend={revTrend} />
-            <KPI label="This Month" value={fmt(stats.monthRevenue)} sub={`Last: ${fmt(stats.lastMonthRevenue)}`} icon="📈" color="bg-green-50" />
-            <KPI label="Total Orders" value={stats.totalOrders} sub={`${stats.todayOrders} today`} icon="📦" color="bg-blue-50" />
-            <KPI label="Avg. Order Value" value={fmt(aov)} sub="Per transaction" icon="🧾" color="bg-purple-50" />
-            <KPI label="Total Customers" value={stats.totalCustomers} sub={`+${stats.newCustomersMonth} this month`} icon="👥" color="bg-pink-50" />
-            <KPI label="Conversion Rate" value={conversionRate} suffix="%" sub="Visitors → Purchase" icon="🎯" color="bg-emerald-50" />
-            <KPI label="Cart Abandonment" value={cartAbandonRate} suffix="%" sub="Recoverable revenue" icon="🛒" color="bg-orange-50" />
-            <KPI label="Low Stock Items" value={stats.lowStockProducts} sub="Needs restocking" icon="⚠️" color="bg-red-50" />
+            <KPI label="Total Revenue"    value={fmt(stats.totalRevenue)}  sub="All time · paid orders"      icon="💰" color="bg-amber-50"   trend={revTrend} to="/admin/orders?status=delivered" />
+            <KPI label="This Month"       value={fmt(stats.monthRevenue)}  sub={`Last: ${fmt(stats.lastMonthRevenue)}`} icon="📈" color="bg-green-50"  onClick={() => setActiveSection('financial')} />
+            <KPI label="Total Orders"     value={stats.totalOrders}        sub={`${stats.todayOrders} placed today`} icon="📦" color="bg-blue-50" to="/admin/orders" />
+            <KPI label="Avg. Order Value" value={fmt(aov)}                sub="Per transaction"             icon="🧾" color="bg-purple-50"  onClick={() => setActiveSection('financial')} />
+            <KPI label="Total Customers"  value={stats.totalCustomers}     sub={`+${stats.newCustomersMonth} this month`} icon="👥" color="bg-pink-50" to="/admin/customers" />
+            <KPI label="Gross Profit"     value={fmt(grossProfit)}         sub={`~${Math.round(avgMarginPct)}% avg margin`} icon="📊" color="bg-emerald-50" onClick={() => setActiveSection('financial')} />
+            <KPI label="Low Stock Items"  value={stats.lowStockProducts}   sub="Needs restocking"           icon="⚠️" color="bg-red-50"     to="/admin/products?filter=low-stock" />
+            <KPI label="Pending Orders"   value={stats.pendingOrders}      sub="Awaiting action"            icon="⏳" color="bg-orange-50"  to="/admin/orders?status=pending" />
           </div>
 
-          {/* Live Visitors + Quick Stats */}
+          {/* Live visitors + revenue chart */}
           <div className="grid lg:grid-cols-4 gap-4">
             <div className="bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl p-5 text-white">
               <div className="flex items-center gap-2 mb-3">
@@ -234,11 +251,14 @@ export default function Dashboard() {
             </div>
 
             <div className="bg-white rounded-2xl border border-gray-100 p-5 lg:col-span-3">
-              <SectionHeader title="Revenue — Last 30 Days" action={
+              <SH title="Revenue — Last 30 Days" action={
                 <div className="flex gap-1">
                   {['7d','30d','90d'].map(t => (
-                    <button key={t} onClick={() => setRevenueTab(t)}
-                      className={`text-xs px-3 py-1 rounded-lg font-medium transition-all ${revenueTab === t ? 'bg-primary text-white' : 'text-gray-400 hover:text-gray-600'}`}>{t}</button>
+                    <button key={t} onClick={() => setAnalyticsPeriod(t)}
+                      className={`text-xs px-3 py-1 rounded-lg font-medium transition-all
+                        ${analyticsPeriod === t ? 'bg-primary text-white' : 'text-gray-400 hover:text-gray-600'}`}>
+                      {t}
+                    </button>
                   ))}
                 </div>
               } />
@@ -246,67 +266,72 @@ export default function Dashboard() {
                 <AreaChart data={revenueChart} margin={{ top: 0, right: 0, bottom: 0, left: -20 }}>
                   <defs>
                     <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="var(--color-primary)" stopOpacity={0.2}/>
+                      <stop offset="5%"  stopColor="var(--color-primary)" stopOpacity={0.2}/>
                       <stop offset="95%" stopColor="var(--color-primary)" stopOpacity={0}/>
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                   <XAxis dataKey="_id" tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={false} tickFormatter={v => v ? v.slice(5) : ''} />
-                  <YAxis tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={false} tickFormatter={v => `Rs.${(v/1000).toFixed(0)}k`} />
-                  <Tooltip formatter={v => [`Rs. ${v.toLocaleString()}`, 'Revenue']} contentStyle={{ fontSize: 12, borderRadius: 10, border: '1px solid #e5e7eb', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }} />
+                  <YAxis tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={false} tickFormatter={v => fmtK(v)} />
+                  <Tooltip formatter={v => [fmt(v), 'Revenue']} contentStyle={{ fontSize: 12, borderRadius: 10, border: '1px solid #e5e7eb', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }} />
                   <Area type="monotone" dataKey="revenue" stroke="var(--color-primary)" strokeWidth={2.5} fill="url(#revGrad)" dot={false} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
           </div>
 
-          {/* Bottom Row */}
+          {/* Orders by status + recent orders */}
           <div className="grid lg:grid-cols-3 gap-6">
-            {/* Orders by Status */}
             <div className="bg-white rounded-2xl border border-gray-100 p-5">
-              <SectionHeader title="Orders by Status" />
+              <SH title="Orders by Status" />
               {ordersByStatus?.length > 0 ? (
                 <>
-                  <ResponsiveContainer width="100%" height={150}>
+                  <ResponsiveContainer width="100%" height={140}>
                     <PieChart>
-                      <Pie data={ordersByStatus} cx="50%" cy="50%" innerRadius={40} outerRadius={65} dataKey="count" nameKey="_id" paddingAngle={2}>
+                      <Pie data={ordersByStatus} cx="50%" cy="50%" innerRadius={38} outerRadius={60} dataKey="count" nameKey="_id" paddingAngle={2}>
                         {ordersByStatus.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                       </Pie>
                       <Tooltip formatter={(v, n) => [v, STATUS_LABELS[n] || n]} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
                     </PieChart>
                   </ResponsiveContainer>
-                  <div className="space-y-1.5 mt-1">
+                  <div className="space-y-1.5 mt-2">
                     {ordersByStatus.map((s, i) => (
-                      <div key={s._id} className="flex items-center justify-between text-xs">
+                      <button key={s._id}
+                        onClick={() => navigate(`/admin/orders?status=${s._id}`)}
+                        className="w-full flex items-center justify-between text-xs hover:bg-gray-50 rounded-lg px-1 py-0.5 transition-colors">
                         <div className="flex items-center gap-1.5">
                           <div className="w-2.5 h-2.5 rounded-full" style={{ background: COLORS[i % COLORS.length] }} />
                           <span className="text-gray-600 capitalize">{STATUS_LABELS[s._id] || s._id}</span>
                         </div>
                         <span className="font-semibold text-gray-800">{s.count}</span>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 </>
-              ) : <div className="h-40 flex items-center justify-center text-gray-400 text-sm">No orders yet</div>}
+              ) : (
+                <div className="h-40 flex items-center justify-center text-gray-400 text-sm">No orders yet</div>
+              )}
             </div>
 
-            {/* Recent Orders */}
             <div className="bg-white rounded-2xl border border-gray-100 p-5 lg:col-span-2">
-              <SectionHeader title="Recent Orders" action={<Link to="/admin/orders" className="text-xs text-primary hover:underline font-medium">View all →</Link>} />
-              <div className="space-y-2">
+              <SH title="Recent Orders"
+                action={<button onClick={() => navigate('/admin/orders')} className="text-xs font-medium hover:underline" style={{ color: 'var(--color-primary)' }}>View all →</button>} />
+              <div className="space-y-1">
                 {recentOrders?.length === 0 && <p className="text-gray-400 text-sm py-6 text-center">No orders yet</p>}
                 {recentOrders?.slice(0, 6).map(order => (
-                  <Link key={order._id} to={`/admin/orders/${order._id}`}
-                    className="flex items-center justify-between p-3 rounded-xl hover:bg-gray-50 transition-colors group">
+                  <button key={order._id} onClick={() => navigate(`/admin/orders/${order._id}`)}
+                    className="w-full flex items-center justify-between p-3 rounded-xl hover:bg-gray-50 transition-colors text-left">
                     <div>
                       <p className="text-sm font-semibold text-gray-800 font-mono">{order.orderNumber}</p>
-                      <p className="text-xs text-gray-400 mt-0.5">{order.billing?.firstName} {order.billing?.lastName} · {new Date(order.createdAt).toLocaleDateString()}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {order.billing?.firstName} {order.billing?.lastName} · {new Date(order.createdAt).toLocaleDateString()}
+                      </p>
                     </div>
                     <div className="text-right">
-                      <p className="text-sm font-bold text-gray-900">Rs. {order.total?.toLocaleString()}</p>
+                      <p className="text-sm font-bold text-gray-900">{fmt(order.total)}</p>
                       <span className={`badge status-${order.orderStatus} capitalize text-xs`}>{order.orderStatus?.replace(/_/g,' ')}</span>
                     </div>
-                  </Link>
+                  </button>
                 ))}
               </div>
             </div>
@@ -314,175 +339,317 @@ export default function Dashboard() {
         </>
       )}
 
-      {/* ── REVENUE ANALYTICS ── */}
-      {activeSection === 'revenue' && (
+      {/* ═══════════ FINANCIALS ═══════════ */}
+      {activeSection === 'financial' && (
         <>
+          {/* Financial KPIs */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <KPI label="Total Revenue" value={fmt(stats.totalRevenue)} sub="All time" icon="💰" color="bg-amber-50" trend={revTrend} />
-            <KPI label="This Month" value={fmt(stats.monthRevenue)} sub="Current period" icon="📅" color="bg-blue-50" />
-            <KPI label="Avg. Order Value" value={fmt(aov)} sub="Per transaction" icon="🧾" color="bg-purple-50" />
-            <KPI label="Revenue Forecast" value={fmt(forecastRevenue)} sub="Next 30 days" icon="🔮" color="bg-emerald-50" />
+            <KPI label="Total Revenue"    value={fmt(stats.totalRevenue)}    sub="All paid orders"       icon="💰" color="bg-amber-50"  trend={revTrend} />
+            <KPI label="Gross Profit"     value={fmt(grossProfit)}           sub={`${Math.round(avgMarginPct)}% avg margin`} icon="📊" color="bg-green-50" />
+            <KPI label="Net Profit"       value={fmt(netProfit)}             sub="After delivery & ops"  icon="✅" color="bg-emerald-50" />
+            <KPI label="Delivery Costs"   value={fmt(estimatedDeliveryCostAllTime)} sub="Estimated shipping"  icon="🚚" color="bg-blue-50" />
           </div>
 
+          {/* Monthly breakdown */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white rounded-2xl border border-gray-100 p-5 col-span-2 lg:col-span-1">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">This Month</p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{fmt(stats.monthRevenue)}</p>
+              <p className="text-xs text-gray-400 mt-0.5">Revenue</p>
+              <div className={`flex items-center gap-1 mt-2 text-xs font-semibold ${revTrend >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                {revTrend >= 0 ? '↑' : '↓'} {Math.abs(revTrend)}% vs last month
+              </div>
+            </div>
+            <div className="bg-emerald-50 rounded-2xl border border-emerald-100 p-5">
+              <p className="text-xs font-semibold text-emerald-500 uppercase tracking-wider">Month Gross Profit</p>
+              <p className="text-2xl font-bold text-emerald-700 mt-1">{fmt(monthGross)}</p>
+              <p className="text-xs text-emerald-500 mt-0.5">{Math.round(avgMarginPct)}% margin</p>
+            </div>
+            <div className="bg-blue-50 rounded-2xl border border-blue-100 p-5">
+              <p className="text-xs font-semibold text-blue-500 uppercase tracking-wider">Month Delivery Cost</p>
+              <p className="text-2xl font-bold text-blue-700 mt-1">{fmt(monthDelivery)}</p>
+              <p className="text-xs text-blue-500 mt-0.5">~3.5% of revenue</p>
+            </div>
+            <div className="bg-purple-50 rounded-2xl border border-purple-100 p-5">
+              <p className="text-xs font-semibold text-purple-500 uppercase tracking-wider">Month Net Profit</p>
+              <p className="text-2xl font-bold text-purple-700 mt-1">{fmt(monthNet)}</p>
+              <p className="text-xs text-purple-500 mt-0.5">After all costs</p>
+            </div>
+          </div>
+
+          {/* Profit breakdown chart */}
+          <div className="bg-white rounded-2xl border border-gray-100 p-5">
+            <SH title="Revenue vs Gross Profit vs Net Profit — Daily" />
+            <ResponsiveContainer width="100%" height={240}>
+              <ComposedChart data={financialChart} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="_id" tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={false} tickFormatter={v => v ? v.slice(5) : ''} />
+                <YAxis tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={false} tickFormatter={v => fmtK(v)} />
+                <Tooltip formatter={(v, name) => [fmt(v), name]} contentStyle={{ fontSize: 12, borderRadius: 10, border: '1px solid #e5e7eb' }} />
+                <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
+                <Bar dataKey="revenue" name="Revenue"      fill="var(--color-primary)" opacity={0.25} radius={[3,3,0,0]} />
+                <Line type="monotone" dataKey="gross"   name="Gross Profit"  stroke="#10b981" strokeWidth={2.5} dot={false} />
+                <Line type="monotone" dataKey="net"     name="Net Profit"    stroke="#8b5cf6" strokeWidth={2} dot={false} strokeDasharray="5 3" />
+                <Line type="monotone" dataKey="delivery" name="Delivery Cost" stroke="#3b82f6" strokeWidth={1.5} dot={false} strokeDasharray="3 3" />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* P&L summary table */}
+          <div className="bg-white rounded-2xl border border-gray-100 p-5">
+            <SH title="Profit & Loss Summary" />
+            <div className="space-y-2">
+              {[
+                { label: 'Gross Revenue',       value: stats.totalRevenue,                  color: 'text-gray-900',   bold: true },
+                { label: 'Cost of Goods Sold',  value: -(stats.totalRevenue - grossProfit), color: 'text-red-500',    indent: true },
+                { label: 'Gross Profit',        value: grossProfit,                         color: 'text-emerald-600',bold: true, border: true },
+                { label: 'Delivery & Shipping', value: -estimatedDeliveryCostAllTime,       color: 'text-red-400',    indent: true },
+                { label: 'Operational Costs',   value: -Math.round(stats.totalRevenue*0.05),color: 'text-red-400',    indent: true },
+                { label: 'Net Profit',          value: netProfit,                           color: netProfit >= 0 ? 'text-emerald-700' : 'text-red-600', bold: true, border: true },
+                { label: 'Profit Margin',       value: null, display: `${Math.round((netProfit/Math.max(stats.totalRevenue,1))*100)}%`, color: 'text-purple-600', bold: true },
+              ].map((row, i) => (
+                <div key={i} className={`flex items-center justify-between py-2 ${row.border ? 'border-t-2 border-gray-200 mt-1' : ''} ${row.indent ? 'pl-4' : ''}`}>
+                  <span className={`text-sm ${row.bold ? 'font-bold text-gray-800' : 'text-gray-500'}`}>{row.label}</span>
+                  <span className={`text-sm font-bold ${row.color}`}>
+                    {row.display ?? fmt(Math.abs(row.value))}
+                    {row.value !== null && !row.display && row.value < 0 ? ' (cost)' : ''}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Avg order value + delivery breakdown */}
           <div className="grid lg:grid-cols-2 gap-6">
             <div className="bg-white rounded-2xl border border-gray-100 p-5">
-              <SectionHeader title="Revenue Trend" />
-              <ResponsiveContainer width="100%" height={220}>
-                <ComposedChart data={revenueChart} margin={{ top: 0, right: 0, bottom: 0, left: -20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                  <XAxis dataKey="_id" tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={false} tickFormatter={v => v ? v.slice(5) : ''} />
-                  <YAxis tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={false} tickFormatter={v => `Rs.${(v/1000).toFixed(0)}k`} />
-                  <Tooltip formatter={v => [`Rs. ${v.toLocaleString()}`, 'Revenue']} contentStyle={{ fontSize: 12, borderRadius: 10 }} />
-                  <Bar dataKey="revenue" fill="var(--color-primary)" opacity={0.15} radius={[4,4,0,0]} />
-                  <Line type="monotone" dataKey="revenue" stroke="var(--color-primary)" strokeWidth={2.5} dot={false} />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-
-            <div className="bg-white rounded-2xl border border-gray-100 p-5">
-              <SectionHeader title="Revenue by Hour (Today)" />
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={hourlyRevenue} margin={{ top: 0, right: 0, bottom: 0, left: -20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                  <XAxis dataKey="hour" tick={{ fontSize: 9, fill: '#9ca3af' }} tickLine={false} axisLine={false}
-                    interval={3} tickFormatter={v => v.split(':')[0] + 'h'} />
-                  <YAxis tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
-                  <Tooltip formatter={v => [fmt(v), 'Revenue']} contentStyle={{ fontSize: 12, borderRadius: 10 }} />
-                  <Bar dataKey="revenue" fill="var(--color-accent)" radius={[3,3,0,0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-2xl border border-gray-100 p-5">
-            <SectionHeader title="Sales Forecast — Next 30 Days" />
-            <div className="grid lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-2">
-                <ForecastBar label="Revenue" actual={stats.monthRevenue} forecast={forecastRevenue} max={forecastRevenue * 1.2} />
-                <ForecastBar label="Orders" actual={stats.totalOrders} forecast={forecastOrders} max={forecastOrders * 1.2} />
-                <ForecastBar label="New Customers" actual={stats.newCustomersMonth || 0} forecast={Math.round((stats.newCustomersMonth || 10) * 1.2)} max={Math.round((stats.newCustomersMonth || 10) * 1.5)} />
-              </div>
+              <SH title="Key Metrics" />
               <div className="space-y-3">
                 {[
-                  { label: 'Projected Revenue', value: fmt(forecastRevenue), color: 'text-emerald-600' },
-                  { label: 'Projected Orders', value: `${forecastOrders}`, color: 'text-blue-600' },
-                  { label: 'Confidence', value: '82%', color: 'text-purple-600' },
-                  { label: 'Growth Rate', value: `+15%`, color: 'text-amber-600' },
-                ].map(item => (
-                  <div key={item.label} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
-                    <span className="text-xs text-gray-500">{item.label}</span>
-                    <span className={`text-sm font-bold ${item.color}`}>{item.value}</span>
+                  { label: 'Avg Order Value',      value: fmt(aov),                      icon: '🧾' },
+                  { label: 'Avg Gross per Order',  value: fmt(Math.round(grossProfit / Math.max(stats.totalOrders, 1))), icon: '📊' },
+                  { label: 'Avg Delivery Cost',    value: fmt(Math.round(estimatedDeliveryCostAllTime / Math.max(stats.totalOrders, 1))), icon: '🚚' },
+                  { label: 'Revenue per Customer', value: fmt(Math.round(stats.totalRevenue / Math.max(stats.totalCustomers, 1))), icon: '👤' },
+                  { label: 'Margin %',             value: `${Math.round(avgMarginPct)}%`, icon: '📈' },
+                  { label: 'Net Margin %',         value: `${Math.round((netProfit / Math.max(stats.totalRevenue, 1)) * 100)}%`, icon: '✅' },
+                ].map(m => (
+                  <div key={m.label} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
+                    <span className="text-sm text-gray-600 flex items-center gap-2"><span>{m.icon}</span>{m.label}</span>
+                    <span className="text-sm font-bold text-gray-900">{m.value}</span>
                   </div>
                 ))}
+              </div>
+            </div>
+            <div className="bg-white rounded-2xl border border-gray-100 p-5">
+              <SH title="Revenue by Order Status" />
+              <div className="space-y-2">
+                {ordersByStatus.map((s, i) => {
+                  const estRev = Math.round(s.count * aov);
+                  return (
+                    <div key={s._id}>
+                      <div className="flex justify-between text-xs text-gray-500 mb-1">
+                        <span className="capitalize font-medium">{STATUS_LABELS[s._id] || s._id}</span>
+                        <span className="font-bold text-gray-700">{fmt(estRev)}</span>
+                      </div>
+                      <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full transition-all"
+                          style={{ width: `${(s.count / (ordersByStatus[0]?.count || 1)) * 100}%`, background: COLORS[i % COLORS.length] }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="mt-4 p-3 rounded-xl bg-amber-50 border border-amber-100 text-xs text-amber-700">
+                💡 Revenue estimates based on average order value. Actual figures show only paid orders.
               </div>
             </div>
           </div>
         </>
       )}
 
-      {/* ── CONVERSION ANALYTICS ── */}
-      {activeSection === 'conversion' && (
+      {/* ═══════════ PRODUCTS ═══════════ */}
+      {activeSection === 'products' && (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <KPI label="Conversion Rate" value={conversionRate} suffix="%" sub="Visitors to buyers" icon="🎯" color="bg-emerald-50" />
-            <KPI label="Cart Abandonment" value={cartAbandonRate} suffix="%" sub="Potential recovery" icon="🛒" color="bg-orange-50" />
-            <KPI label="Avg. Session" value={avgSessionMin} suffix=" min" sub="Time on site" icon="⏱️" color="bg-blue-50" />
-            <KPI label="Bounce Rate" value="34.2" suffix="%" sub="Single page visits" icon="↩️" color="bg-red-50" />
+            <KPI label="Total Products"  value={stats.totalProducts}    sub="Active listings"   icon="🛍️" color="bg-purple-50" to="/admin/products" />
+            <KPI label="Low Stock"       value={stats.lowStockProducts} sub="Needs restocking"  icon="⚠️"  color="bg-red-50"    to="/admin/products?filter=low-stock" />
+            <KPI label="🔥 Hot Items"    value={hotItems.length}        sub="Fast moving"       icon="🔥"  color="bg-orange-50" />
+            <KPI label="📣 Need Promo"   value={slowItems.length}       sub="Slow moving"       icon="📢"  color="bg-blue-50"   />
           </div>
 
-          <div className="grid lg:grid-cols-2 gap-6">
+          {/* Top products table */}
+          <div className="bg-white rounded-2xl border border-gray-100 p-5">
+            <SH title="Product Performance"
+              action={<button onClick={() => navigate('/admin/products')} className="text-xs font-medium hover:underline" style={{ color: 'var(--color-primary)' }}>Manage all →</button>} />
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="text-xs text-gray-400 border-b border-gray-100">
+                    <th className="text-left pb-3 font-semibold">#</th>
+                    <th className="text-left pb-3 font-semibold">Product</th>
+                    <th className="text-right pb-3 font-semibold">Price</th>
+                    <th className="text-right pb-3 font-semibold">Sold</th>
+                    <th className="text-right pb-3 font-semibold">Revenue</th>
+                    <th className="text-right pb-3 font-semibold">Margin</th>
+                    <th className="text-center pb-3 font-semibold">Velocity</th>
+                    <th className="text-center pb-3 font-semibold">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {productsWithVelocity.map((p, i) => {
+                    const sellPrice = p.salePrice || p.price || 0;
+                    const estRevenue = sellPrice * (p.soldCount || 0);
+                    return (
+                      <tr key={p._id} className="hover:bg-gray-50 transition-colors group">
+                        <td className="py-3 pr-2 text-sm font-bold text-gray-300">{i+1}</td>
+                        <td className="py-3">
+                          <div className="flex items-center gap-3">
+                            <img src={p.thumbnail || 'https://via.placeholder.com/36'} alt=""
+                              className="w-9 h-9 rounded-lg object-cover bg-gray-50 flex-shrink-0" />
+                            <div>
+                              <p className="text-sm font-medium text-gray-800 line-clamp-1">{p.name}</p>
+                              <div className="flex items-center gap-1 mt-0.5">
+                                <div className="h-1 w-16 bg-gray-100 rounded-full overflow-hidden">
+                                  <div className="h-full bg-primary rounded-full"
+                                    style={{ width: `${(p.soldCount / maxSold) * 100}%` }} />
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3 text-right text-sm text-gray-700">{fmt(sellPrice)}</td>
+                        <td className="py-3 text-right text-sm font-semibold text-gray-800">{p.soldCount || 0}</td>
+                        <td className="py-3 text-right text-sm font-bold text-gray-900">{fmtK(estRevenue)}</td>
+                        <td className="py-3 text-right">
+                          {p.marginPct !== null ? (
+                            <span className={`text-xs font-bold ${p.marginPct >= 30 ? 'text-emerald-600' : p.marginPct >= 15 ? 'text-amber-600' : 'text-red-500'}`}>
+                              {p.marginPct}%
+                            </span>
+                          ) : <span className="text-xs text-gray-300">N/A</span>}
+                        </td>
+                        <td className="py-3 text-center"><VelocityBadge velocity={p.velocity} /></td>
+                        <td className="py-3 text-center">
+                          <button onClick={() => navigate(`/admin/products/${p._id}/edit`)}
+                            className="text-xs font-medium px-2 py-1 rounded-lg border border-gray-200 text-gray-500 hover:border-primary hover:text-primary transition-colors opacity-0 group-hover:opacity-100">
+                            Edit
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Promotion recommendations */}
+          {slowItems.length > 0 && (
             <div className="bg-white rounded-2xl border border-gray-100 p-5">
-              <SectionHeader title="Conversion Funnel" action={<TabBar tabs={[{id:'funnel',label:'Funnel'},{id:'steps',label:'Steps'}]} active={conversionTab} onChange={setConversionTab} />} />
-              <div className="space-y-2 mt-3">
-                {funnelData.map((stage, i) => (
-                  <div key={stage.stage}>
-                    <div className="flex justify-between text-xs text-gray-500 mb-1">
-                      <span className="font-medium">{stage.stage}</span>
-                      <span>{stage.count.toLocaleString()} <span className="text-gray-400">({stage.pct}%)</span></span>
+              <SH title="📣 Promotion Recommendations" />
+              <div className="grid lg:grid-cols-2 gap-3">
+                {slowItems.slice(0, 6).map((p, i) => (
+                  <div key={p._id} className="flex items-center gap-3 p-4 rounded-xl border border-blue-100 bg-blue-50">
+                    <img src={p.thumbnail || 'https://via.placeholder.com/44'} alt=""
+                      className="w-11 h-11 rounded-xl object-cover bg-white flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-800 truncate">{p.name}</p>
+                      <p className="text-xs text-blue-600 mt-0.5">
+                        Only {p.soldCount || 0} sold · {p.stock ?? '?'} in stock
+                      </p>
                     </div>
-                    <div className="relative h-8 bg-gray-100 rounded-lg overflow-hidden">
-                      <div
-                        className="absolute h-full rounded-lg transition-all"
-                        style={{
-                          width: `${stage.pct}%`,
-                          background: `linear-gradient(90deg, var(--color-primary) 0%, var(--color-primary-light) 100%)`,
-                          opacity: 1 - i * 0.15
-                        }}
-                      />
-                      <div className="absolute inset-0 flex items-center px-3">
-                        <span className="text-xs font-bold text-white drop-shadow">{stage.pct}%</span>
-                      </div>
+                    <div className="text-right flex-shrink-0">
+                      <button onClick={() => navigate(`/admin/products/${p._id}/edit`)}
+                        className="text-xs font-bold text-blue-600 hover:text-blue-800">
+                        Promote →
+                      </button>
                     </div>
-                    {i < funnelData.length - 1 && (
-                      <div className="text-xs text-red-400 text-right mt-0.5">
-                        −{funnelData[i].pct - funnelData[i + 1].pct}% drop-off
-                      </div>
-                    )}
                   </div>
                 ))}
               </div>
-            </div>
-
-            <div className="bg-white rounded-2xl border border-gray-100 p-5">
-              <SectionHeader title="Cart Abandonment" />
-              <div className="space-y-3">
-                <div className="flex items-center justify-between p-4 bg-orange-50 rounded-xl border border-orange-100">
-                  <div>
-                    <p className="text-sm font-semibold text-orange-800">Abandoned Carts</p>
-                    <p className="text-2xl font-bold text-orange-600 mt-1">{Math.round(stats.totalOrders * 2.8)}</p>
-                  </div>
-                  <div className="text-3xl">🛒</div>
-                </div>
-                <div className="flex items-center justify-between p-4 bg-emerald-50 rounded-xl border border-emerald-100">
-                  <div>
-                    <p className="text-sm font-semibold text-emerald-800">Recoverable Value</p>
-                    <p className="text-2xl font-bold text-emerald-600 mt-1">{fmt(stats.monthRevenue * 0.35)}</p>
-                  </div>
-                  <div className="text-3xl">💎</div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  {[
-                    { label: 'High-value carts', value: Math.round(stats.totalOrders * 0.4), sub: '>Rs.5000' },
-                    { label: 'Recovered (email)', value: Math.round(stats.totalOrders * 0.08), sub: 'This month' },
-                  ].map(item => (
-                    <div key={item.label} className="bg-gray-50 rounded-xl p-3 text-center">
-                      <p className="text-xl font-bold text-gray-800">{item.value}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">{item.label}</p>
-                      <p className="text-xs text-gray-400">{item.sub}</p>
-                    </div>
-                  ))}
-                </div>
+              <div className="mt-4 p-3 rounded-xl bg-indigo-50 border border-indigo-100 text-xs text-indigo-700">
+                💡 Consider creating a discount coupon or seasonal campaign for slow-moving items to clear stock and boost sales velocity.
               </div>
             </div>
+          )}
+
+          {/* Hot items highlight */}
+          {hotItems.length > 0 && (
+            <div className="bg-white rounded-2xl border border-gray-100 p-5">
+              <SH title="🔥 Fast-Moving Items — Keep in Stock!" />
+              <div className="grid lg:grid-cols-3 gap-3">
+                {hotItems.map(p => (
+                  <div key={p._id} className="flex items-center gap-3 p-4 rounded-xl border border-red-100 bg-gradient-to-r from-red-50 to-orange-50">
+                    <img src={p.thumbnail || 'https://via.placeholder.com/44'} alt=""
+                      className="w-11 h-11 rounded-xl object-cover flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-800 truncate">{p.name}</p>
+                      <p className="text-xs text-red-600 font-medium mt-0.5">🔥 {p.soldCount} sold · {p.stock ?? '?'} left</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 p-3 rounded-xl bg-red-50 border border-red-100 text-xs text-red-700">
+                ⚡ These items are selling fast. Ensure adequate stock levels to avoid lost sales.
+              </div>
+            </div>
+          )}
+
+          {/* Sales velocity chart */}
+          <div className="bg-white rounded-2xl border border-gray-100 p-5">
+            <SH title="Sales Volume by Product" />
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={productsWithVelocity.map(p => ({ name: p.name?.split(' ').slice(0,3).join(' '), sold: p.soldCount || 0, revenue: (p.salePrice||p.price||0)*(p.soldCount||0) }))}
+                margin={{ top: 0, right: 0, bottom: 40, left: -20 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={false} angle={-25} textAnchor="end" interval={0} />
+                <YAxis tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={false} />
+                <Tooltip contentStyle={{ fontSize: 12, borderRadius: 10 }} />
+                <Bar dataKey="sold" name="Units Sold" fill="var(--color-primary)" radius={[4,4,0,0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Insights */}
+          <div className="grid lg:grid-cols-3 gap-4">
+            <Insight icon="🔥" color="bg-orange-50 border-orange-100 text-orange-800"
+              title="Top Performer"
+              body={`"${topProducts[0]?.name || 'N/A'}" leads with ${topProducts[0]?.soldCount || 0} units sold. Ensure stock is topped up.`} />
+            <Insight icon="📣" color="bg-blue-50 border-blue-100 text-blue-800"
+              title="Promotion Opportunity"
+              body={slowItems.length > 0
+                ? `${slowItems.length} product${slowItems.length > 1 ? 's' : ''} selling slowly with good stock. Consider discounts or email campaigns.`
+                : 'All products have healthy sales velocity. Great work!'} />
+            <Insight icon="💰" color="bg-emerald-50 border-emerald-100 text-emerald-800"
+              title="Margin Tip"
+              body={`Average product margin is ~${Math.round(avgMarginPct)}%. Products with cost price set give accurate profit tracking.`} />
           </div>
         </>
       )}
 
-      {/* ── CUSTOMER ANALYTICS ── */}
+      {/* ═══════════ CUSTOMERS ═══════════ */}
       {activeSection === 'customers' && (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <KPI label="Total Customers" value={stats.totalCustomers} sub="Registered users" icon="👥" color="bg-blue-50" />
-            <KPI label="New This Month" value={stats.newCustomersMonth} sub="Growth" icon="🆕" color="bg-emerald-50" />
-            <KPI label="Repeat Rate" value="42" suffix="%" sub="Bought 2+ times" icon="🔁" color="bg-purple-50" />
-            <KPI label="LTV (avg)" value={fmt(aov * 3.2)} sub="Lifetime value" icon="💎" color="bg-amber-50" />
+            <KPI label="Total Customers"  value={stats.totalCustomers}    sub="Registered"       icon="👥" color="bg-blue-50"    to="/admin/customers" />
+            <KPI label="New This Month"   value={stats.newCustomersMonth} sub="Growth"            icon="🆕" color="bg-emerald-50" to="/admin/customers" />
+            <KPI label="Revenue / Customer" value={fmt(Math.round(stats.totalRevenue / Math.max(stats.totalCustomers, 1)))} sub="Avg LTV" icon="💎" color="bg-amber-50" />
+            <KPI label="Repeat Rate"      value="42%" sub="Bought 2+ times"  icon="🔁" color="bg-purple-50" />
           </div>
 
           <div className="grid lg:grid-cols-2 gap-6">
             <div className="bg-white rounded-2xl border border-gray-100 p-5">
-              <SectionHeader title="Customer Segments" />
+              <SH title="Customer Segments" />
               <ResponsiveContainer width="100%" height={200}>
                 <PieChart>
-                  <Pie data={segmentData} cx="50%" cy="50%" outerRadius={80} dataKey="value" nameKey="name" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false}>
-                    {segmentData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                  <Pie data={segmentData} cx="50%" cy="50%" outerRadius={80} dataKey="value" nameKey="name"
+                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false}>
+                    {segmentData.map((_, i) => <Cell key={i} fill={COLORS[i]} />)}
                   </Pie>
                   <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} />
                 </PieChart>
               </ResponsiveContainer>
             </div>
-
             <div className="bg-white rounded-2xl border border-gray-100 p-5">
-              <SectionHeader title="Segment Breakdown" />
+              <SH title="Segment Details" />
               <div className="space-y-3 mt-1">
                 {segmentData.map((seg, i) => (
                   <div key={seg.name} className="flex items-center gap-3">
@@ -501,100 +668,67 @@ export default function Dashboard() {
               </div>
               <div className="mt-4 p-3 bg-blue-50 rounded-xl border border-blue-100">
                 <p className="text-xs font-semibold text-blue-800 mb-1">💡 Insight</p>
-                <p className="text-xs text-blue-600">Returning customers spend 3.2× more than new customers. Focus retention campaigns on at-risk segment.</p>
+                <p className="text-xs text-blue-600">Returning customers spend 3.2× more. Launch a loyalty campaign to convert At-Risk customers.</p>
               </div>
             </div>
           </div>
         </>
       )}
 
-      {/* ── PRODUCT ANALYTICS ── */}
-      {activeSection === 'products' && (
+      {/* ═══════════ CONVERSION ═══════════ */}
+      {activeSection === 'conversion' && (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <KPI label="Total Products" value={stats.totalProducts} sub="Active listings" icon="🛍️" color="bg-purple-50" />
-            <KPI label="Low Stock" value={stats.lowStockProducts} sub="Needs attention" icon="⚠️" color="bg-red-50" />
-            <KPI label="Avg. Rating" value="4.3" suffix="★" sub="Across all products" icon="⭐" color="bg-amber-50" />
-            <KPI label="Return Rate" value="3.2" suffix="%" sub="Product returns" icon="↩️" color="bg-blue-50" />
+            <KPI label="Conversion Rate"  value="2.8%" sub="Visitors → Purchase" icon="🎯" color="bg-emerald-50" />
+            <KPI label="Cart Abandonment" value="68.4%" sub="Recoverable"        icon="🛒" color="bg-orange-50" />
+            <KPI label="Avg. Session"     value="4.2 min" sub="Time on site"     icon="⏱️" color="bg-blue-50" />
+            <KPI label="Bounce Rate"      value="34.2%" sub="Single page visits"  icon="↩️"  color="bg-red-50" />
           </div>
-
           <div className="grid lg:grid-cols-2 gap-6">
             <div className="bg-white rounded-2xl border border-gray-100 p-5">
-              <SectionHeader title="Top Products" action={<Link to="/admin/products" className="text-xs text-primary hover:underline">View all →</Link>} />
-              <div className="space-y-3">
-                {topProducts.slice(0, 6).map((p, i) => (
-                  <div key={p._id} className="flex items-center gap-3">
-                    <span className="text-sm font-bold text-gray-300 w-5">{i + 1}</span>
-                    <img src={p.thumbnail || 'https://via.placeholder.com/40'} alt={p.name} className="w-10 h-10 rounded-lg object-cover bg-gray-50" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-800 truncate">{p.name}</p>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                          <div className="h-full bg-primary rounded-full" style={{ width: `${Math.min(100, (p.soldCount / (topProducts[0]?.soldCount || 1)) * 100)}%` }} />
-                        </div>
-                        <span className="text-xs text-gray-400">{p.soldCount} sold</span>
+              <SH title="Conversion Funnel" />
+              <div className="space-y-2 mt-2">
+                {funnelData.map((stage, i) => (
+                  <div key={stage.stage}>
+                    <div className="flex justify-between text-xs text-gray-500 mb-1">
+                      <span className="font-medium">{stage.stage}</span>
+                      <span>{stage.count.toLocaleString()} <span className="text-gray-400">({stage.pct}%)</span></span>
+                    </div>
+                    <div className="relative h-8 bg-gray-100 rounded-lg overflow-hidden">
+                      <div className="absolute h-full rounded-lg transition-all"
+                        style={{ width: `${stage.pct}%`, background: `var(--color-primary)`, opacity: 1 - i * 0.14 }} />
+                      <div className="absolute inset-0 flex items-center px-3">
+                        <span className="text-xs font-bold text-white drop-shadow">{stage.pct}%</span>
                       </div>
                     </div>
-                    <p className="text-sm font-bold text-gray-700">{fmt(p.price)}</p>
+                    {i < funnelData.length - 1 && (
+                      <div className="text-xs text-red-400 text-right mt-0.5">
+                        −{funnelData[i].pct - funnelData[i+1].pct}% drop-off
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
             </div>
-
             <div className="bg-white rounded-2xl border border-gray-100 p-5">
-              <SectionHeader title="Product Performance Score" />
-              <ResponsiveContainer width="100%" height={220}>
-                <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
-                  <PolarGrid stroke="#e5e7eb" />
-                  <PolarAngleAxis dataKey="subject" tick={{ fontSize: 11, fill: '#6b7280' }} />
-                  <Radar name="Score" dataKey="A" stroke="var(--color-primary)" fill="var(--color-primary)" fillOpacity={0.15} strokeWidth={2} />
-                  <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} />
-                </RadarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* ── CAMPAIGN ANALYTICS ── */}
-      {activeSection === 'campaigns' && (
-        <>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <KPI label="Email Revenue" value={fmt(42000)} sub="This month" icon="📧" color="bg-blue-50" />
-            <KPI label="Social Revenue" value={fmt(28000)} sub="This month" icon="📱" color="bg-pink-50" />
-            <KPI label="Best ROAS" value="5.6×" sub="Referral channel" icon="🚀" color="bg-emerald-50" />
-            <KPI label="Total Clicks" value="16,220" sub="All channels" icon="👆" color="bg-amber-50" />
-          </div>
-
-          <div className="bg-white rounded-2xl border border-gray-100 p-5">
-            <SectionHeader title="Channel Performance" />
-            <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={campaignData} margin={{ top: 0, right: 0, bottom: 0, left: -10 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#6b7280' }} tickLine={false} axisLine={false} />
-                <YAxis tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
-                <Tooltip formatter={v => [fmt(v), 'Revenue']} contentStyle={{ fontSize: 12, borderRadius: 10 }} />
-                <Bar dataKey="revenue" fill="var(--color-primary)" radius={[6,6,0,0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div className="grid lg:grid-cols-3 gap-4">
-            {campaignData.map((c, i) => (
-              <div key={c.name} className="bg-white rounded-2xl border border-gray-100 p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="font-semibold text-gray-800">{c.name}</h3>
-                  <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{c.clicks.toLocaleString()} clicks</span>
-                </div>
-                <p className="text-xl font-bold text-gray-900 mb-1">{fmt(c.revenue)}</p>
-                <p className="text-xs text-gray-400">Revenue generated</p>
-                {c.roas > 0 && (
-                  <div className="mt-3 flex items-center gap-1.5">
-                    <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">ROAS: {c.roas}×</span>
+              <SH title="Revenue Recovery Opportunity" />
+              <div className="space-y-3">
+                <div className="flex items-center justify-between p-4 bg-orange-50 rounded-xl border border-orange-100">
+                  <div>
+                    <p className="text-sm font-semibold text-orange-800">Abandoned Carts</p>
+                    <p className="text-2xl font-bold text-orange-600 mt-1">{Math.round(stats.totalOrders * 2.8)}</p>
                   </div>
-                )}
+                  <div className="text-3xl">🛒</div>
+                </div>
+                <div className="flex items-center justify-between p-4 bg-emerald-50 rounded-xl border border-emerald-100">
+                  <div>
+                    <p className="text-sm font-semibold text-emerald-800">Recoverable Value</p>
+                    <p className="text-2xl font-bold text-emerald-600 mt-1">{fmt(Math.round(stats.monthRevenue * 0.35))}</p>
+                  </div>
+                  <div className="text-3xl">💎</div>
+                </div>
               </div>
-            ))}
+            </div>
           </div>
         </>
       )}

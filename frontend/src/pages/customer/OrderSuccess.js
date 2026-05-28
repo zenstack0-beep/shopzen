@@ -1,8 +1,186 @@
-import React, { useEffect, useState } from 'react';
-import { useParams, useSearchParams, Link } from 'react-router-dom';
+import React, { useEffect, useState, useCallback } from 'react';
+import { useParams, useSearchParams, Link, useNavigate } from 'react-router-dom';
 import API from '../../utils/api';
 import { useTheme } from '../../context/ThemeContext';
 import useSEO, { trackPurchase } from '../../hooks/useSEO';
+import toast from 'react-hot-toast';
+
+
+// ── Cancel helpers (shared with OrderTracking) ────────────────────────────────
+// Returns:
+//   null                              → settings not yet loaded
+//   { eligible: false }               → order not in cancellable status
+//   { eligible: true, open: false }   → window expired OR cancellations disabled
+//   { eligible: true, open: true, minutes, seconds, totalMs } → active timed window
+function useCancelCountdownOT(orderId, orderCreatedAt, orderStatus, cancelRequested, windowMinutes) {
+  const [state, setState] = React.useState(null);
+  React.useEffect(() => {
+    const cancellable = ['pending', 'confirmed'];
+
+    // Not a cancellable status — hide button entirely
+    if (!cancellable.includes(orderStatus)) { setState({ eligible: false }); return; }
+
+    // Already has a cancel request — show badge not button
+    if (cancelRequested) { setState({ eligible: true, open: false, hasCancelRequest: true }); return; }
+
+    // Settings not yet loaded
+    if (windowMinutes === null || windowMinutes === undefined) { setState(null); return; }
+
+    const winNum = Number(windowMinutes);
+
+    // Admin disabled cancellations
+    if (winNum === 0) { setState({ eligible: true, open: false }); return; }
+
+    // Guard invalid createdAt
+    const placed = new Date(orderCreatedAt).getTime();
+    if (!isFinite(placed) || placed <= 0) { setState({ eligible: true, open: false }); return; }
+
+    const deadline = placed + winNum * 60 * 1000;
+    const tick = () => {
+      const diff = deadline - Date.now();
+      if (!isFinite(diff) || diff <= 0) {
+        setState({ eligible: true, open: false });
+      } else {
+        setState({
+          eligible: true, open: true,
+          minutes: Math.floor(diff / 60000),
+          seconds: Math.floor((diff % 60000) / 1000),
+          totalMs: diff,
+        });
+      }
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderId, orderCreatedAt, orderStatus, cancelRequested, windowMinutes]);
+  return state;
+}
+
+function TrackingCancelButton({ order, windowMinutes, onCancelled }) {
+  const [open, setOpen]       = React.useState(false);
+  const [reason, setReason]   = React.useState('');
+  const [loading, setLoading] = React.useState(false);
+
+  const cs = useCancelCountdownOT(
+    order._id, order.createdAt, order.orderStatus,
+    !!order.cancelRequest?.requested, windowMinutes
+  );
+
+  // Order cancelled
+  if (order.orderStatus === 'cancelled') return null;
+
+  // Not in a cancellable status
+  if (cs && !cs.eligible) return null;
+
+  // Already submitted a cancel request
+  if (order.cancelRequest?.requested) {
+    const s = order.cancelRequest.status;
+    return (
+      <span className={`inline-flex items-center gap-1 text-xs font-semibold px-3 py-1 rounded-full ${
+        s === 'pending'  ? 'bg-yellow-100 text-yellow-700' :
+        s === 'approved' ? 'bg-red-100 text-red-600' :
+                           'bg-gray-100 text-gray-500'}`}>
+        {s === 'pending'  ? '⏳ Cancel Requested' :
+         s === 'approved' ? '🚫 Cancellation Approved' :
+                            '❌ Request Rejected'}
+      </span>
+    );
+  }
+
+  // Settings still loading
+  if (cs === null) return <span className="inline-block w-28 h-7 rounded-lg bg-gray-100 animate-pulse" />;
+
+  // Window closed
+  if (cs && !cs.open) {
+    if (Number(windowMinutes) === 0) return null;
+    return <span className="inline-flex items-center gap-1 text-xs text-gray-400 px-2 py-1 rounded-lg bg-gray-50 border border-gray-100">🔒 Cancel window closed</span>;
+  }
+
+  const mm = cs.minutes !== undefined ? String(cs.minutes).padStart(2, '0') : null;
+  const ss = cs.seconds !== undefined ? String(cs.seconds).padStart(2, '0') : null;
+  const isUrgent = cs.totalMs !== undefined && cs.totalMs < 5 * 60 * 1000;
+
+  const handleRequest = async () => {
+    setLoading(true);
+    try {
+      await API.post(`/orders/${order._id}/cancel-request`, { reason });
+      toast.success('Cancellation request sent to admin');
+      setOpen(false);
+      onCancelled();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not submit cancel request');
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className={`inline-flex items-center gap-1.5 text-xs font-semibold border px-3 py-1.5 rounded-lg transition-all ${
+          isUrgent
+            ? 'text-red-600 hover:text-red-800 border-red-300 hover:border-red-500 bg-red-50 hover:bg-red-100'
+            : 'text-red-500 hover:text-red-700 border-red-200 hover:border-red-400 bg-red-50 hover:bg-red-100'
+        }`}
+      >
+        <span>✕ Cancel Order</span>
+        {mm !== null && (
+          <span className={`font-mono px-1.5 py-0.5 rounded-md text-[11px] ${
+            isUrgent ? 'bg-red-200 text-red-700' : 'bg-red-100 text-red-600'
+          }`}>
+            {mm}:{ss}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.55)' }}
+          onClick={e => e.target === e.currentTarget && setOpen(false)}>
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center text-xl">✕</div>
+              <div>
+                <h3 className="font-bold text-gray-900 text-lg leading-tight">Cancel this order?</h3>
+                <p className="text-xs text-gray-400 font-mono mt-0.5">{order.orderNumber}</p>
+              </div>
+            </div>
+
+            {mm !== null && (
+              <div className={`flex items-center gap-2 rounded-xl px-3 py-2 mb-4 text-sm font-medium ${
+                isUrgent ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-amber-50 text-amber-700 border border-amber-200'
+              }`}>
+                <span>⏱</span>
+                <span>Cancel window closes in <strong className="font-mono">{mm}:{ss}</strong></span>
+              </div>
+            )}
+
+            <div className="bg-gray-50 rounded-xl p-3 mb-4 flex items-center justify-between">
+              <span className="text-sm text-gray-600">Order Total</span>
+              <span className="font-bold text-gray-900">Rs. {order.total?.toLocaleString()}</span>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Reason <span className="text-gray-400 font-normal">(optional)</span></label>
+              <textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} className="form-input resize-none" placeholder="e.g. Changed my mind, found a better price..." />
+            </div>
+
+            <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 mb-5 text-xs text-amber-700">
+              ⚠️ Your request will be reviewed by our team. You'll receive an email with the decision.
+            </div>
+
+            <div className="flex gap-3">
+              <button onClick={() => setOpen(false)} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">Keep Order</button>
+              <button onClick={handleRequest} disabled={loading} className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-bold transition-colors disabled:opacity-60 flex items-center justify-center gap-2">
+                {loading ? <><span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />Submitting...</> : 'Request Cancellation'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 
 export function OrderSuccess() {
   const { id } = useParams();
@@ -181,6 +359,7 @@ export function OrderTracking() {
   const [slipPreview, setSlipPreview] = useState(null);
   const [slipUploading, setSlipUploading] = useState(false);
   const [slipDone, setSlipDone] = useState(false);
+  const [cancelWindowMinutes, setCancelWindowMinutes] = useState(null);
   const sym = settings?.currencySymbol || 'Rs.';
 
   useEffect(() => {
@@ -191,6 +370,20 @@ export function OrderTracking() {
         if (r.data.paymentSlip) setSlipDone(true);
       })
       .finally(() => setLoading(false));
+  }, [id]);
+
+  useEffect(() => {
+    API.get('/settings')
+      .then(r => {
+        const raw = r.data?.cancelWindowMinutes;
+        const parsed = (raw !== undefined && raw !== null && String(raw).trim() !== '') ? Number(raw) : 60;
+        setCancelWindowMinutes(isNaN(parsed) ? 60 : parsed);
+      })
+      .catch(() => setCancelWindowMinutes(60));
+  }, []);
+
+  const handleOrderCancelled = useCallback(() => {
+    API.get(`/orders/${id}`).then(r => setOrder(r.data)).catch(() => {});
   }, [id]);
 
   const handleSlipChange = (e) => {
@@ -276,6 +469,14 @@ export function OrderTracking() {
           </>
         )}
       </div>
+
+      {/* Cancel button */}
+      {order && !['delivered','cancelled'].includes(order.orderStatus) && (
+        <div className="flex items-center justify-between mb-4 px-1">
+          <Link to="/my-orders" className="text-sm font-medium hover:underline" style={{ color: 'var(--color-primary)' }}>← My Orders</Link>
+          <TrackingCancelButton order={order} windowMinutes={cancelWindowMinutes} onCancelled={handleOrderCancelled} />
+        </div>
+      )}
 
       {/* Bank Transfer: payment details + slip upload */}
       {isBankPending && (

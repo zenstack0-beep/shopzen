@@ -271,7 +271,7 @@ export default function Checkout() {
       if (paymentMethod === 'stripe') {
         clearCart();
         sessionStorage.removeItem('checkout_state');
-        navigate(`/account?new=${data.orderId}`);
+        navigate(`/my-orders?new=${data.orderId}`);
         return;
       }
 
@@ -286,7 +286,7 @@ export default function Checkout() {
       }
 
       // COD and everything else — go straight to My Orders
-      navigate(`/account?new=${data.orderId}`);
+      navigate(`/my-orders?new=${data.orderId}`);
     } catch (err) {
       toast.error(err.response?.data?.message || 'Order failed. Please try again.');
     } finally { setLoading(false); }
@@ -324,7 +324,7 @@ export default function Checkout() {
       }
     }
     // Navigate to My Orders (Account page) with the new order highlighted
-    navigate(`/account?new=${pendingBankOrder.orderId}`);
+    navigate(`/my-orders?new=${pendingBankOrder.orderId}`);
   };
 
   if (pendingBankOrder) {
