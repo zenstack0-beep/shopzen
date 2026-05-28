@@ -1,16 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import useSEO from '../../hooks/useSEO';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { useTheme } from '../../context/ThemeContext';
 import API from '../../utils/api';
 import toast from 'react-hot-toast';
 
 export default function Account() {
   const { user, updateUser } = useAuth();
   useSEO({ title: 'Account', noindex: true });
-  const { settings } = useTheme();
-  const navigate = useNavigate();
   const [tab, setTab] = useState('profile');
   const [profile, setProfile] = useState({ firstName: user?.firstName||'', lastName: user?.lastName||'', phone: '' });
   const [passwords, setPasswords] = useState({ currentPassword:'', newPassword:'', confirm:'' });

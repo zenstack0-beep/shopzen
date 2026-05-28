@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { useParams, useSearchParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, useSearchParams, Link } from 'react-router-dom';
 import API from '../../utils/api';
 import { useTheme } from '../../context/ThemeContext';
 import useSEO, { trackPurchase } from '../../hooks/useSEO';
