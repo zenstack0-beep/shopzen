@@ -16,12 +16,20 @@ export const AuthProvider = ({ children }) => {
     return data.user;
   };
 
+  // ✅ Called after Google OAuth — token+user already written to localStorage
+  // by Auth.js before this runs, so we just sync React state.
+  const loginWithGoogle = (user, token) => {
+    localStorage.setItem('token', token);
+    localStorage.setItem('user', JSON.stringify(user));
+    setUser(user);
+  };
+
   const register = async (formData) => {
     const res = await API.post('/auth/register', formData);
     localStorage.setItem('token', res.data.token);
     localStorage.setItem('user', JSON.stringify(res.data.user));
     setUser(res.data.user);
-    return res; // Return full response so Register page can show coupon
+    return res;
   };
 
   const logout = () => {
@@ -37,7 +45,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, register, logout, updateUser, isAdmin: user?.role === 'admin' }}>
+    <AuthContext.Provider value={{ user, login, loginWithGoogle, register, logout, updateUser, isAdmin: user?.role === 'admin' }}>
       {children}
     </AuthContext.Provider>
   );
