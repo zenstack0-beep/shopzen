@@ -21,6 +21,15 @@ const CopyBtn = ({ text }) => (
   </button>
 );
 
+// ── Field — defined OUTSIDE AdminSEO to prevent re-mount on every render ──────
+const Field = ({ label, value, onChange, placeholder, hint, type = 'text' }) => (
+  <div>
+    <label className="form-label">{label}</label>
+    <input type={type} value={value || ''} onChange={onChange} placeholder={placeholder} className="form-input"/>
+    {hint && <p className="text-xs text-gray-400 mt-1">{hint}</p>}
+  </div>
+);
+
 // ── Tab Nav ───────────────────────────────────────────────────────────────────
 const TABS = [
   { id: 'overview',  icon: '📊', label: 'Overview' },
@@ -151,14 +160,6 @@ ${urls.map(u => `  <url>
   };
 
   const saveRobots = () => { localStorage.setItem('shopzen_robots', robotsTxt); toast.success('Robots.txt saved!'); };
-
-  const Field = ({ label, value, onChange, placeholder, hint, type = 'text' }) => (
-    <div>
-      <label className="form-label">{label}</label>
-      <input type={type} value={value || ''} onChange={onChange} placeholder={placeholder} className="form-input"/>
-      {hint && <p className="text-xs text-gray-400 mt-1">{hint}</p>}
-    </div>
-  );
 
   const overallScore = vitals
     ? Math.round(Object.values(vitals).filter(v => typeof v.score === 'number').reduce((s, v) => s + v.score, 0) / Object.values(vitals).filter(v => typeof v.score === 'number').length)
