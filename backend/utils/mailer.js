@@ -10,10 +10,14 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+// ── FIX: sendMail now throws on failure so callers (e.g. forgot-password route)
+//        can catch it and return a proper 500 to the client instead of silently
+//        succeeding while no email was ever sent.
 const sendMail = async ({ to, subject, html }) => {
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-    console.log(`[MAIL SKIPPED — not configured] To:${to} | ${subject}`);
-    return;
+    const msg = 'Email is not configured on the server (EMAIL_USER / EMAIL_PASS missing).';
+    console.error('[MAIL ERROR]', msg);
+    throw new Error(msg);   // ← was: console.log + return — callers never knew it failed
   }
   try {
     await transporter.sendMail({
@@ -25,14 +29,11 @@ const sendMail = async ({ to, subject, html }) => {
     console.log(`[MAIL SENT] To:${to} | ${subject}`);
   } catch (e) {
     console.error('[MAIL ERROR]', e.message);
+    throw e;                // ← was: swallowed — callers never knew SMTP failed
   }
 };
 
 // ── Theme helper ──────────────────────────────────────────────────────────────
-// Fetches primaryColor and storeName from the Settings collection and caches
-// them for 60 seconds so every email in a burst uses the same values without
-// hammering MongoDB. Falls back to the original orange if DB is unreachable.
-
 let _themeCache = null;
 let _themeCacheAt = 0;
 const THEME_TTL_MS = 60_000;
@@ -40,20 +41,14 @@ const THEME_TTL_MS = 60_000;
 const getTheme = async () => {
   const now = Date.now();
   if (_themeCache && now - _themeCacheAt < THEME_TTL_MS) return _themeCache;
-
   try {
-    // Lazy-require so mailer can be loaded before mongoose connects
     const { Settings } = require('../models/index');
     const rows = await Settings.find(
       { key: { $in: ['primaryColor', 'storeName'] } },
       'key value'
     ).lean();
-
     const map = {};
     rows.forEach(r => { map[r.key] = r.value; });
-
-    // Derive a readable light version of the primary colour for backgrounds
-    // by just using it at low opacity — we embed it inline so no CSS var needed.
     _themeCache = {
       primary:   map.primaryColor || '#b5451b',
       storeName: map.storeName    || 'ShopZen',
@@ -64,15 +59,12 @@ const getTheme = async () => {
     _themeCache = { primary: '#b5451b', storeName: 'ShopZen' };
     _themeCacheAt = now;
   }
-
   return _themeCache;
 };
 
-// Call this whenever settings are saved so the next email picks up the change
-// immediately instead of waiting for the TTL. Used in routes/settings.js.
 const clearThemeCache = () => { _themeCache = null; _themeCacheAt = 0; };
 
-// ── Shared layout helpers (accept theme object) ───────────────────────────────
+// ── Shared layout helpers ─────────────────────────────────────────────────────
 const header = (subtitle, theme) => `
   <div style="background:linear-gradient(135deg,${theme.primary},${lighten(theme.primary)});padding:32px;text-align:center">
     <h1 style="color:white;margin:0;font-size:26px;font-family:sans-serif">${theme.storeName}</h1>
@@ -90,9 +82,6 @@ const wrapper = (content, theme) => `<!DOCTYPE html><html><body style="font-fami
     ${footer(theme)}
   </div></body></html>`;
 
-// ── Colour utility — lighten a hex colour for the gradient end-stop ───────────
-// Shifts each RGB channel 30% towards 255 so the gradient looks natural even
-// with dark brand colours (navy, forest-green, etc.).
 const lighten = (hex) => {
   try {
     const h = hex.replace('#', '');
@@ -122,13 +111,11 @@ const otpEmailHtml = async (otp, name) => {
 // ── Order placed confirmation email ──────────────────────────────────────────
 const orderConfirmHtml = async (order) => {
   const t = await getTheme();
-
   const itemRows = (order.items || []).map(item => `
     <tr>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;color:#374151">${item.name} × ${item.quantity}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;color:#374151;text-align:right;font-weight:600">Rs. ${item.subtotal?.toLocaleString()}</td>
     </tr>`).join('');
-
   const bankBlock = order.paymentMethod === 'bank_transfer' ? `
     <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:16px;margin:20px 0">
       <p style="margin:0 0 8px;font-weight:700;color:#92400e;font-size:14px">⚠️ Action Required — Bank Transfer</p>
@@ -137,7 +124,6 @@ const orderConfirmHtml = async (order) => {
         Use <strong>${order.orderNumber}</strong> as the payment reference.
       </p>
     </div>` : '';
-
   return wrapper(`
     ${header('Order Confirmed!', t)}
     <div style="padding:32px">
@@ -147,14 +133,11 @@ const orderConfirmHtml = async (order) => {
           ? 'Your order has been placed! Complete your bank transfer to confirm it.'
           : 'Your order has been received and is being processed.'}
       </p>
-
       <div style="background:#f8fafc;border-radius:10px;padding:16px;margin-bottom:20px;text-align:center">
         <p style="margin:0;font-size:12px;color:#6b7280">Order Number</p>
         <p style="margin:4px 0 0;font-size:22px;font-weight:800;color:${t.primary};font-family:monospace">${order.orderNumber}</p>
       </div>
-
       ${bankBlock}
-
       <table style="width:100%;border-collapse:collapse;margin-bottom:16px">
         <thead>
           <tr style="background:#f8fafc">
@@ -170,7 +153,6 @@ const orderConfirmHtml = async (order) => {
           <tr style="border-top:2px solid #e5e7eb"><td style="padding:12px;font-size:15px;font-weight:700;color:#111">Total</td><td style="padding:12px;font-size:15px;font-weight:700;color:${t.primary};text-align:right">Rs. ${order.total?.toLocaleString()}</td></tr>
         </tfoot>
       </table>
-
       <div style="background:#f8fafc;border-radius:10px;padding:14px;font-size:13px;color:#374151;line-height:1.6">
         <strong>Shipping to:</strong><br>
         ${order.billing?.firstName} ${order.billing?.lastName}<br>
@@ -187,7 +169,6 @@ const slipUploadedAdminHtml = async (order, slipUrl) => {
     ${header('Payment Slip Uploaded', t)}
     <div style="padding:32px">
       <p style="color:#374151;margin:0 0 16px">A customer has uploaded a payment slip for order <strong>${order.orderNumber}</strong>.</p>
-
       <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
         <tr><td style="padding:8px 0;color:#6b7280;font-size:13px;width:40%">Customer</td><td style="padding:8px 0;font-size:13px;color:#111;font-weight:600">${order.billing?.firstName} ${order.billing?.lastName}</td></tr>
         <tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Email</td><td style="padding:8px 0;font-size:13px;color:#111">${order.billing?.email}</td></tr>
@@ -195,14 +176,12 @@ const slipUploadedAdminHtml = async (order, slipUrl) => {
         <tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Order Total</td><td style="padding:8px 0;font-size:13px;font-weight:700;color:${t.primary}">Rs. ${order.total?.toLocaleString()}</td></tr>
         <tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Uploaded At</td><td style="padding:8px 0;font-size:13px;color:#111">${new Date().toLocaleString('en-LK')}</td></tr>
       </table>
-
       ${slipUrl && /\.(jpg|jpeg|png|gif|webp)$/i.test(slipUrl) ? `
         <p style="font-size:13px;color:#6b7280;margin-bottom:8px">Payment slip preview:</p>
         <img src="${slipUrl}" alt="Payment Slip" style="width:100%;max-height:300px;object-fit:contain;border-radius:10px;border:1px solid #e5e7eb;margin-bottom:16px" />
       ` : `
         <p style="font-size:13px;color:#6b7280;margin-bottom:8px">Payment slip: <a href="${slipUrl}" style="color:${t.primary}">View PDF</a></p>
       `}
-
       <a href="${process.env.ADMIN_URL || process.env.FRONTEND_URL || ''}/admin/orders/${order._id}"
          style="display:inline-block;background:linear-gradient(135deg,${t.primary},${lighten(t.primary)});color:white;padding:12px 24px;border-radius:10px;font-weight:700;font-size:14px;text-decoration:none">
         Review &amp; Confirm Payment →
@@ -218,11 +197,9 @@ const slipReceivedCustomerHtml = async (order) => {
     <div style="padding:32px">
       <p style="color:#374151">Hi <strong>${order.billing?.firstName}</strong>,</p>
       <p style="color:#6b7280;font-size:14px">We've received your payment slip for order <strong style="color:${t.primary}">${order.orderNumber}</strong>. Our team will verify your payment shortly and confirm your order.</p>
-
       <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:16px;margin:20px 0;text-align:center">
         <p style="margin:0;font-size:13px;color:#166534">⏳ Payment verification usually takes <strong>1–2 business hours</strong>.<br>You'll receive another email once confirmed.</p>
       </div>
-
       <div style="background:#f8fafc;border-radius:10px;padding:14px;font-size:13px;color:#374151">
         <strong>Order:</strong> ${order.orderNumber}<br>
         <strong>Total:</strong> Rs. ${order.total?.toLocaleString()}<br>
@@ -234,25 +211,21 @@ const slipReceivedCustomerHtml = async (order) => {
 // ── Payment confirmed email to customer ──────────────────────────────────────
 const paymentConfirmedHtml = async (order) => {
   const t = await getTheme();
-
   const itemRows = (order.items || []).map(item => `
     <tr>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;color:#374151">${item.name} × ${item.quantity}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;color:#374151;text-align:right;font-weight:600">Rs. ${item.subtotal?.toLocaleString()}</td>
     </tr>`).join('');
-
   return wrapper(`
     ${header('✅ Payment Confirmed!', t)}
     <div style="padding:32px">
       <p style="color:#374151">Hi <strong>${order.billing?.firstName}</strong>,</p>
       <p style="color:#6b7280;font-size:14px;margin-bottom:20px">Great news! Your payment has been verified and your order is now <strong style="color:#16a34a">confirmed</strong>. We'll begin processing it right away.</p>
-
       <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:16px;text-align:center;margin-bottom:20px">
         <p style="margin:0 0 4px;font-size:12px;color:#166534">Order Number</p>
         <p style="margin:0;font-size:22px;font-weight:800;color:#15803d;font-family:monospace">${order.orderNumber}</p>
         <p style="margin:8px 0 0;font-size:13px;color:#166534;font-weight:600">✓ Payment Verified &amp; Confirmed</p>
       </div>
-
       <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
         <thead>
           <tr style="background:#f8fafc">
@@ -267,14 +240,12 @@ const paymentConfirmedHtml = async (order) => {
           <tr style="border-top:2px solid #e5e7eb"><td style="padding:12px;font-size:15px;font-weight:700;color:#111">Total Paid</td><td style="padding:12px;font-size:15px;font-weight:700;color:#15803d;text-align:right">Rs. ${order.total?.toLocaleString()}</td></tr>
         </tfoot>
       </table>
-
       <div style="background:#f8fafc;border-radius:10px;padding:14px;font-size:13px;color:#374151;line-height:1.6">
         <strong>Shipping to:</strong><br>
         ${order.billing?.firstName} ${order.billing?.lastName}<br>
         ${order.billing?.street}, ${order.billing?.city}<br>
         ${order.billing?.phone}
       </div>
-
       <p style="margin-top:20px;color:#9ca3af;font-size:12px;text-align:center">
         You'll receive tracking details once your order is shipped. Thank you for shopping with ${t.storeName}!
       </p>
@@ -354,7 +325,6 @@ const orderStatusUpdateHtml = async (order, newStatus, note) => {
   };
   const color = statusColors[newStatus] || t.primary;
   const label = statusLabels[newStatus] || newStatus;
-
   return wrapper(`
     ${header(`Order ${label}`, t)}
     <div style="padding:32px">
@@ -369,7 +339,6 @@ const orderStatusUpdateHtml = async (order, newStatus, note) => {
       <p style="color:#9ca3af;font-size:12px;text-align:center">Thank you for shopping with ${t.storeName}!</p>
     </div>`, t);
 };
-
 
 // ── Auto cancel-decision notification to admin ────────────────────────────────
 const cancelAutoDecisionAdminHtml = async (order, decision) => {
