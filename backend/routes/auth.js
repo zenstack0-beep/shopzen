@@ -2,29 +2,34 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const { OAuth2Client } = require('google-auth-library');
 const User = require('../models/User');
 const { auth } = require('../middleware/auth');
 const { Notification, OTP, Coupon } = require('../models/index');
 const { sendMail, otpEmailHtml } = require('../utils/mailer');
 
 const generateToken = (id) => jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '30d' });
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-// Register
+// ─── Register ─────────────────────────────────────────────────────────────────
 router.post('/register', async (req, res) => {
   try {
     const { firstName, lastName, username, email, password, phone } = req.body;
     const exists = await User.findOne({ $or: [{ email }, { username }] });
     if (exists) return res.status(400).json({ message: exists.email === email ? 'Email already registered' : 'Username already taken' });
     const user = await User.create({ firstName, lastName, username, email, password, phone });
-    // Auto-apply new user coupon if exists
     const newUserCoupon = await Coupon.findOne({ isNewUserOnly: true, isActive: true, validUntil: { $gte: new Date() } });
     await Notification.create({ type: 'new_user', title: 'New Customer Registered', message: `${firstName} ${lastName} just created an account`, link: `/admin/customers` });
     const token = generateToken(user._id);
-    res.status(201).json({ token, user: { id: user._id, firstName, lastName, username, email, role: user.role }, newUserCoupon: newUserCoupon ? { code: newUserCoupon.code, value: newUserCoupon.value, type: newUserCoupon.type, description: newUserCoupon.description } : null });
+    res.status(201).json({
+      token,
+      user: { id: user._id, firstName, lastName, username, email, role: user.role },
+      newUserCoupon: newUserCoupon ? { code: newUserCoupon.code, value: newUserCoupon.value, type: newUserCoupon.type, description: newUserCoupon.description } : null
+    });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
-// Login
+// ─── Login ────────────────────────────────────────────────────────────────────
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -38,22 +43,88 @@ router.post('/login', async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
-// Forgot Password — Send OTP
+// ─── Google OAuth ─────────────────────────────────────────────────────────────
+router.post('/google', async (req, res) => {
+  try {
+    const { credential } = req.body;
+    if (!credential) return res.status(400).json({ message: 'Google credential is required' });
+
+    // Verify the ID token with Google
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+    const { email, given_name, family_name, picture, sub: googleId } = payload;
+
+    // Find existing user or create new one
+    let user = await User.findOne({ email });
+
+    if (!user) {
+      // New user — auto-register via Google
+      const baseUsername = email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '');
+      const username = baseUsername + '_' + googleId.slice(-4);
+      user = await User.create({
+        firstName:  given_name  || 'User',
+        lastName:   family_name || '',
+        username,
+        email,
+        password:   googleId + process.env.JWT_SECRET, // non-guessable, never used for password login
+        googleId,
+        avatar:     picture || '',
+        isVerified: true,
+      });
+      await Notification.create({
+        type:    'new_user',
+        title:   'New Customer (Google)',
+        message: `${given_name} ${family_name} signed up via Google`,
+        link:    '/admin/customers',
+      });
+    }
+
+    if (!user.isActive) return res.status(403).json({ message: 'Your account has been deactivated' });
+
+    // Update Google fields if not set yet
+    if (!user.googleId) user.googleId = googleId;
+    if (!user.avatar && picture) user.avatar = picture;
+    user.lastLogin = Date.now();
+    await user.save();
+
+    const token = generateToken(user._id);
+    res.json({
+      token,
+      user: {
+        id:        user._id,
+        firstName: user.firstName,
+        lastName:  user.lastName,
+        username:  user.username,
+        email:     user.email,
+        role:      user.role,
+        avatar:    user.avatar,
+      },
+    });
+  } catch (err) {
+    console.error('[GOOGLE AUTH ERROR]', err.message);
+    res.status(401).json({ message: 'Google sign-in failed. Please try again.' });
+  }
+});
+
+// ─── Forgot Password — Send OTP ───────────────────────────────────────────────
 router.post('/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ message: 'No account found with this email' });
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-    await OTP.deleteMany({ email }); // remove old OTPs
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    await OTP.deleteMany({ email });
     await OTP.create({ email, otp, expiresAt });
     await sendMail({ to: email, subject: 'ShopZen Password Reset OTP', html: await otpEmailHtml(otp, user.firstName) });
     res.json({ message: 'OTP sent to your email address' });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
-// Verify OTP
+// ─── Verify OTP ───────────────────────────────────────────────────────────────
 router.post('/verify-otp', async (req, res) => {
   try {
     const { email, otp } = req.body;
@@ -62,13 +133,12 @@ router.post('/verify-otp', async (req, res) => {
     const resetToken = crypto.randomBytes(32).toString('hex');
     record.used = true;
     await record.save();
-    // Store reset token temporarily
     await OTP.create({ email, otp: resetToken, expiresAt: new Date(Date.now() + 15 * 60 * 1000) });
     res.json({ message: 'OTP verified', resetToken });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
-// Reset Password
+// ─── Reset Password ───────────────────────────────────────────────────────────
 router.post('/reset-password', async (req, res) => {
   try {
     const { email, resetToken, newPassword } = req.body;
@@ -84,10 +154,10 @@ router.post('/reset-password', async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
-// Get profile
+// ─── Get profile ──────────────────────────────────────────────────────────────
 router.get('/me', auth, async (req, res) => { res.json(req.user); });
 
-// Update profile
+// ─── Update profile ───────────────────────────────────────────────────────────
 router.put('/profile', auth, async (req, res) => {
   try {
     const { firstName, lastName, phone, addresses, defaultAddress } = req.body;
@@ -97,22 +167,10 @@ router.put('/profile', auth, async (req, res) => {
     if (phone     !== undefined) update.phone     = phone;
 
     if (defaultAddress) {
-      // Save billing address as the user's default address for checkout pre-fill
       const user = await User.findById(req.user._id);
-      const addr = {
-        label: 'Default',
-        country: defaultAddress.country || '',
-        street:  defaultAddress.street  || '',
-        city:    defaultAddress.city    || '',
-        isDefault: true,
-      };
+      const addr = { label: 'Default', country: defaultAddress.country || '', street: defaultAddress.street || '', city: defaultAddress.city || '', isDefault: true };
       const idx = user.addresses.findIndex(a => a.isDefault);
-      if (idx > -1) {
-        user.addresses[idx] = addr;
-      } else {
-        user.addresses.push(addr);
-      }
-      // Ensure only one default
+      if (idx > -1) { user.addresses[idx] = addr; } else { user.addresses.push(addr); }
       const defaultIdx = idx > -1 ? idx : user.addresses.length - 1;
       user.addresses.forEach((a, i) => { if (i !== defaultIdx) a.isDefault = false; });
       update.addresses = user.addresses;
@@ -125,7 +183,7 @@ router.put('/profile', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
-// Change password
+// ─── Change password ──────────────────────────────────────────────────────────
 router.put('/change-password', auth, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
@@ -137,7 +195,7 @@ router.put('/change-password', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
-// Get wishlist
+// ─── Get wishlist ─────────────────────────────────────────────────────────────
 router.get('/wishlist', auth, async (req, res) => {
   try {
     const user = await User.findById(req.user._id).populate('wishlist');
@@ -145,7 +203,7 @@ router.get('/wishlist', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
-// Toggle wishlist
+// ─── Toggle wishlist ──────────────────────────────────────────────────────────
 router.post('/wishlist/:productId', auth, async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
