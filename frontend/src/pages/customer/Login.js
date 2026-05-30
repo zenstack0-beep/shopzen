@@ -124,15 +124,7 @@ function GoogleSignInButton({ onSuccess, disabled, label = 'Continue with Google
     // Use renderButton flow via a hidden div — more reliable than prompt() with FedCM
     window.google.accounts.id.prompt((notification) => {
       if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-        // Fallback: open Google OAuth popup manually
-        const params = new URLSearchParams({
-          client_id: GOOGLE_CLIENT_ID,
-          redirect_uri: window.location.origin,
-          response_type: 'token',
-          scope: 'email profile',
-          prompt: 'select_account',
-        });
-        // Use renderButton instead — inject a hidden button and click it
+          // Use renderButton as fallback — inject hidden button and click it
         const container = document.getElementById('__gsi_btn_container');
         if (container) {
           window.google.accounts.id.renderButton(container, {
