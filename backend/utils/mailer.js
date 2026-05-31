@@ -1,91 +1,45 @@
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
+
+// ── Resend client ─────────────────────────────────────────────────────────────
+const getResendClient = () => {
+  return new Resend(process.env.RESEND_API_KEY || 're_6rTy1uYg_Pyw8zzzKx7EKKsxk8pRTmHVe');
+};
 
 // ── SMTP connection verification (called once at startup) ─────────────────────
 const verifySmtp = async () => {
   try {
-    const transporter = await getTransporter();
-    await transporter.verify();
-    console.log('[MAIL] ✅ SMTP connection verified — emails will work');
-  } catch (err) {
-    console.error('[MAIL] ❌ SMTP connection FAILED:', err.message);
-    console.error('[MAIL] ⚠️  OTP / order emails will NOT be sent until SMTP is fixed.');
-    console.error('[MAIL] Check EMAIL_USER, EMAIL_PASS (use Gmail App Password), EMAIL_HOST, EMAIL_PORT in your .env');
-  }
-};
-
-// ── Lazy transporter — built fresh per send so DB-saved SMTP settings work ────
-const getTransporter = async () => {
-  if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-    const port   = Number(process.env.EMAIL_PORT) || 587;
-    const secure = port === 465;
-    return nodemailer.createTransport({
-      host:       process.env.EMAIL_HOST || 'smtp.gmail.com',
-      port,
-      secure,
-      requireTLS: !secure && port === 587,
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-      tls: {
-        rejectUnauthorized: false,
-      },
+    const resend = getResendClient();
+    await resend.emails.send({
+      from: 'onboarding@resend.dev',
+      to: 'delivered@resend.dev',
+      subject: 'SMTP verify test',
+      html: '<p>test</p>',
     });
-  }
-
-  try {
-    const { Settings } = require('../models/index');
-    const keys = ['smtpHost', 'smtpPort', 'smtpUser', 'smtpPass', 'smtpSecure', 'emailFrom'];
-    const rows = await Settings.find({ key: { $in: keys } }).lean();
-    const cfg = {};
-    rows.forEach(r => { cfg[r.key] = r.value; });
-
-    if (!cfg.smtpUser || !cfg.smtpPass) {
-      throw new Error(
-        'Email is not configured. Add EMAIL_USER & EMAIL_PASS to your .env (use a Gmail App Password), ' +
-        'or set SMTP settings in Admin → Settings.'
-      );
-    }
-
-    const port   = Number(cfg.smtpPort) || 587;
-    const secure = port === 465;
-    return nodemailer.createTransport({
-      host:       cfg.smtpHost || 'smtp.gmail.com',
-      port,
-      secure,
-      requireTLS: !secure && port === 587,
-      auth: { user: cfg.smtpUser, pass: cfg.smtpPass },
-      tls: { rejectUnauthorized: false },
-    });
+    console.log('[MAIL] ✅ Resend API verified — emails will work');
   } catch (err) {
-    throw err;
+    console.error('[MAIL] ❌ Resend API FAILED:', err.message);
+    console.error('[MAIL] ⚠️  Check RESEND_API_KEY in your Railway env vars.');
   }
 };
 
 // ── From address helper ───────────────────────────────────────────────────────
 const getFromAddress = async (theme) => {
+  // Resend requires a verified domain — use onboarding@resend.dev for testing
+  // Once shopzen.lk is verified in Resend dashboard, change to noreply@shopzen.lk
   if (process.env.EMAIL_FROM) return process.env.EMAIL_FROM;
-  if (process.env.EMAIL_USER) return `${theme?.storeName || 'ShopZen'} <${process.env.EMAIL_USER}>`;
-  try {
-    const { Settings } = require('../models/index');
-    const rows = await Settings.find({ key: { $in: ['emailFrom', 'smtpUser'] } }).lean();
-    const cfg = {};
-    rows.forEach(r => { cfg[r.key] = r.value; });
-    if (cfg.emailFrom) return cfg.emailFrom;
-    if (cfg.smtpUser) return `${theme?.storeName || 'ShopZen'} <${cfg.smtpUser}>`;
-  } catch {}
-  return 'ShopZen <noreply@shopzen.com>';
+  return `${theme?.storeName || 'ShopZen'} <onboarding@resend.dev>`;
 };
 
-// ── sendMail — throws on failure so callers can catch and return 500 ──────────
+// ── sendMail ──────────────────────────────────────────────────────────────────
 const sendMail = async ({ to, subject, html }) => {
   try {
-    const transporter = await getTransporter();
+    const resend = getResendClient();
     const theme = await getTheme().catch(() => ({ storeName: 'ShopZen', primary: '#b5451b' }));
     const from = await getFromAddress(theme);
-    const info = await transporter.sendMail({ from, to, subject, html });
-    console.log(`[MAIL SENT] To:${to} | ${subject} | msgId:${info.messageId}`);
-    return info;
+    const { data, error } = await resend.emails.send({ from, to, subject, html });
+    if (error) throw new Error(error.message || JSON.stringify(error));
+    console.log(`[MAIL SENT] To:${to} | ${subject} | id:${data.id}`);
+    return data;
   } catch (e) {
     console.error('[MAIL ERROR]', e.message);
     const wrapped = new Error(`Failed to send email to ${to}: ${e.message}`);
@@ -541,7 +495,7 @@ const cancelRejectedAdminHtml = async (order) => {
     </div>`, t);
 };
 
-// ── Run SMTP check on startup (non-blocking) ──────────────────────────────────
+// ── Run verify on startup (non-blocking) ──────────────────────────────────────
 setTimeout(() => verifySmtp(), 3000);
 
 module.exports = {
