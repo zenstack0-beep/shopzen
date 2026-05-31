@@ -10,20 +10,46 @@ if (!process.env.MONGODB_URI) { console.error('❌ MONGODB_URI not defined'); pr
 console.log('🔗 MongoDB:', process.env.MONGODB_URI.replace(/\/\/(.*?):(.*)@/, '//***:***@'));
 
 // ─── CORS ─────────────────────────────────────────────────────────────────────
+// Allowed origins:
+//   1. Any localhost / 127.0.0.1 port (local dev)
+//   2. The production domain set in FRONTEND_URL env var
+//   3. ALL Vercel preview deployments for your project (*.vercel.app)
+//      This fixes: "CORS blocked: https://shopzen-xxx-yyy.vercel.app"
 const allowedOrigins = [
-  /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/,   // any localhost port
+  /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/,  // any localhost port
+  /^https:\/\/[a-z0-9-]+-[a-z0-9]+-[a-z0-9-]+\.vercel\.app$/,  // Vercel preview URLs
+  /^https:\/\/shopzen\.lk$/,                        // production domain
+  /^https:\/\/www\.shopzen\.lk$/,                   // www variant
 ];
+
+// Also allow whatever is in FRONTEND_URL (e.g. https://shopzen.lk)
 if (process.env.FRONTEND_URL) {
-  allowedOrigins.push(process.env.FRONTEND_URL);   // production Vercel URL
+  const fu = process.env.FRONTEND_URL.trim().replace(/\/$/, '');
+  if (!allowedOrigins.some(o => typeof o === 'string' && o === fu)) {
+    allowedOrigins.push(fu);
+  }
+}
+
+// Allow any extra origins listed in EXTRA_ORIGINS (comma-separated)
+if (process.env.EXTRA_ORIGINS) {
+  process.env.EXTRA_ORIGINS.split(',').forEach(o => {
+    const trimmed = o.trim().replace(/\/$/, '');
+    if (trimmed) allowedOrigins.push(trimmed);
+  });
 }
 
 app.use(cors({
   origin: (origin, cb) => {
-    if (!origin) return cb(null, true); // curl / same-origin
+    if (!origin) return cb(null, true); // curl / server-to-server / same-origin
     const ok = allowedOrigins.some(o =>
       typeof o === 'string' ? o === origin : o.test(origin)
     );
-    ok ? cb(null, true) : cb(new Error('CORS blocked: ' + origin));
+    if (ok) {
+      cb(null, true);
+    } else {
+      console.warn(`[CORS] Blocked: ${origin}`);
+      cb(new Error('CORS blocked: ' + origin));
+    }
   },
   credentials: true,
 }));
