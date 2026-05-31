@@ -11,10 +11,29 @@ const { sendMail, otpEmailHtml } = require('../utils/mailer');
 const generateToken = (id) => jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '30d' });
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
+// ─── Password strength validator ─────────────────────────────────────────────
+// Returns { valid: Boolean, errors: String[] }
+function validatePasswordStrength(password) {
+  const errors = [];
+  if (!password || password.length < 8)          errors.push('At least 8 characters');
+  if (!/[A-Z]/.test(password))                   errors.push('At least one uppercase letter (A-Z)');
+  if (!/[a-z]/.test(password))                   errors.push('At least one lowercase letter (a-z)');
+  if (!/[0-9]/.test(password))                   errors.push('At least one number (0-9)');
+  if (!/[^A-Za-z0-9]/.test(password))            errors.push('At least one special character (!@#$%^&* etc.)');
+  return { valid: errors.length === 0, errors };
+}
+
 // ─── Register ─────────────────────────────────────────────────────────────────
 router.post('/register', async (req, res) => {
   try {
     const { firstName, lastName, username, email, password, phone } = req.body;
+
+    // Validate password strength on register too
+    const pwCheck = validatePasswordStrength(password);
+    if (!pwCheck.valid) {
+      return res.status(400).json({ message: 'Password is too weak', errors: pwCheck.errors });
+    }
+
     const exists = await User.findOne({ $or: [{ email }, { username }] });
     if (exists) return res.status(400).json({ message: exists.email === email ? 'Email already registered' : 'Username already taken' });
     const user = await User.create({ firstName, lastName, username, email, password, phone });
@@ -116,13 +135,6 @@ router.post('/google', async (req, res) => {
 });
 
 // ─── Forgot Password — Send OTP ───────────────────────────────────────────────
-// FIX: Previously the catch block returned err.message which could be a raw
-//      nodemailer/SMTP error that confused the frontend into showing
-//      "Failed to send OTP". Now we:
-//      1. Validate email exists before touching SMTP.
-//      2. Always delete old OTPs before creating new one (idempotent).
-//      3. Return a clear, user-friendly message on SMTP failure while logging
-//         the real cause on the server so you can diagnose it in Railway logs.
 router.post('/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
@@ -133,15 +145,12 @@ router.post('/forgot-password', async (req, res) => {
 
     const user = await User.findOne({ email: email.toLowerCase().trim() });
     if (!user) {
-      // Don't reveal whether the email exists — just say "if registered…"
-      // but for a small internal shop it's fine to be explicit:
       return res.status(404).json({ message: 'No account found with this email address' });
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min
 
-    // Remove any previous unused OTPs for this email
     await OTP.deleteMany({ email: user.email });
     await OTP.create({ email: user.email, otp, expiresAt });
 
@@ -152,11 +161,8 @@ router.post('/forgot-password', async (req, res) => {
         html: await otpEmailHtml(otp, user.firstName),
       });
     } catch (mailErr) {
-      // Log the REAL smtp error in Railway/Render so you can fix it
       console.error('[FORGOT-PASSWORD] SMTP error:', mailErr.message);
-      // Clean up the OTP we just created since it can't be delivered
       await OTP.deleteMany({ email: user.email }).catch(() => {});
-      // Return a helpful message — NOT the raw nodemailer stack trace
       return res.status(500).json({
         message:
           'Unable to send the OTP email right now. ' +
@@ -187,18 +193,51 @@ router.post('/verify-otp', async (req, res) => {
 });
 
 // ─── Reset Password ───────────────────────────────────────────────────────────
+// CHANGED: Now validates password strength, then returns token + user for auto-login
 router.post('/reset-password', async (req, res) => {
   try {
     const { email, resetToken, newPassword } = req.body;
+
+    // 1. Validate password strength before touching the DB
+    const pwCheck = validatePasswordStrength(newPassword);
+    if (!pwCheck.valid) {
+      return res.status(400).json({ message: 'Password is too weak', errors: pwCheck.errors });
+    }
+
+    // 2. Verify the reset token
     const record = await OTP.findOne({ email, otp: resetToken, used: false, expiresAt: { $gte: new Date() } });
     if (!record) return res.status(400).json({ message: 'Invalid or expired reset token. Please restart the password reset process.' });
+
+    // 3. Find user
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ message: 'User not found' });
+
+    // 4. Update password
     user.password = newPassword;
+    user.lastLogin = Date.now();
     await user.save();
+
+    // 5. Mark token as used
     record.used = true;
     await record.save();
-    res.json({ message: 'Password reset successfully' });
+
+    // 6. Generate a fresh JWT so the frontend can auto-login immediately
+    const token = generateToken(user._id);
+
+    res.json({
+      message: 'Password reset successfully',
+      // Auto-login payload — same shape as /login response
+      token,
+      user: {
+        id:        user._id,
+        firstName: user.firstName,
+        lastName:  user.lastName,
+        username:  user.username,
+        email:     user.email,
+        role:      user.role,
+        avatar:    user.avatar,
+      },
+    });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
@@ -235,6 +274,13 @@ router.put('/profile', auth, async (req, res) => {
 router.put('/change-password', auth, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
+
+    // Validate new password strength
+    const pwCheck = validatePasswordStrength(newPassword);
+    if (!pwCheck.valid) {
+      return res.status(400).json({ message: 'Password is too weak', errors: pwCheck.errors });
+    }
+
     const user = await User.findById(req.user._id);
     if (!(await user.comparePassword(currentPassword))) return res.status(400).json({ message: 'Current password is incorrect' });
     user.password = newPassword;

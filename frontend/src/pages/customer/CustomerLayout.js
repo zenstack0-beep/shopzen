@@ -221,7 +221,7 @@ const Header = ({ settings, campaign }) => {
       )}
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
-        <div className="flex items-center gap-2" style={{height: `${Math.max(64, logoHeight + 20)}px`}}>
+        <div className="flex items-center gap-2" style={{height: '64px'}}>
 
           {/* ── Logo ── */}
           <Link
@@ -238,6 +238,7 @@ const Header = ({ settings, campaign }) => {
                   alt={settings.storeName || 'ShopZen'}
                   style={{
                     height: `${logoHeight}px`,
+                    maxHeight: '52px',
                     maxWidth: '260px',
                     objectFit: 'contain',
                     filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.10))',
@@ -248,8 +249,8 @@ const Header = ({ settings, campaign }) => {
                   <div
                     className="rounded-xl flex items-center justify-center text-white transition-all duration-300 group-hover:rotate-6"
                     style={{
-                      width: `${Math.max(28, logoHeight * 0.6)}px`,
-                      height: `${Math.max(28, logoHeight * 0.6)}px`,
+                      width: `${Math.min(40, Math.max(28, logoHeight * 0.6))}px`,
+                      height: `${Math.min(40, Math.max(28, logoHeight * 0.6))}px`,
                       background: 'var(--theme-gradient)',
                       boxShadow: '0 4px 14px var(--glow-primary)',
                     }}
@@ -263,7 +264,7 @@ const Header = ({ settings, campaign }) => {
                     style={{
                       fontFamily: 'var(--font-display)',
                       letterSpacing: '-0.02em',
-                      fontSize: `${Math.max(16, logoHeight * 0.38)}px`,
+                      fontSize: `${Math.min(22, Math.max(16, logoHeight * 0.38))}px`,
                       color: '#111827',
                     }}
                   >
