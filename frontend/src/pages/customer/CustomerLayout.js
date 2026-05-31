@@ -110,6 +110,42 @@ const CartDrawer = ({ settings }) => {
   );
 };
 
+/* ── Nav Link with 3D hover ─────────────────────────────────── */
+const NavLink3D = ({ to, label, isActive, emoji }) => (
+  <Link
+    to={to}
+    className="relative group px-4 py-2 text-sm font-semibold rounded-xl transition-all duration-200 overflow-hidden"
+    style={{
+      color: isActive ? 'var(--color-primary)' : '#64748b',
+      background: isActive ? 'color-mix(in srgb, var(--color-primary) 10%, transparent)' : 'transparent',
+      transform: 'perspective(500px) rotateX(0deg)',
+      transformStyle: 'preserve-3d',
+    }}
+    onMouseEnter={e => {
+      e.currentTarget.style.transform = 'perspective(500px) rotateX(-8deg) translateY(-2px)';
+      e.currentTarget.style.color = 'var(--color-primary)';
+      e.currentTarget.style.background = 'color-mix(in srgb, var(--color-primary) 10%, transparent)';
+      e.currentTarget.style.boxShadow = '0 8px 20px color-mix(in srgb, var(--color-primary) 25%, transparent)';
+    }}
+    onMouseLeave={e => {
+      e.currentTarget.style.transform = 'perspective(500px) rotateX(0deg) translateY(0)';
+      e.currentTarget.style.color = isActive ? 'var(--color-primary)' : '#64748b';
+      e.currentTarget.style.background = isActive ? 'color-mix(in srgb, var(--color-primary) 10%, transparent)' : 'transparent';
+      e.currentTarget.style.boxShadow = 'none';
+    }}
+  >
+    {/* Shimmer layer */}
+    <span className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none"
+      style={{background:'linear-gradient(135deg,rgba(255,255,255,0.15) 0%,transparent 60%)'}}/>
+    {emoji && <span className="mr-1">{emoji}</span>}
+    {label}
+    {isActive && (
+      <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full"
+        style={{background:'var(--color-primary)'}}/>
+    )}
+  </Link>
+);
+
 /* ── Header ────────────────────────────────────────────────────── */
 const Header = ({ settings, campaign }) => {
   const { user, logout } = useAuth();
@@ -120,9 +156,13 @@ const Header = ({ settings, campaign }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [userMenu, setUserMenu] = useState(false);
   const [categories, setCategories] = useState([]);
+  const [navHovered, setNavHovered] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const headerRef = useRef(null);
+
+  // Logo size from settings (default 56px height, max 160px)
+  const logoHeight = Math.min(160, settings?.logoSize || 56);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 30);
@@ -138,7 +178,6 @@ const Header = ({ settings, campaign }) => {
     if (searchQuery.trim()) { navigate(`/shop?search=${encodeURIComponent(searchQuery)}`); setSearchOpen(false); setSearchQuery(''); }
   };
 
-  // Announcement: campaign > custom setting > auto free-delivery
   const announcement = (() => {
     if (campaign?.announcement && campaign?.announcementEnabled !== false) return campaign.announcement;
     if (settings?.announcementEnabled !== false && settings?.announcementText) return settings.announcementText;
@@ -149,9 +188,19 @@ const Header = ({ settings, campaign }) => {
   const announcementLink = settings?.announcementLink || null;
 
   return (
-    <header ref={headerRef} className={`sticky top-0 z-[45] transition-all duration-500 ${scrolled ? 'header-scrolled' : ''}`}
-      style={{background: scrolled ? undefined : 'rgba(255,255,255,0.98)', backdropFilter:'blur(20px)', WebkitBackdropFilter:'blur(20px)', borderBottom: scrolled ? undefined : '1px solid rgba(0,0,0,0.05)'}}>
-      
+    <header
+      ref={headerRef}
+      className={`sticky top-0 z-[45] transition-all duration-500 ${scrolled ? 'header-scrolled' : ''}`}
+      style={{
+        background: scrolled
+          ? 'rgba(255,255,255,0.92)'
+          : 'rgba(255,255,255,0.98)',
+        backdropFilter: 'blur(24px)',
+        WebkitBackdropFilter: 'blur(24px)',
+        borderBottom: scrolled ? '1px solid rgba(0,0,0,0.08)' : '1px solid rgba(0,0,0,0.04)',
+        boxShadow: scrolled ? '0 4px 24px rgba(0,0,0,0.06)' : 'none',
+      }}
+    >
       {/* Ticker announcement */}
       {announcement && (
         <div className="announcement-bar overflow-hidden py-1.5 text-xs font-bold text-white"
@@ -172,66 +221,189 @@ const Header = ({ settings, campaign }) => {
       )}
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
-        <div className="flex items-center h-14 sm:h-16 gap-2">
-          {/* Logo */}
-          <Link to="/" className="flex items-center gap-2 flex-shrink-0 group mr-2">
-            {settings?.logoUrl ? (
-              <img src={settings.logoUrl} alt={settings.storeName||'ShopZen'} className="h-16 sm:h-18 object-contain max-w-[280px]"/>
-            ) : (
-              <>
-                <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white transition-transform group-hover:scale-110 group-hover:rotate-3"
-                  style={{background:'var(--theme-gradient)',boxShadow:'0 4px 14px var(--glow-primary)'}}>
-                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+        <div className="flex items-center gap-2" style={{height: `${Math.max(64, logoHeight + 20)}px`}}>
+
+          {/* ── Logo ── */}
+          <Link
+            to="/"
+            className="flex items-center gap-2 flex-shrink-0 group mr-3"
+            style={{perspective:'600px'}}
+            onMouseEnter={e => { e.currentTarget.querySelector('.logo-inner') && (e.currentTarget.querySelector('.logo-inner').style.transform = 'rotateY(8deg) scale(1.03)'); }}
+            onMouseLeave={e => { e.currentTarget.querySelector('.logo-inner') && (e.currentTarget.querySelector('.logo-inner').style.transform = 'rotateY(0deg) scale(1)'); }}
+          >
+            <div className="logo-inner transition-transform duration-300" style={{transformStyle:'preserve-3d'}}>
+              {settings?.logoUrl ? (
+                <img
+                  src={settings.logoUrl}
+                  alt={settings.storeName || 'ShopZen'}
+                  style={{
+                    height: `${logoHeight}px`,
+                    maxWidth: '260px',
+                    objectFit: 'contain',
+                    filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.10))',
+                  }}
+                />
+              ) : (
+                <div className="flex items-center gap-2">
+                  <div
+                    className="rounded-xl flex items-center justify-center text-white transition-all duration-300 group-hover:rotate-6"
+                    style={{
+                      width: `${Math.max(28, logoHeight * 0.6)}px`,
+                      height: `${Math.max(28, logoHeight * 0.6)}px`,
+                      background: 'var(--theme-gradient)',
+                      boxShadow: '0 4px 14px var(--glow-primary)',
+                    }}
+                  >
+                    <svg style={{width:'55%',height:'55%'}} fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"/>
+                    </svg>
+                  </div>
+                  <span
+                    className="font-bold hidden xs:block"
+                    style={{
+                      fontFamily: 'var(--font-display)',
+                      letterSpacing: '-0.02em',
+                      fontSize: `${Math.max(16, logoHeight * 0.38)}px`,
+                      color: '#111827',
+                    }}
+                  >
+                    {settings?.storeName || 'ShopZen'}
+                  </span>
                 </div>
-                <span className="font-bold text-base sm:text-xl text-gray-900 hidden xs:block" style={{fontFamily:'var(--font-display)',letterSpacing:'-0.02em'}}>
-                  {settings?.storeName||'ShopZen'}
-                </span>
-              </>
-            )}
+              )}
+            </div>
           </Link>
 
-          {/* Desktop nav */}
-          <nav className="hidden lg:flex items-center gap-0.5 flex-1 justify-center">
-            {[['/', 'Home'], ['/shop', 'Shop']].map(([to,label]) => (
-              <Link key={to} to={to} className={`px-3 py-2 text-sm font-semibold rounded-xl transition-all ${location.pathname===to?'text-gray-900 bg-gray-100':'text-gray-500 hover:text-gray-900 hover:bg-gray-50'}`}>{label}</Link>
-            ))}
-            {categories.slice(0,4).map(cat => (
-              <Link key={cat._id} to={`/shop/${cat.slug}`} className="px-3 py-2 text-sm font-semibold text-gray-500 hover:text-gray-900 hover:bg-gray-50 rounded-xl transition-all">{cat.name}</Link>
-            ))}
-            {settings?.enableGiftCards !== false && (
-              <Link to="/gift-cards" className="px-3 py-2 text-sm font-semibold text-gray-500 hover:text-gray-900 hover:bg-gray-50 rounded-xl transition-all">🎁 Gifts</Link>
-            )}
+          {/* ── Desktop 3D Nav ── */}
+          <nav
+            className="hidden lg:flex items-center gap-0.5 flex-1 justify-center"
+            onMouseEnter={() => setNavHovered(true)}
+            onMouseLeave={() => setNavHovered(false)}
+          >
+            {/* Floating nav pill background */}
+            <div
+              className="flex items-center gap-0.5 px-2 py-1.5 rounded-2xl transition-all duration-300"
+              style={{
+                background: navHovered ? 'rgba(0,0,0,0.03)' : 'transparent',
+                boxShadow: navHovered ? 'inset 0 1px 0 rgba(255,255,255,0.8), 0 1px 8px rgba(0,0,0,0.04)' : 'none',
+              }}
+            >
+              <NavLink3D to="/" label="Home" isActive={location.pathname==='/'} />
+              <NavLink3D to="/shop" label="Shop" isActive={location.pathname==='/shop'} />
+              {categories.slice(0,4).map(cat => (
+                <NavLink3D
+                  key={cat._id}
+                  to={`/shop/${cat.slug}`}
+                  label={cat.name}
+                  isActive={location.pathname===`/shop/${cat.slug}`}
+                />
+              ))}
+              {settings?.enableGiftCards !== false && (
+                <NavLink3D to="/gift-cards" label="Gifts" emoji="🎁" isActive={location.pathname==='/gift-cards'} />
+              )}
+            </div>
           </nav>
 
-          {/* Actions */}
-          <div className="flex items-center gap-0.5 ml-auto">
+          {/* ── Action Icons ── */}
+          <div className="flex items-center gap-1 ml-auto">
+
             {/* Search */}
-            <button onClick={()=>setSearchOpen(true)} className="p-2 rounded-xl hover:bg-gray-100 transition-colors text-gray-500 hover:text-gray-800">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+            <button
+              onClick={() => setSearchOpen(true)}
+              className="relative p-2.5 rounded-xl transition-all duration-200 text-gray-500 hover:text-gray-800"
+              style={{background:'transparent'}}
+              onMouseEnter={e => {
+                e.currentTarget.style.background = 'rgba(0,0,0,0.05)';
+                e.currentTarget.style.transform = 'perspective(400px) rotateX(-10deg) translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 6px 16px rgba(0,0,0,0.1)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.background = 'transparent';
+                e.currentTarget.style.transform = 'none';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+              </svg>
             </button>
+
             {/* Wishlist */}
             {user && settings?.enableWishlist !== false && (
-              <Link to="/wishlist" className="hidden sm:flex p-2 rounded-xl hover:bg-gray-100 transition-colors text-gray-500 hover:text-red-400">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
+              <Link
+                to="/wishlist"
+                className="hidden sm:flex p-2.5 rounded-xl transition-all duration-200 text-gray-500 hover:text-red-400"
+                style={{background:'transparent'}}
+                onMouseEnter={e => {
+                  e.currentTarget.style.background = 'rgba(239,68,68,0.07)';
+                  e.currentTarget.style.transform = 'perspective(400px) rotateX(-10deg) translateY(-2px)';
+                  e.currentTarget.style.boxShadow = '0 6px 16px rgba(239,68,68,0.12)';
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.background = 'transparent';
+                  e.currentTarget.style.transform = 'none';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/>
+                </svg>
               </Link>
             )}
+
             {/* Cart */}
-            <button onClick={()=>setIsOpen(true)} className="relative p-2 rounded-xl hover:bg-gray-100 transition-colors text-gray-500 hover:text-gray-800">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
+            <button
+              onClick={() => setIsOpen(true)}
+              className="relative p-2.5 rounded-xl transition-all duration-200 text-gray-500 hover:text-gray-800"
+              style={{background:'transparent'}}
+              onMouseEnter={e => {
+                e.currentTarget.style.background = 'color-mix(in srgb, var(--color-primary) 10%, transparent)';
+                e.currentTarget.style.transform = 'perspective(400px) rotateX(-10deg) translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 6px 16px color-mix(in srgb, var(--color-primary) 20%, transparent)';
+                e.currentTarget.style.color = 'var(--color-primary)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.background = 'transparent';
+                e.currentTarget.style.transform = 'none';
+                e.currentTarget.style.boxShadow = 'none';
+                e.currentTarget.style.color = '';
+              }}
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/>
+                <line x1="3" y1="6" x2="21" y2="6"/>
+                <path d="M16 10a4 4 0 01-8 0"/>
+              </svg>
               {itemCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 text-white text-[9px] rounded-full min-w-[16px] h-4 flex items-center justify-center font-black bounce-in px-0.5"
-                  style={{background:'var(--theme-gradient)',boxShadow:'0 2px 8px var(--glow-primary)'}}>
+                <span
+                  className="absolute -top-0.5 -right-0.5 text-white text-[9px] rounded-full min-w-[17px] h-[17px] flex items-center justify-center font-black bounce-in px-0.5"
+                  style={{background:'var(--theme-gradient)',boxShadow:'0 2px 8px var(--glow-primary)'}}
+                >
                   {itemCount > 9 ? '9+' : itemCount}
                 </span>
               )}
             </button>
-            {/* User */}
+
+            {/* User Avatar */}
             {user ? (
               <div className="relative ml-1">
-                <button onClick={()=>setUserMenu(!userMenu)}
-                  className="flex items-center gap-1.5 p-1 rounded-xl hover:bg-gray-100 transition-all">
-                  <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold"
-                    style={{background:'var(--theme-gradient)',boxShadow:'0 2px 10px var(--glow-primary)'}}>
+                <button
+                  onClick={() => setUserMenu(!userMenu)}
+                  className="flex items-center gap-1.5 p-1 rounded-xl transition-all duration-200"
+                  style={{background:'transparent'}}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.background = 'rgba(0,0,0,0.04)';
+                    e.currentTarget.style.transform = 'perspective(400px) rotateX(-6deg) translateY(-1px)';
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.background = 'transparent';
+                    e.currentTarget.style.transform = 'none';
+                  }}
+                >
+                  <div
+                    className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold"
+                    style={{background:'var(--theme-gradient)',boxShadow:'0 2px 10px var(--glow-primary)'}}
+                  >
                     {user.firstName?.[0]?.toUpperCase()}
                   </div>
                 </button>
@@ -250,12 +422,29 @@ const Header = ({ settings, campaign }) => {
                 )}
               </div>
             ) : (
-              <Link to="/login" className="hidden sm:flex btn-primary text-sm py-2 px-4 ml-2">Sign In</Link>
+              <Link
+                to="/login"
+                className="hidden sm:flex btn-primary text-sm py-2 px-4 ml-2 transition-all duration-200"
+                onMouseEnter={e => {
+                  e.currentTarget.style.transform = 'perspective(400px) rotateX(-8deg) translateY(-2px)';
+                  e.currentTarget.style.boxShadow = '0 8px 20px var(--glow-primary)';
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.transform = 'none';
+                  e.currentTarget.style.boxShadow = '';
+                }}
+              >
+                Sign In
+              </Link>
             )}
+
             {/* Hamburger */}
-            <button onClick={()=>setMenuOpen(!menuOpen)} className="lg:hidden p-2 rounded-xl hover:bg-gray-100 text-gray-500 ml-1">
+            <button
+              onClick={() => setMenuOpen(!menuOpen)}
+              className="lg:hidden p-2 rounded-xl hover:bg-gray-100 text-gray-500 ml-1 transition-all"
+            >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d={menuOpen?"M6 18L18 6M6 6l12 12":"M4 6h16M4 12h16M4 18h16"}/>
+                <path strokeLinecap="round" strokeLinejoin="round" d={menuOpen ? "M6 18L18 6M6 6l12 12" : "M4 6h16M4 12h16M4 18h16"}/>
               </svg>
             </button>
           </div>
@@ -275,16 +464,16 @@ const Header = ({ settings, campaign }) => {
 
       {/* Search overlay */}
       {searchOpen && (
-        <div className="fixed inset-0 bg-black/60 z-[55] flex items-start justify-center pt-14 sm:pt-20 px-4" onClick={()=>setSearchOpen(false)}>
-          <form onSubmit={handleSearch} onClick={e=>e.stopPropagation()} className="w-full max-w-xl bg-white rounded-2xl overflow-hidden shadow-2xl scale-in">
+        <div className="fixed inset-0 bg-black/60 z-[55] flex items-start justify-center pt-14 sm:pt-20 px-4" onClick={() => setSearchOpen(false)}>
+          <form onSubmit={handleSearch} onClick={e => e.stopPropagation()} className="w-full max-w-xl bg-white rounded-2xl overflow-hidden shadow-2xl scale-in">
             <div className="flex items-center gap-3 p-4">
               <svg className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-              <input autoFocus value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="Search products…" className="flex-1 text-gray-800 text-base outline-none font-medium" style={{fontSize:'16px'}}/>
-              <button type="button" onClick={()=>setSearchOpen(false)} className="text-gray-400 hover:text-gray-600 text-lg">✕</button>
+              <input autoFocus value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search products…" className="flex-1 text-gray-800 text-base outline-none font-medium" style={{fontSize:'16px'}}/>
+              <button type="button" onClick={() => setSearchOpen(false)} className="text-gray-400 hover:text-gray-600 text-lg">✕</button>
             </div>
             <div className="border-t border-gray-100 px-4 py-3 bg-gray-50 flex gap-2 flex-wrap">
               {categories.slice(0,5).map(cat => (
-                <button key={cat._id} type="button" onClick={()=>{navigate(`/shop/${cat.slug}`);setSearchOpen(false);}}
+                <button key={cat._id} type="button" onClick={() => { navigate(`/shop/${cat.slug}`); setSearchOpen(false); }}
                   className="text-xs bg-white border border-gray-200 text-gray-600 px-3 py-1.5 rounded-full hover:border-gray-300 transition-colors">{cat.name}</button>
               ))}
             </div>
@@ -315,9 +504,9 @@ const MobileBottomNav = ({ settings }) => {
       {tabs.map((tab, i) => {
         const isActive = tab.to && location.pathname === tab.to;
         if (tab.cart) return (
-          <button key={i} onClick={()=>setIsOpen(true)} className="flex-1 flex flex-col items-center justify-center py-2 gap-0.5 relative">
+          <button key={i} onClick={() => setIsOpen(true)} className="flex-1 flex flex-col items-center justify-center py-2 gap-0.5 relative">
             <div className="relative">
-              <span style={{color:isActive?primary:'#94a3b8'}}>{tab.icon}</span>
+              <span style={{color: isActive ? primary : '#94a3b8'}}>{tab.icon}</span>
               {itemCount > 0 && (
                 <span className="absolute -top-1.5 -right-2 text-white text-[9px] rounded-full min-w-[15px] h-3.5 flex items-center justify-center font-black px-0.5"
                   style={{background:'var(--theme-gradient)'}}>
@@ -325,13 +514,13 @@ const MobileBottomNav = ({ settings }) => {
                 </span>
               )}
             </div>
-            <span className="text-[10px] font-bold" style={{color:isActive?primary:'#94a3b8'}}>{tab.label}</span>
+            <span className="text-[10px] font-bold" style={{color: isActive ? primary : '#94a3b8'}}>{tab.label}</span>
           </button>
         );
         return (
           <Link key={i} to={tab.to} className="flex-1 flex flex-col items-center justify-center py-2 gap-0.5">
-            <span style={{color:isActive?primary:'#94a3b8'}}>{tab.icon}</span>
-            <span className="text-[10px] font-bold" style={{color:isActive?primary:'#94a3b8'}}>{tab.label}</span>
+            <span style={{color: isActive ? primary : '#94a3b8'}}>{tab.icon}</span>
+            <span className="text-[10px] font-bold" style={{color: isActive ? primary : '#94a3b8'}}>{tab.label}</span>
           </Link>
         );
       })}
@@ -374,7 +563,7 @@ const Footer = ({ settings }) => {
           <div>
             <h4 className="text-white font-bold mb-3 text-xs uppercase tracking-widest">Shop</h4>
             <ul className="space-y-2">
-              {[['/',  'Home'],['/shop','All Products'],['/gift-cards','🎁 Gift Cards'],['/shop?onSale=true','Sale Items']].map(([to,label])=>(
+              {[['/', 'Home'],['/shop','All Products'],['/gift-cards','🎁 Gift Cards'],['/shop?onSale=true','Sale Items']].map(([to,label])=>(
                 <li key={to}><Link to={to} className="text-sm hover:text-white transition-colors">{label}</Link></li>
               ))}
             </ul>
@@ -435,7 +624,6 @@ export default function CustomerLayout() {
   const { campaign } = useSeasonal();
   const { settings }  = useTheme();
 
-  // Inject Google Search Console verification meta tag dynamically
   React.useEffect(() => {
     if (settings?.googleSearchConsole) {
       let el = document.querySelector('meta[name="google-site-verification"]');

@@ -264,12 +264,17 @@ export default function MyOrders() {
 
   const [orders, setOrders]                             = useState([]);
   const [loading, setLoading]                           = useState(true);
+  const [slipFile, setSlipFile]                         = useState(null);
+  const [slipPreview, setSlipPreview]                   = useState(null);
+  const [slipUploading, setSlipUploading]               = useState(false);
+  const [slipUploaded, setSlipUploaded]                 = useState(false);
   // null = not loaded yet — prevents premature "expired" state on first render
   const [cancelWindowMinutes, setCancelWindowMinutes]   = useState(null);
 
   const sym      = settings?.currencySymbol || 'Rs.';
   const primary  = 'var(--color-primary)';
-  const newOrderId = searchParams.get('new');
+  const newOrderId    = searchParams.get('new');
+  const newPaymentMethod = searchParams.get('payment'); // e.g. 'bank_transfer'
 
   const fetchOrders = useCallback(() => {
     setLoading(true);
@@ -295,6 +300,36 @@ export default function MyOrders() {
       })
       .catch(() => setCancelWindowMinutes(60)); // fallback on API error
   }, []);
+
+  // Slip upload for bank transfer orders landing from checkout
+  const handleSlipChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setSlipFile(file);
+    const reader = new FileReader();
+    reader.onload = (ev) => setSlipPreview(ev.target.result);
+    reader.readAsDataURL(file);
+  };
+
+  const handleSlipUpload = async () => {
+    if (!newOrderId || !slipFile) return;
+    setSlipUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('slip', slipFile);
+      await API.post(`/orders/${newOrderId}/payment-slip`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      toast.success('✅ Payment slip uploaded! We\'ll verify it shortly.');
+      setSlipUploaded(true);
+      setSlipFile(null);
+      setSlipPreview(null);
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Upload failed. Try again or contact support.');
+    } finally {
+      setSlipUploading(false);
+    }
+  };
 
   const pendingPaymentOrders = orders.filter(
     o => o.paymentMethod === 'bank_transfer' && o.paymentStatus !== 'paid'
@@ -328,8 +363,82 @@ export default function MyOrders() {
         </div>
       )}
 
-      {/* New order success banner */}
-      {newOrderId && (
+      {/* New order success banner — enhanced for bank transfer */}
+      {newOrderId && !slipUploaded && newPaymentMethod === 'bank_transfer' && (
+        <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-5 mb-6">
+          {/* Success header */}
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-11 h-11 rounded-xl flex items-center justify-center text-white flex-shrink-0" style={{ background: 'var(--theme-gradient)' }}>
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            </div>
+            <div>
+              <p className="font-bold text-amber-900 text-base">Order placed! Complete your bank transfer</p>
+              <p className="text-xs text-amber-700 mt-0.5">Your order is confirmed — please transfer the amount below</p>
+            </div>
+          </div>
+
+          {/* Bank details */}
+          <div className="rounded-xl bg-white border border-amber-200 p-4 mb-4 space-y-1.5 text-sm">
+            <p className="font-bold text-gray-800 mb-2">🏦 Bank Transfer Details</p>
+            {settings?.bankName && <div className="flex gap-2"><span className="text-gray-400 w-28 flex-shrink-0">Bank</span><span className="font-semibold text-gray-800">{settings.bankName}</span></div>}
+            {settings?.bankAccountName && <div className="flex gap-2"><span className="text-gray-400 w-28 flex-shrink-0">Account Name</span><span className="font-semibold text-gray-800">{settings.bankAccountName}</span></div>}
+            {settings?.bankAccountNumber && (
+              <div className="flex gap-2 items-center">
+                <span className="text-gray-400 w-28 flex-shrink-0">Account No.</span>
+                <span className="font-mono font-black text-gray-900 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-lg tracking-widest">{settings.bankAccountNumber}</span>
+              </div>
+            )}
+            {settings?.bankBranch && <div className="flex gap-2"><span className="text-gray-400 w-28 flex-shrink-0">Branch</span><span className="font-semibold text-gray-800">{settings.bankBranch}</span></div>}
+            <div className="pt-2 mt-2 border-t border-amber-100 text-xs text-amber-700 font-medium">
+              ⚠️ Use your order number as the transfer reference so we can match your payment.
+            </div>
+          </div>
+
+          {/* Slip upload */}
+          <p className="text-sm font-semibold text-gray-800 mb-2">📎 Upload Payment Slip <span className="font-normal text-gray-400">(optional — speeds up verification)</span></p>
+          {slipPreview ? (
+            <div className="relative rounded-xl overflow-hidden border-2 border-amber-300 mb-3 max-h-48">
+              <img src={slipPreview} alt="Payment slip" className="w-full object-contain max-h-48"/>
+              <button onClick={() => { setSlipFile(null); setSlipPreview(null); }}
+                className="absolute top-2 right-2 w-7 h-7 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold hover:bg-red-600">✕</button>
+            </div>
+          ) : (
+            <label className="flex items-center justify-center gap-3 rounded-xl border-2 border-dashed border-amber-300 p-4 cursor-pointer hover:bg-amber-100 transition-colors mb-3 bg-white">
+              <svg className="w-6 h-6 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+              <span className="text-sm font-medium text-amber-700">Click to attach your slip (image or PDF)</span>
+              <input type="file" accept="image/*,application/pdf" onChange={handleSlipChange} className="hidden"/>
+            </label>
+          )}
+          {slipFile && (
+            <button onClick={handleSlipUpload} disabled={slipUploading}
+              className="w-full py-3 rounded-xl text-white font-bold text-sm transition-opacity disabled:opacity-60 flex items-center justify-center gap-2"
+              style={{ background: 'var(--theme-gradient)' }}>
+              {slipUploading
+                ? <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Uploading…</>
+                : '📤 Upload Slip'
+              }
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Slip uploaded confirmation */}
+      {newOrderId && slipUploaded && (
+        <div className="rounded-2xl border-2 border-green-200 bg-green-50 p-4 mb-6 flex items-center gap-3">
+          <svg className="w-6 h-6 text-green-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          <div>
+            <p className="font-bold text-green-800 text-sm">Slip uploaded! We'll verify your payment shortly.</p>
+            <p className="text-xs text-green-600">You'll receive a confirmation once it's approved.</p>
+          </div>
+        </div>
+      )}
+
+      {/* Normal success banner for non-bank-transfer orders */}
+      {newOrderId && newPaymentMethod !== 'bank_transfer' && (
         <div className="rounded-2xl border-2 border-green-200 bg-green-50 p-4 mb-6 flex items-center gap-3">
           <svg className="w-6 h-6 text-green-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>

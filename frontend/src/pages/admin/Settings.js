@@ -108,7 +108,7 @@ export default function AdminSettings() {
     codEnabled:true, bankTransferEnabled:true,
     bankName:'', bankAccountName:'', bankAccountNumber:'', bankBranch:'',
     theme:'default', primaryColor:'', secondaryColor:'', darkBgColor:'', darkMode:false,
-    fontStyle:'default', logoUrl:'', faviconUrl:'', customCSS:'',
+    fontStyle:'default', logoUrl:'', faviconUrl:'', logoSize:48, customCSS:'',
     metaTitle:'', metaDescription:'', googleAnalytics:'', facebookPixel:'',
     lowStockAlert:5, orderNotificationEmail:'', cancelWindowMinutes:60, autoConfirmOrders:false,
     autoDecisionEnabled:false, autoDecisionMinutes:60, autoDecisionAction:'approve',
@@ -860,6 +860,55 @@ export default function AdminSettings() {
                     <ImageUpload label="Store Logo" hint="Recommended: 200×60px PNG or SVG" value={settings.logoUrl} onChange={url=>setSettings(p=>({...p,logoUrl:url}))} />
                     <ImageUpload label="Favicon" hint="32×32px .ico or .png" value={settings.faviconUrl} onChange={url=>setSettings(p=>({...p,faviconUrl:url}))} />
                   </div>
+
+                  {/* Logo Size Control */}
+                  <div className="mt-5 p-4 rounded-2xl border border-gray-100 bg-gray-50">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <p className="text-sm font-semibold text-gray-800">Logo Size in Navbar</p>
+                        <p className="text-xs text-gray-400 mt-0.5">Adjust the visible height of your logo in the header</p>
+                      </div>
+                      <span className="text-sm font-bold px-3 py-1.5 rounded-xl text-white" style={{background:'var(--theme-gradient)'}}>{settings.logoSize||56}px</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={28}
+                      max={160}
+                      step={4}
+                      value={settings.logoSize||56}
+                      onChange={e=>setSettings(p=>({...p,logoSize:Number(e.target.value)}))}
+                      className="w-full accent-primary"
+                      style={{cursor:'pointer'}}
+                    />
+                    <div className="flex justify-between text-xs text-gray-400 mt-1.5">
+                      <span>28px</span>
+                      <span>Default (56px)</span>
+                      <span>160px</span>
+                    </div>
+                    {/* Live logo preview */}
+                    {settings.logoUrl && (
+                      <div className="mt-4 flex items-center gap-3 p-3 bg-white rounded-xl border border-gray-100 overflow-hidden">
+                        <span className="text-xs text-gray-400 flex-shrink-0">Preview:</span>
+                        <img
+                          src={settings.logoUrl}
+                          alt="logo preview"
+                          style={{height:`${settings.logoSize||56}px`,maxWidth:'260px',objectFit:'contain'}}
+                        />
+                      </div>
+                    )}
+                    <div className="flex gap-1.5 mt-3 flex-wrap">
+                      {[28, 40, 56, 72, 96, 128, 160].map(sz => (
+                        <button
+                          key={sz}
+                          onClick={()=>setSettings(p=>({...p,logoSize:sz}))}
+                          className={`flex-1 text-xs py-1.5 rounded-lg font-semibold transition-all border min-w-[36px] ${(settings.logoSize||56)===sz?'border-primary bg-primary text-white':'border-gray-200 text-gray-500 hover:border-gray-300 bg-white'}`}
+                        >
+                          {sz}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-xs text-gray-400 mt-2">⚠️ Logos above 96px will significantly increase header height</p>
+                  </div>
                 </div>
 
                 <div className="border-t pt-5">
@@ -875,7 +924,7 @@ export default function AdminSettings() {
                     <div className="py-1.5 text-center text-xs font-semibold text-white" style={{background:settings.primaryColor||currentTheme.primary}}>🚚 Free delivery on orders over {settings.currencySymbol||'Rs.'} {(settings.freeDeliveryThreshold||5000).toLocaleString()}</div>
                     <div className="px-5 py-4 flex items-center justify-between" style={{background:settings.darkBgColor||currentTheme.dark}}>
                       <div className="flex items-center gap-2.5">
-                        {settings.logoUrl ? <img src={settings.logoUrl} alt="" className="h-8 object-contain"/> : <span className="font-bold text-white text-base" style={{fontFamily:currentFont.display}}>{settings.storeName||'ShopZen'}</span>}
+                        {settings.logoUrl ? <img src={settings.logoUrl} alt="" style={{height:`${settings.logoSize||56}px`,maxWidth:'180px',objectFit:'contain'}}/> : <span className="font-bold text-white text-base" style={{fontFamily:currentFont.display}}>{settings.storeName||'ShopZen'}</span>}
                       </div>
                       <div className="px-4 py-1.5 rounded-lg text-white text-xs font-semibold" style={{background:settings.primaryColor||currentTheme.primary}}>Shop Now</div>
                     </div>
