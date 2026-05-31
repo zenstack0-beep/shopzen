@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -7,11 +7,10 @@ import API from '../../utils/api';
 
 const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID || '';
 
-// ─── Load GIS script once ─────────────────────────────────────────────────────
+// ─── Load GIS script once globally ───────────────────────────────────────────
 let gsiLoaded = false;
 let gsiLoading = false;
 const gsiCallbacks = [];
-
 function loadGSI(cb) {
   if (gsiLoaded) { cb(); return; }
   gsiCallbacks.push(cb);
@@ -30,7 +29,68 @@ function loadGSI(cb) {
   document.head.appendChild(script);
 }
 
-// ─── Shared helpers ───────────────────────────────────────────────────────────
+// ─── Password strength checker ────────────────────────────────────────────────
+const checkPasswordStrength = (password) => {
+  const rules = [
+    { id: 'length',    label: 'At least 8 characters',            pass: password.length >= 8 },
+    { id: 'uppercase', label: 'One uppercase letter (A–Z)',        pass: /[A-Z]/.test(password) },
+    { id: 'lowercase', label: 'One lowercase letter (a–z)',        pass: /[a-z]/.test(password) },
+    { id: 'number',    label: 'One number (0–9)',                  pass: /[0-9]/.test(password) },
+    { id: 'special',   label: 'One special character (!@#$%...)',  pass: /[^A-Za-z0-9]/.test(password) },
+  ];
+  const passed = rules.filter(r => r.pass).length;
+  let strength = 'weak';
+  if (passed === 5) strength = 'strong';
+  else if (passed >= 3) strength = 'medium';
+  return { rules, passed, strength };
+};
+
+const strengthConfig = {
+  weak:   { label: 'Weak',   color: '#ef4444', barColor: 'bg-red-500',    bars: 1 },
+  medium: { label: 'Fair',   color: '#f59e0b', barColor: 'bg-amber-400',  bars: 2 },
+  strong: { label: 'Strong', color: '#22c55e', barColor: 'bg-green-500',  bars: 3 },
+};
+
+function PasswordStrengthMeter({ password }) {
+  const { rules, strength } = useMemo(() => checkPasswordStrength(password), [password]);
+  if (!password) return null;
+  const cfg = strengthConfig[strength];
+
+  return (
+    <div className="mt-2 space-y-2">
+      {/* Strength bars */}
+      <div className="flex items-center gap-2">
+        <div className="flex gap-1 flex-1">
+          {[1, 2, 3].map(i => (
+            <div
+              key={i}
+              className={`h-1.5 flex-1 rounded-full transition-all duration-300 ${i <= cfg.bars ? cfg.barColor : 'bg-gray-200'}`}
+            />
+          ))}
+        </div>
+        <span className="text-xs font-semibold" style={{ color: cfg.color, minWidth: 40 }}>
+          {cfg.label}
+        </span>
+      </div>
+
+      {/* Rule checklist */}
+      <div className="grid grid-cols-1 gap-1">
+        {rules.map(rule => (
+          <div key={rule.id} className="flex items-center gap-1.5">
+            <span className={`flex-shrink-0 w-4 h-4 rounded-full flex items-center justify-center text-white transition-all duration-200 ${rule.pass ? 'bg-green-500' : 'bg-gray-200'}`} style={{ fontSize: 9 }}>
+              {rule.pass ? '✓' : ''}
+            </span>
+            <span className={`text-xs transition-colors duration-200 ${rule.pass ? 'text-green-600 line-through' : 'text-gray-400'}`}>
+              {rule.label}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Shared UI helpers ────────────────────────────────────────────────────────
 const Logo = ({ settings }) => (
   <Link to="/" className="inline-flex items-center gap-2 mb-6">
     {settings?.logoUrl ? (
@@ -50,8 +110,8 @@ const Logo = ({ settings }) => (
   </Link>
 );
 
-const Spinner = ({ className = 'w-4 h-4' }) => (
-  <svg className={`${className} animate-spin`} fill="none" viewBox="0 0 24 24">
+const Spinner = () => (
+  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
   </svg>
@@ -68,148 +128,85 @@ const Divider = () => (
   </div>
 );
 
-// ─── Google Button ────────────────────────────────────────────────────────────
-//
-// KEY DESIGN:
-//  1. The GSI callback calls our backend, then writes token+user to
-//     localStorage SYNCHRONOUSLY before calling onSuccess.
-//     This guarantees the API utility has a valid token before any
-//     navigation or subsequent requests fire.
-//  2. We use renderButton (not prompt) as the primary trigger — it is
-//     the only method that reliably works with Chrome's FedCM.
-//  3. GSI is re-initialized on every mount with a fresh callback via a ref,
-//     so switching accounts or re-visiting the page always works.
-//
+// ─── Google Sign-In Button ────────────────────────────────────────────────────
 function GoogleSignInButton({ onSuccess, disabled, label = 'Continue with Google' }) {
+  const [ready, setReady] = useState(false);
   const [loading, setLoading] = useState(false);
-  const containerRef = useRef(null);
 
-  // Always-current reference to onSuccess — avoids stale closure without
-  // needing to re-run the GSI init effect on every render.
-  const onSuccessRef = useRef(onSuccess);
-  useEffect(() => { onSuccessRef.current = onSuccess; }, [onSuccess]);
+  const handleCredential = useCallback(async (response) => {
+    setLoading(true);
+    try {
+      const { data } = await API.post('/auth/google', { credential: response.credential });
+      onSuccess(data.user, data.token);
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Google sign-in failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, [onSuccess]);
 
   useEffect(() => {
-    if (!GOOGLE_CLIENT_ID || !containerRef.current) return;
-
-    let cancelled = false; // guard against calling setState after unmount
-
+    if (!GOOGLE_CLIENT_ID) return;
     loadGSI(() => {
-      if (cancelled || !containerRef.current) return;
-
-      // Cancel any previous One Tap / popup session before re-init
-      try { window.google.accounts.id.cancel(); } catch (_) {}
-
+      if (window.__gsiInitialized) { setReady(true); return; }
+      window.__gsiInitialized = true;
       window.google.accounts.id.initialize({
         client_id: GOOGLE_CLIENT_ID,
-        // ─── THE FIX: this callback does the full auth sequence ───────────
-        callback: async (googleResponse) => {
-          if (cancelled) return;
-          setLoading(true);
-          try {
-            const { data } = await API.post('/auth/google', {
-              credential: googleResponse.credential,
-            });
-
-            // ✅ Write to localStorage FIRST — synchronously — so the token
-            //    is available to any API interceptor before navigate() fires.
-            localStorage.setItem('token', data.token);
-            localStorage.setItem('user', JSON.stringify(data.user));
-
-            // Then notify parent (which calls loginWithGoogle to sync React
-            // state, then navigate). Even if state lags, localStorage is set.
-            onSuccessRef.current(data.user, data.token);
-          } catch (err) {
-            toast.error(
-              err.response?.data?.message || 'Google sign-in failed. Please try again.'
-            );
-          } finally {
-            if (!cancelled) setLoading(false);
-          }
-        },
+        callback: handleCredential,
         auto_select: false,
         cancel_on_tap_outside: true,
         ux_mode: 'popup',
       });
-
-      // renderButton is rendered into the hidden container.
-      // Width must be set so GSI renders a full-width button internally.
-      window.google.accounts.id.renderButton(containerRef.current, {
-        type: 'standard',
-        theme: 'outline',
-        size: 'large',
-        width: Math.floor(containerRef.current.getBoundingClientRect().width) || 400,
-        logo_alignment: 'left',
-      });
+      setReady(true);
     });
+    return () => { window.__gsiInitialized = false; };
+  }, [handleCredential]);
 
-    return () => {
-      cancelled = true;
-      try { window.google.accounts.id.cancel(); } catch (_) {}
-    };
-  }, []); // run once per mount — onSuccess kept fresh via ref above
-
-  // When user clicks our styled button, click the real hidden GSI button.
   const handleClick = () => {
     if (!GOOGLE_CLIENT_ID) {
-      toast.error('Google Sign-In is not configured. Set REACT_APP_GOOGLE_CLIENT_ID in your .env');
+      toast.error('Google Sign-In is not configured. Add REACT_APP_GOOGLE_CLIENT_ID to frontend/.env');
       return;
     }
-    if (disabled || loading) return;
-    // The rendered GSI button is either a <div role="button"> or an <iframe>
-    const inner =
-      containerRef.current?.querySelector('[role="button"]') ||
-      containerRef.current?.querySelector('iframe');
-    if (inner) {
-      inner.click();
-    } else {
-      // Fallback: try prompt() if renderButton hasn't populated yet
-      window.google?.accounts?.id?.prompt();
+    if (!ready || !window.google?.accounts?.id) {
+      toast.error('Google is still loading, please try again.');
+      return;
     }
+    window.google.accounts.id.prompt((notification) => {
+      if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+        const container = document.getElementById('__gsi_btn_container');
+        if (container) {
+          window.google.accounts.id.renderButton(container, { type: 'standard', theme: 'outline', size: 'large' });
+          const btn = container.querySelector('div[role=button]');
+          if (btn) btn.click();
+        }
+      }
+    });
   };
 
   return (
-    <div className="relative w-full" style={{ minHeight: '46px' }}>
-      {/* Hidden GSI button — real clickable target */}
-      <div
-        ref={containerRef}
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          inset: 0,
-          opacity: 0,
-          overflow: 'hidden',
-          borderRadius: '12px',
-          pointerEvents: 'none', // our overlay handles pointer events
-          zIndex: 0,
-        }}
-      />
-
-      {/* Styled overlay button */}
+    <>
+      <div id="__gsi_btn_container" style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', height: 0, overflow: 'hidden' }} />
       <button
         type="button"
         onClick={handleClick}
-        disabled={disabled || loading}
-        className="relative w-full flex items-center justify-center gap-3 py-3 px-4 border border-gray-200 rounded-xl bg-white hover:bg-gray-50 transition-all font-medium text-gray-700 text-sm shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-        style={{ zIndex: 1 }}
+        disabled={disabled || loading || !ready}
+        className="w-full flex items-center justify-center gap-3 py-3 px-4 border border-gray-200 rounded-xl bg-white hover:bg-gray-50 transition-all font-medium text-gray-700 text-sm shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        {loading ? (
-          <Spinner />
-        ) : (
+        {loading ? <Spinner /> : (
           <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24">
-            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
-            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" />
+            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
           </svg>
         )}
         <span>{loading ? 'Signing in...' : label}</span>
       </button>
-    </div>
+    </>
   );
 }
 
-// ─── Login Page ───────────────────────────────────────────────────────────────
+// ─── Login Page ────────────────────────────────────────────────────────────────
 export function Login() {
   const { login, loginWithGoogle } = useAuth();
   const { settings } = useTheme();
@@ -232,12 +229,11 @@ export function Login() {
     }
   };
 
-  // loginWithGoogle syncs React state from localStorage (which is already written)
   const handleGoogleSuccess = useCallback((user, token) => {
-    if (typeof loginWithGoogle === 'function') loginWithGoogle(user, token);
+    loginWithGoogle(user, token);
     toast.success(`Welcome back, ${user.firstName}! 👋`);
     navigate(user.role === 'admin' ? '/admin' : '/');
-  }, [navigate, loginWithGoogle]);
+  }, [loginWithGoogle, navigate]);
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4 py-12" style={{ background: 'var(--body-bg)' }}>
@@ -247,12 +243,9 @@ export function Login() {
           <h1 className="text-3xl font-bold text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>Welcome back</h1>
           <p className="text-gray-500 mt-1 text-sm">Sign in to continue shopping</p>
         </div>
-
         <div className="rounded-2xl border border-gray-100 shadow-xl p-8" style={{ background: 'var(--card-bg)' }}>
           <GoogleSignInButton onSuccess={handleGoogleSuccess} disabled={loading} />
-
           <Divider />
-
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="form-label">Email Address</label>
@@ -286,7 +279,6 @@ export function Login() {
               {loading ? <><Spinner />Signing in...</> : 'Sign In →'}
             </button>
           </form>
-
           <Divider />
           <p className="text-center text-sm text-gray-500">
             Don't have an account?{' '}
@@ -303,7 +295,7 @@ export function Login() {
   );
 }
 
-// ─── Register Page ────────────────────────────────────────────────────────────
+// ─── Register Page ─────────────────────────────────────────────────────────────
 export function Register() {
   const { register, loginWithGoogle } = useAuth();
   const { settings } = useTheme();
@@ -311,6 +303,7 @@ export function Register() {
   const location = useLocation();
   const prefill = location.state?.prefill || {};
   const fromCheckout = location.state?.fromCheckout || false;
+
   const [form, setForm] = useState({
     firstName: prefill.firstName || '',
     lastName:  prefill.lastName  || '',
@@ -319,12 +312,23 @@ export function Register() {
     password:  '',
     phone:     prefill.phone     || '',
   });
+  const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const [newUserCoupon, setNewUserCoupon] = useState(null);
 
+  // Live password strength
+  const { rules, strength } = useMemo(() => checkPasswordStrength(form.password), [form.password]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (form.password.length < 6) { toast.error('Password must be at least 6 characters'); return; }
+
+    // Enforce all 5 rules before submitting
+    const failedRules = rules.filter(r => !r.pass);
+    if (failedRules.length > 0) {
+      toast.error(`Password needs: ${failedRules[0].label.toLowerCase()}`);
+      return;
+    }
+
     setLoading(true);
     try {
       const res = await register(form);
@@ -345,15 +349,15 @@ export function Register() {
   };
 
   const handleGoogleSuccess = useCallback((user, token) => {
-    if (typeof loginWithGoogle === 'function') loginWithGoogle(user, token);
+    loginWithGoogle(user, token);
     toast.success(`Welcome, ${user.firstName}! 🎉`);
     navigate(fromCheckout ? '/checkout' : '/');
-  }, [navigate, fromCheckout, loginWithGoogle]);
+  }, [loginWithGoogle, navigate, fromCheckout]);
 
   if (newUserCoupon) return (
     <div className="min-h-screen flex items-center justify-center px-4" style={{ background: 'var(--body-bg)' }}>
       <div className="rounded-2xl border border-gray-100 shadow-xl p-8 max-w-md w-full text-center bounce-in" style={{ background: 'var(--card-bg)' }}>
-        <div className="text-6xl mb-4 bounce-in">🎉</div>
+        <div className="text-6xl mb-4">🎉</div>
         <h2 className="text-2xl font-bold text-gray-900 mb-2" style={{ fontFamily: 'var(--font-display)' }}>
           Welcome to {settings?.storeName || 'ShopZen'}!
         </h2>
@@ -389,7 +393,6 @@ export function Register() {
 
         <div className="rounded-2xl border border-gray-100 shadow-xl p-8" style={{ background: 'var(--card-bg)' }}>
           <GoogleSignInButton onSuccess={handleGoogleSuccess} disabled={loading} label="Sign up with Google" />
-
           <Divider />
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -403,30 +406,67 @@ export function Register() {
                 <input value={form.lastName} onChange={e => setForm(p => ({ ...p, lastName: e.target.value }))} required className="form-input" placeholder="Doe" />
               </div>
             </div>
+
             <div>
               <label className="form-label">Username *</label>
               <input value={form.username} onChange={e => setForm(p => ({ ...p, username: e.target.value }))} required className="form-input" placeholder="johndoe123" />
             </div>
+
             <div>
               <label className="form-label">Email *</label>
               <input type="email" value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} required className="form-input" />
             </div>
+
             <div>
               <label className="form-label">Phone</label>
               <input type="tel" value={form.phone} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} className="form-input" placeholder="+94 7X XXX XXXX" />
             </div>
+
+            {/* Password with strength meter */}
             <div>
-              <label className="form-label">Password * (min. 6 chars)</label>
-              <input type="password" value={form.password} onChange={e => setForm(p => ({ ...p, password: e.target.value }))} required minLength={6} className="form-input" />
+              <label className="form-label">Password *</label>
+              <div className="relative">
+                <input
+                  type={showPass ? 'text' : 'password'}
+                  value={form.password}
+                  onChange={e => setForm(p => ({ ...p, password: e.target.value }))}
+                  required
+                  className="form-input pr-10"
+                  placeholder="Create a strong password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPass(!showPass)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  {showPass ? '🙈' : '👁'}
+                </button>
+              </div>
+              {/* Live strength meter — only shows once user starts typing */}
+              <PasswordStrengthMeter password={form.password} />
             </div>
-            <button type="submit" disabled={loading} className="btn-primary w-full py-3 flex items-center justify-center gap-2">
+
+            <button
+              type="submit"
+              disabled={loading || (form.password.length > 0 && strength !== 'strong')}
+              className="btn-primary w-full py-3 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
               {loading ? <><Spinner />Creating...</> : 'Create Account 🎉'}
             </button>
+
+            {/* Helper text when button is disabled due to weak password */}
+            {form.password.length > 0 && strength !== 'strong' && (
+              <p className="text-center text-xs text-amber-500">
+                Complete all password requirements to continue
+              </p>
+            )}
           </form>
 
           <p className="text-center text-sm text-gray-500 mt-5">
             Already have an account?{' '}
-            <Link to="/login" className="font-semibold hover:underline" style={{ color: 'var(--color-primary)' }}>Sign in</Link>
+            <Link to="/login" className="font-semibold hover:underline" style={{ color: 'var(--color-primary)' }}>
+              Sign in
+            </Link>
           </p>
         </div>
       </div>

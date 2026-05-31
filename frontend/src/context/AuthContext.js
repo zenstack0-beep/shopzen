@@ -16,12 +16,12 @@ export const AuthProvider = ({ children }) => {
     return data.user;
   };
 
-  // ✅ Called after Google OAuth — token+user already written to localStorage
-  // by Auth.js before this runs, so we just sync React state.
-  const loginWithGoogle = (user, token) => {
+  // ── NEW: called after Google OAuth succeeds ──────────────────────────────
+  const loginWithGoogle = (userData, token) => {
     localStorage.setItem('token', token);
-    localStorage.setItem('user', JSON.stringify(user));
-    setUser(user);
+    localStorage.setItem('user', JSON.stringify(userData));
+    setUser(userData);   // ← this is what updates the UI
+    return userData;
   };
 
   const register = async (formData) => {

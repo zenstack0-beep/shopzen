@@ -49,7 +49,7 @@ router.post('/google', async (req, res) => {
     const { credential } = req.body;
     if (!credential) return res.status(400).json({ message: 'Google credential is required' });
 
-    // Verify the ID token with Google
+    // Verify token with Google
     const ticket = await googleClient.verifyIdToken({
       idToken: credential,
       audience: process.env.GOOGLE_CLIENT_ID,
@@ -57,38 +57,51 @@ router.post('/google', async (req, res) => {
     const payload = ticket.getPayload();
     const { email, given_name, family_name, picture, sub: googleId } = payload;
 
-    // Find existing user or create new one
-    let user = await User.findOne({ email });
+    // Try find by googleId first, then by email
+    let user = await User.findOne({ googleId });
+    if (!user) user = await User.findOne({ email });
 
     if (!user) {
-      // New user — auto-register via Google
-      const baseUsername = email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '');
-      const username = baseUsername + '_' + googleId.slice(-4);
+      // ── New user: create account ──────────────────────────────────────────
+
+      // Build a unique username — keep trying until one is free
+      const base = (email.split('@')[0]).replace(/[^a-zA-Z0-9_]/g, '').slice(0, 20) || 'user';
+      let username = base;
+      let attempt = 0;
+      while (await User.findOne({ username })) {
+        attempt++;
+        username = `${base}_${attempt}`;
+      }
+
       user = await User.create({
         firstName:  given_name  || 'User',
-        lastName:   family_name || '',
+        lastName:   family_name || '',           // empty string — field is now optional
         username,
         email,
-        password:   googleId + process.env.JWT_SECRET, // non-guessable, never used for password login
+        // A strong non-guessable password — this account can only be accessed via Google
+        password:   crypto.randomBytes(32).toString('hex'),
         googleId,
         avatar:     picture || '',
         isVerified: true,
       });
+
       await Notification.create({
         type:    'new_user',
         title:   'New Customer (Google)',
-        message: `${given_name} ${family_name} signed up via Google`,
+        message: `${given_name || email} signed up via Google`,
         link:    '/admin/customers',
       });
     }
 
     if (!user.isActive) return res.status(403).json({ message: 'Your account has been deactivated' });
 
-    // Update Google fields if not set yet
-    if (!user.googleId) user.googleId = googleId;
-    if (!user.avatar && picture) user.avatar = picture;
+    // Backfill googleId / avatar if this was an existing email-registered user
+    let dirty = false;
+    if (!user.googleId) { user.googleId = googleId; dirty = true; }
+    if (!user.avatar && picture) { user.avatar = picture; dirty = true; }
     user.lastLogin = Date.now();
-    await user.save();
+    if (dirty) await user.save();
+    else await User.findByIdAndUpdate(user._id, { lastLogin: Date.now() });
 
     const token = generateToken(user._id);
     res.json({
@@ -105,7 +118,7 @@ router.post('/google', async (req, res) => {
     });
   } catch (err) {
     console.error('[GOOGLE AUTH ERROR]', err.message);
-    res.status(401).json({ message: 'Google sign-in failed. Please try again.' });
+    res.status(500).json({ message: 'Google sign-in failed: ' + err.message });
   }
 });
 
@@ -162,9 +175,9 @@ router.put('/profile', auth, async (req, res) => {
   try {
     const { firstName, lastName, phone, addresses, defaultAddress } = req.body;
     const update = {};
-    if (firstName !== undefined) update.firstName = firstName;
-    if (lastName  !== undefined) update.lastName  = lastName;
-    if (phone     !== undefined) update.phone     = phone;
+    if (firstName  !== undefined) update.firstName = firstName;
+    if (lastName   !== undefined) update.lastName  = lastName;
+    if (phone      !== undefined) update.phone     = phone;
 
     if (defaultAddress) {
       const user = await User.findById(req.user._id);
