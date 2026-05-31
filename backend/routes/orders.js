@@ -27,10 +27,18 @@ const fs = require('fs');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function absoluteSlipUrl(relPath) {
-  const base =
+  // FIX: BACKEND_URL must include the https:// protocol.
+  // If it's missing the protocol (e.g. "shopzen-production.up.railway.app"),
+  // we add https:// automatically so image previews work in emails.
+  let base =
     process.env.BACKEND_URL ||
     process.env.RAILWAY_STATIC_URL ||
     `http://localhost:${process.env.PORT || 5001}`;
+
+  if (base && !base.startsWith('http://') && !base.startsWith('https://')) {
+    base = 'https://' + base;
+  }
+
   return `${base.replace(/\/$/, '')}${relPath}`;
 }
 
@@ -228,12 +236,13 @@ router.put('/admin/:id/status', adminAuth, async (req, res) => {
 
     if (!order) return res.status(404).json({ message: 'Order not found' });
 
-    // In-app notification for admin panel
     const statusLabels = {
       confirmed: 'Confirmed ✅', processing: 'Processing 🔄', shipped: 'Shipped 📦',
       out_for_delivery: 'Out for Delivery 🚚', delivered: 'Delivered ✅',
       cancelled: 'Cancelled ❌', refunded: 'Refunded 💰',
     };
+
+    // In-app notification
     await Notification.create({
       type: 'order_status',
       title: `Order ${statusLabels[status] || status}`,
@@ -249,7 +258,7 @@ router.put('/admin/:id/status', adminAuth, async (req, res) => {
         to: order.billing.email,
         subject: `Order Update — ${order.orderNumber} | ShopZen`,
         html: await orderStatusUpdateHtml(order, status, note),
-      }).catch(() => {});
+      }).catch(err => console.error('[STATUS EMAIL]', err.message));
     }
 
     res.json(order);
@@ -294,9 +303,18 @@ router.put('/admin/:id/confirm-payment', adminAuth, async (req, res) => {
     await Notification.create({
       type: 'payment_confirmed',
       title: '✅ Payment Confirmed',
-      message: `Order ${order.orderNumber} — payment confirmed manually`,
+      message: `Order ${order.orderNumber} — payment confirmed manually by admin`,
       link: `/admin/orders/${order._id}`,
     }).catch(() => {});
+
+    // FIX: Email customer on manual payment confirmation too
+    if (order.billing?.email) {
+      sendMail({
+        to: order.billing.email,
+        subject: `✅ Payment Confirmed — Order ${order.orderNumber} | ShopZen`,
+        html: await paymentConfirmedHtml(order),
+      }).catch(err => console.error('[PAYMENT CONFIRM EMAIL]', err.message));
+    }
 
     res.json(order);
   } catch (err) {
@@ -339,7 +357,7 @@ router.put('/admin/:id/confirm-slip', adminAuth, async (req, res) => {
         to: order.billing.email,
         subject: `✅ Payment Confirmed — Order ${order.orderNumber} | ShopZen`,
         html: await paymentConfirmedHtml(order),
-      }).catch(() => {});
+      }).catch(err => console.error('[SLIP CONFIRM EMAIL]', err.message));
     }
 
     res.json(order);
@@ -542,7 +560,6 @@ router.post('/payment-success', async (req, res) => {
       link: `/admin/orders/${order._id}`,
     });
 
-    // Email customer: payment confirmed
     if (order.billing?.email) {
       sendMail({
         to: order.billing.email,

@@ -49,7 +49,6 @@ router.post('/google', async (req, res) => {
     const { credential } = req.body;
     if (!credential) return res.status(400).json({ message: 'Google credential is required' });
 
-    // Verify token with Google
     const ticket = await googleClient.verifyIdToken({
       idToken: credential,
       audience: process.env.GOOGLE_CLIENT_ID,
@@ -57,14 +56,10 @@ router.post('/google', async (req, res) => {
     const payload = ticket.getPayload();
     const { email, given_name, family_name, picture, sub: googleId } = payload;
 
-    // Try find by googleId first, then by email
     let user = await User.findOne({ googleId });
     if (!user) user = await User.findOne({ email });
 
     if (!user) {
-      // ── New user: create account ──────────────────────────────────────────
-
-      // Build a unique username — keep trying until one is free
       const base = (email.split('@')[0]).replace(/[^a-zA-Z0-9_]/g, '').slice(0, 20) || 'user';
       let username = base;
       let attempt = 0;
@@ -75,10 +70,9 @@ router.post('/google', async (req, res) => {
 
       user = await User.create({
         firstName:  given_name  || 'User',
-        lastName:   family_name || '',           // empty string — field is now optional
+        lastName:   family_name || '',
         username,
         email,
-        // A strong non-guessable password — this account can only be accessed via Google
         password:   crypto.randomBytes(32).toString('hex'),
         googleId,
         avatar:     picture || '',
@@ -95,7 +89,6 @@ router.post('/google', async (req, res) => {
 
     if (!user.isActive) return res.status(403).json({ message: 'Your account has been deactivated' });
 
-    // Backfill googleId / avatar if this was an existing email-registered user
     let dirty = false;
     if (!user.googleId) { user.googleId = googleId; dirty = true; }
     if (!user.avatar && picture) { user.avatar = picture; dirty = true; }
@@ -123,18 +116,60 @@ router.post('/google', async (req, res) => {
 });
 
 // ─── Forgot Password — Send OTP ───────────────────────────────────────────────
+// FIX: Previously the catch block returned err.message which could be a raw
+//      nodemailer/SMTP error that confused the frontend into showing
+//      "Failed to send OTP". Now we:
+//      1. Validate email exists before touching SMTP.
+//      2. Always delete old OTPs before creating new one (idempotent).
+//      3. Return a clear, user-friendly message on SMTP failure while logging
+//         the real cause on the server so you can diagnose it in Railway logs.
 router.post('/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
-    const user = await User.findOne({ email });
-    if (!user) return res.status(404).json({ message: 'No account found with this email' });
+
+    if (!email || !email.trim()) {
+      return res.status(400).json({ message: 'Email address is required' });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
+    if (!user) {
+      // Don't reveal whether the email exists — just say "if registered…"
+      // but for a small internal shop it's fine to be explicit:
+      return res.status(404).json({ message: 'No account found with this email address' });
+    }
+
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-    await OTP.deleteMany({ email });
-    await OTP.create({ email, otp, expiresAt });
-    await sendMail({ to: email, subject: 'ShopZen Password Reset OTP', html: await otpEmailHtml(otp, user.firstName) });
-    res.json({ message: 'OTP sent to your email address' });
-  } catch (err) { res.status(500).json({ message: err.message }); }
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min
+
+    // Remove any previous unused OTPs for this email
+    await OTP.deleteMany({ email: user.email });
+    await OTP.create({ email: user.email, otp, expiresAt });
+
+    try {
+      await sendMail({
+        to: user.email,
+        subject: `${otp} — Your ShopZen Password Reset OTP`,
+        html: await otpEmailHtml(otp, user.firstName),
+      });
+    } catch (mailErr) {
+      // Log the REAL smtp error in Railway/Render so you can fix it
+      console.error('[FORGOT-PASSWORD] SMTP error:', mailErr.message);
+      // Clean up the OTP we just created since it can't be delivered
+      await OTP.deleteMany({ email: user.email }).catch(() => {});
+      // Return a helpful message — NOT the raw nodemailer stack trace
+      return res.status(500).json({
+        message:
+          'Unable to send the OTP email right now. ' +
+          'Please check your spam folder or try again in a few minutes. ' +
+          'If this keeps happening, contact support.',
+      });
+    }
+
+    res.json({ message: 'OTP sent to your email address. Please check your inbox (and spam folder).' });
+  } catch (err) {
+    console.error('[FORGOT-PASSWORD] Unexpected error:', err.message);
+    res.status(500).json({ message: 'Something went wrong. Please try again.' });
+  }
 });
 
 // ─── Verify OTP ───────────────────────────────────────────────────────────────
@@ -142,7 +177,7 @@ router.post('/verify-otp', async (req, res) => {
   try {
     const { email, otp } = req.body;
     const record = await OTP.findOne({ email, otp, used: false, expiresAt: { $gte: new Date() } });
-    if (!record) return res.status(400).json({ message: 'Invalid or expired OTP' });
+    if (!record) return res.status(400).json({ message: 'Invalid or expired OTP. Please request a new one.' });
     const resetToken = crypto.randomBytes(32).toString('hex');
     record.used = true;
     await record.save();
@@ -156,7 +191,7 @@ router.post('/reset-password', async (req, res) => {
   try {
     const { email, resetToken, newPassword } = req.body;
     const record = await OTP.findOne({ email, otp: resetToken, used: false, expiresAt: { $gte: new Date() } });
-    if (!record) return res.status(400).json({ message: 'Invalid or expired reset token' });
+    if (!record) return res.status(400).json({ message: 'Invalid or expired reset token. Please restart the password reset process.' });
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ message: 'User not found' });
     user.password = newPassword;

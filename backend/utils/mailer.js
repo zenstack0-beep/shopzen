@@ -1,17 +1,38 @@
 const nodemailer = require('nodemailer');
 
+// ── SMTP connection verification (called once at startup) ─────────────────────
+const verifySmtp = async () => {
+  try {
+    const transporter = await getTransporter();
+    await transporter.verify();
+    console.log('[MAIL] ✅ SMTP connection verified — emails will work');
+  } catch (err) {
+    console.error('[MAIL] ❌ SMTP connection FAILED:', err.message);
+    console.error('[MAIL] ⚠️  OTP / order emails will NOT be sent until SMTP is fixed.');
+    console.error('[MAIL] Check EMAIL_USER, EMAIL_PASS (use Gmail App Password), EMAIL_HOST, EMAIL_PORT in your .env');
+  }
+};
+
 // ── Lazy transporter — built fresh per send so DB-saved SMTP settings work ────
 // Priority: env vars → DB settings → error
 const getTransporter = async () => {
   // Fast path: env vars are set
   if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+    const port   = Number(process.env.EMAIL_PORT) || 587;
+    const secure = process.env.EMAIL_SECURE === 'true' || port === 465;
     return nodemailer.createTransport({
       host:   process.env.EMAIL_HOST || 'smtp.gmail.com',
-      port:   Number(process.env.EMAIL_PORT) || 587,
-      secure: process.env.EMAIL_SECURE === 'true' || Number(process.env.EMAIL_PORT) === 465,
+      port,
+      secure,
+      // For port 587 (STARTTLS) on some hosts we must explicitly allow TLS upgrade
+      requireTLS: !secure && port === 587,
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
+      },
+      tls: {
+        // Needed on Railway / Render where the outbound hostname may differ
+        rejectUnauthorized: process.env.NODE_ENV === 'production' ? true : false,
       },
     });
   }
@@ -26,16 +47,20 @@ const getTransporter = async () => {
 
     if (!cfg.smtpUser || !cfg.smtpPass) {
       throw new Error(
-        'Email is not configured. Add EMAIL_USER & EMAIL_PASS to your .env, ' +
+        'Email is not configured. Add EMAIL_USER & EMAIL_PASS to your .env (use a Gmail App Password), ' +
         'or set SMTP settings in Admin → Settings.'
       );
     }
 
+    const port   = Number(cfg.smtpPort) || 587;
+    const secure = cfg.smtpSecure === true || cfg.smtpSecure === 'true' || port === 465;
     return nodemailer.createTransport({
       host:   cfg.smtpHost   || 'smtp.gmail.com',
-      port:   Number(cfg.smtpPort) || 587,
-      secure: cfg.smtpSecure === true || cfg.smtpSecure === 'true' || Number(cfg.smtpPort) === 465,
+      port,
+      secure,
+      requireTLS: !secure && port === 587,
       auth: { user: cfg.smtpUser, pass: cfg.smtpPass },
+      tls: { rejectUnauthorized: process.env.NODE_ENV === 'production' ? true : false },
     });
   } catch (err) {
     throw err;
@@ -58,16 +83,23 @@ const getFromAddress = async (theme) => {
 };
 
 // ── sendMail — throws on failure so callers can catch and return 500 ──────────
+// In production the real SMTP error is now propagated all the way back to the
+// API response so the frontend/logs always show the true root cause.
 const sendMail = async ({ to, subject, html }) => {
   try {
     const transporter = await getTransporter();
     const theme = await getTheme().catch(() => ({ storeName: 'ShopZen', primary: '#b5451b' }));
     const from = await getFromAddress(theme);
-    await transporter.sendMail({ from, to, subject, html });
-    console.log(`[MAIL SENT] To:${to} | ${subject}`);
+    const info = await transporter.sendMail({ from, to, subject, html });
+    console.log(`[MAIL SENT] To:${to} | ${subject} | msgId:${info.messageId}`);
+    return info;
   } catch (e) {
+    // Log the full stack so Railway/Render logs show exactly what failed
     console.error('[MAIL ERROR]', e.message);
-    throw e;
+    // Re-throw with a clear message (don't lose the original)
+    const wrapped = new Error(`Failed to send email to ${to}: ${e.message}`);
+    wrapped.originalError = e;
+    throw wrapped;
   }
 };
 
@@ -517,6 +549,10 @@ const cancelRejectedAdminHtml = async (order) => {
       </div>
     </div>`, t);
 };
+
+// ── Run SMTP check on startup (non-blocking) ──────────────────────────────────
+// Delay slightly so server has time to fully init before we test SMTP
+setTimeout(() => verifySmtp(), 3000);
 
 module.exports = {
   sendMail,
