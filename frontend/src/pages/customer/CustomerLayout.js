@@ -227,7 +227,7 @@ const Header = ({ settings, campaign }) => {
           <Link
             to="/"
             className="flex items-center gap-2 flex-shrink-0 group mr-3"
-            style={{perspective:'600px'}}
+            style={{perspective:'600px', overflow:'visible', position:'relative', zIndex:10}}
             onMouseEnter={e => { e.currentTarget.querySelector('.logo-inner') && (e.currentTarget.querySelector('.logo-inner').style.transform = 'rotateY(8deg) scale(1.03)'); }}
             onMouseLeave={e => { e.currentTarget.querySelector('.logo-inner') && (e.currentTarget.querySelector('.logo-inner').style.transform = 'rotateY(0deg) scale(1)'); }}
           >
@@ -238,7 +238,6 @@ const Header = ({ settings, campaign }) => {
                   alt={settings.storeName || 'ShopZen'}
                   style={{
                     height: `${logoHeight}px`,
-                    maxHeight: '52px',
                     maxWidth: '260px',
                     objectFit: 'contain',
                     filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.10))',
@@ -249,8 +248,8 @@ const Header = ({ settings, campaign }) => {
                   <div
                     className="rounded-xl flex items-center justify-center text-white transition-all duration-300 group-hover:rotate-6"
                     style={{
-                      width: `${Math.min(40, Math.max(28, logoHeight * 0.6))}px`,
-                      height: `${Math.min(40, Math.max(28, logoHeight * 0.6))}px`,
+                      width: `${Math.max(28, logoHeight * 0.7)}px`,
+                      height: `${Math.max(28, logoHeight * 0.7)}px`,
                       background: 'var(--theme-gradient)',
                       boxShadow: '0 4px 14px var(--glow-primary)',
                     }}
@@ -264,7 +263,7 @@ const Header = ({ settings, campaign }) => {
                     style={{
                       fontFamily: 'var(--font-display)',
                       letterSpacing: '-0.02em',
-                      fontSize: `${Math.min(22, Math.max(16, logoHeight * 0.38))}px`,
+                      fontSize: `${Math.max(16, logoHeight * 0.42)}px`,
                       color: '#111827',
                     }}
                   >
