@@ -67,7 +67,8 @@ const AdminRoute = ({ children }) => {
 
 const ProtectedRoute = ({ children }) => {
   const { user } = useAuth();
-  if (!user) return <Navigate to="/login"/>;
+  const location = useLocation();
+  if (!user) return <Navigate to="/login" state={{ from: location }} replace />;
   return children;
 };
 

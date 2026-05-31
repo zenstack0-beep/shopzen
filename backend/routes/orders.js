@@ -6,12 +6,15 @@ const { Coupon, GiftCard, Notification, Settings, DeliveryService } = require('.
 const { auth, adminAuth } = require('../middleware/auth');
 const {
   sendMail,
+  getAdminEmail,
   orderConfirmHtml,
+  newOrderAdminHtml,
   slipUploadedAdminHtml,
   slipReceivedCustomerHtml,
   paymentConfirmedHtml,
   orderCancelledHtml,
   cancelRequestAdminHtml,
+  cancelRequestReceivedCustomerHtml,
   cancelRejectedHtml,
   cancelApprovedAdminHtml,
   cancelRejectedAdminHtml,
@@ -92,8 +95,6 @@ if (USE_CLOUDINARY) {
 }
 
 // ── Auto-cancel decision scheduler ───────────────────────────────────────────
-// Reads settings every minute. If autoDecisionEnabled is true, auto-decides
-// any pending cancel requests older than autoDecisionMinutes.
 const runAutoCancelDecisions = async () => {
   try {
     const rows = await Settings.find({
@@ -126,13 +127,11 @@ const runAutoCancelDecisions = async () => {
           note: `Auto-cancelled by system after ${minutes} min. Customer reason: ${order.cancelRequest.reason || 'None'}`,
           updatedBy: 'system',
         });
-        // Restore stock
         for (const item of order.items) {
           await Product.findByIdAndUpdate(item.product, {
             $inc: { stock: item.quantity, soldCount: -item.quantity },
           }).catch(() => {});
         }
-        // Email customer — approved
         if (order.billing?.email) {
           sendMail({
             to: order.billing.email,
@@ -141,7 +140,6 @@ const runAutoCancelDecisions = async () => {
           }).catch(() => {});
         }
       } else {
-        // Email customer — rejected
         if (order.billing?.email) {
           sendMail({
             to: order.billing.email,
@@ -153,7 +151,6 @@ const runAutoCancelDecisions = async () => {
 
       await order.save();
 
-      // In-app admin notification
       await Notification.create({
         type: 'cancel_auto_decision',
         title: action === 'approved' ? '🤖 Auto-Cancelled Order' : '🤖 Auto-Rejected Cancel Request',
@@ -162,8 +159,7 @@ const runAutoCancelDecisions = async () => {
         data: { orderId: order._id, action },
       }).catch(() => {});
 
-      // Email admin
-      const adminEmail = process.env.ADMIN_EMAIL || process.env.EMAIL_USER;
+      const adminEmail = await getAdminEmail();
       if (adminEmail) {
         sendMail({
           to: adminEmail,
@@ -179,14 +175,10 @@ const runAutoCancelDecisions = async () => {
   }
 };
 
-// Run every 60 seconds
 setInterval(runAutoCancelDecisions, 60 * 1000);
-// Also run once on startup after a short delay
 setTimeout(runAutoCancelDecisions, 5000);
 
-// ── IMPORTANT: All named routes BEFORE /:id wildcard ─────────────────────────
-
-// Admin — Get all orders
+// ── Admin — Get all orders ────────────────────────────────────────────────────
 router.get('/admin/all', adminAuth, async (req, res) => {
   try {
     const { status, page = 1, limit = 20, search } = req.query;
@@ -210,7 +202,7 @@ router.get('/admin/all', adminAuth, async (req, res) => {
   }
 });
 
-// Admin — Update order status
+// ── Admin — Update order status ───────────────────────────────────────────────
 router.put('/admin/:id/status', adminAuth, async (req, res) => {
   try {
     const { status, note, trackingNumber, deliveryPartner } = req.body;
@@ -218,6 +210,7 @@ router.put('/admin/:id/status', adminAuth, async (req, res) => {
     if (trackingNumber) update.trackingNumber = trackingNumber;
     if (deliveryPartner) update.deliveryPartner = deliveryPartner;
     if (status === 'delivered') update.deliveredAt = Date.now();
+
     const order = await Order.findByIdAndUpdate(
       req.params.id,
       {
@@ -232,21 +225,40 @@ router.put('/admin/:id/status', adminAuth, async (req, res) => {
       },
       { new: true }
     );
-    const notifyStatuses = ['confirmed','processing','shipped','out_for_delivery','delivered','cancelled'];
-    if (order?.billing?.email && notifyStatuses.includes(status)) {
+
+    if (!order) return res.status(404).json({ message: 'Order not found' });
+
+    // In-app notification for admin panel
+    const statusLabels = {
+      confirmed: 'Confirmed ✅', processing: 'Processing 🔄', shipped: 'Shipped 📦',
+      out_for_delivery: 'Out for Delivery 🚚', delivered: 'Delivered ✅',
+      cancelled: 'Cancelled ❌', refunded: 'Refunded 💰',
+    };
+    await Notification.create({
+      type: 'order_status',
+      title: `Order ${statusLabels[status] || status}`,
+      message: `Order ${order.orderNumber} (${order.billing?.firstName} ${order.billing?.lastName}) → ${status}`,
+      link: `/admin/orders/${order._id}`,
+      data: { orderId: order._id, status },
+    }).catch(() => {});
+
+    // Email customer
+    const notifyStatuses = ['confirmed', 'processing', 'shipped', 'out_for_delivery', 'delivered', 'cancelled'];
+    if (order.billing?.email && notifyStatuses.includes(status)) {
       sendMail({
         to: order.billing.email,
         subject: `Order Update — ${order.orderNumber} | ShopZen`,
         html: await orderStatusUpdateHtml(order, status, note),
       }).catch(() => {});
     }
+
     res.json(order);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// Admin — Mark order as read
+// ── Admin — Mark order as read ────────────────────────────────────────────────
 router.put('/admin/:id/read', adminAuth, async (req, res) => {
   try {
     await Order.findByIdAndUpdate(req.params.id, { isRead: true });
@@ -256,7 +268,7 @@ router.put('/admin/:id/read', adminAuth, async (req, res) => {
   }
 });
 
-// Admin — Confirm payment (manual gateway confirmation)
+// ── Admin — Confirm payment (manual gateway) ──────────────────────────────────
 router.put('/admin/:id/confirm-payment', adminAuth, async (req, res) => {
   try {
     const { paymentReference } = req.body;
@@ -277,13 +289,22 @@ router.put('/admin/:id/confirm-payment', adminAuth, async (req, res) => {
       },
       { new: true }
     );
+    if (!order) return res.status(404).json({ message: 'Order not found' });
+
+    await Notification.create({
+      type: 'payment_confirmed',
+      title: '✅ Payment Confirmed',
+      message: `Order ${order.orderNumber} — payment confirmed manually`,
+      link: `/admin/orders/${order._id}`,
+    }).catch(() => {});
+
     res.json(order);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// Admin — Confirm payment from uploaded slip + send confirmation email to customer
+// ── Admin — Confirm payment from uploaded slip ────────────────────────────────
 router.put('/admin/:id/confirm-slip', adminAuth, async (req, res) => {
   try {
     const { paymentReference } = req.body;
@@ -304,20 +325,30 @@ router.put('/admin/:id/confirm-slip', adminAuth, async (req, res) => {
       },
       { new: true }
     );
-    if (order?.billing?.email) {
+    if (!order) return res.status(404).json({ message: 'Order not found' });
+
+    await Notification.create({
+      type: 'payment_confirmed',
+      title: '✅ Slip Verified & Payment Confirmed',
+      message: `Order ${order.orderNumber} — bank slip verified by admin`,
+      link: `/admin/orders/${order._id}`,
+    }).catch(() => {});
+
+    if (order.billing?.email) {
       sendMail({
         to: order.billing.email,
         subject: `✅ Payment Confirmed — Order ${order.orderNumber} | ShopZen`,
         html: await paymentConfirmedHtml(order),
       }).catch(() => {});
     }
+
     res.json(order);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// Customer — Get my orders
+// ── Customer — Get my orders ──────────────────────────────────────────────────
 router.get('/my-orders', auth, async (req, res) => {
   try {
     const orders = await Order.find({ customer: req.user._id })
@@ -329,7 +360,7 @@ router.get('/my-orders', auth, async (req, res) => {
   }
 });
 
-// Place order (public — guest + logged in)
+// ── Place order (public — guest + logged in) ──────────────────────────────────
 router.post('/', async (req, res) => {
   try {
     const {
@@ -392,9 +423,18 @@ router.post('/', async (req, res) => {
     let deliveryServiceName = 'Standard Delivery';
     if (deliveryService) {
       const svc = await DeliveryService.findOne({ code: deliveryService, isEnabled: true });
-      if (svc && svc.rates && svc.rates.length > 0) {
-        const rate = svc.rates[0];
-        shippingCost = rate.freeAbove && subtotal >= rate.freeAbove ? 0 : rate.price;
+      if (svc) {
+        const city = (billing?.city || '').toLowerCase();
+        let rate = null;
+        if (city && svc.zoneRates?.length > 0) {
+          rate = svc.zoneRates.find(zr =>
+            zr.zones?.some(z => z.toLowerCase() === city || city.includes(z.toLowerCase()))
+          );
+        }
+        if (!rate && svc.rates?.length > 0) rate = svc.rates[0];
+        if (rate) {
+          shippingCost = rate.freeAbove && subtotal >= rate.freeAbove ? 0 : rate.price;
+        }
         deliveryServiceName = svc.name;
       }
     } else {
@@ -404,7 +444,7 @@ router.post('/', async (req, res) => {
       });
       allSettings.forEach((s) => (settingsMap[s.key] = s.value));
       const freeThreshold = settingsMap.freeDeliveryThreshold || 5000;
-      shippingCost = subtotal >= freeThreshold ? 0 : settingsMap.standardDelivery || 600;
+      shippingCost = subtotal >= freeThreshold ? 0 : (settingsMap.standardDelivery || 600);
     }
 
     const total = Math.max(0, subtotal - couponDiscount - giftCardDiscount + shippingCost);
@@ -442,6 +482,7 @@ router.post('/', async (req, res) => {
       await giftCardDoc.save();
     }
 
+    // ── Admin in-app notification ──
     await Notification.create({
       type: 'new_order',
       title: '🛒 New Order Received!',
@@ -450,12 +491,23 @@ router.post('/', async (req, res) => {
       data: { orderId: order._id, total, paymentMethod },
     });
 
+    // ── Email customer: order confirmation ──
     if (billing?.email) {
       sendMail({
         to: billing.email,
         subject: `Order Confirmed — ${order.orderNumber} | ShopZen`,
         html: await orderConfirmHtml(order),
-      }).catch(() => {});
+      }).catch(err => console.error('[ORDER CONFIRM EMAIL]', err.message));
+    }
+
+    // ── Email admin: new order alert ──
+    const adminEmail = await getAdminEmail();
+    if (adminEmail) {
+      sendMail({
+        to: adminEmail,
+        subject: `🛒 New Order ${order.orderNumber} — Rs. ${total.toLocaleString()} | ShopZen`,
+        html: await newOrderAdminHtml(order),
+      }).catch(err => console.error('[NEW ORDER ADMIN EMAIL]', err.message));
     }
 
     res.status(201).json({
@@ -467,7 +519,7 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Payment gateway webhook — auto-confirm order after successful payment
+// ── Payment gateway webhook — auto-confirm order after successful payment ──────
 router.post('/payment-success', async (req, res) => {
   try {
     const { orderId, paymentReference, gateway } = req.body;
@@ -482,12 +534,23 @@ router.post('/payment-success', async (req, res) => {
       updatedBy: 'system',
     });
     await order.save();
+
     await Notification.create({
-      type: 'new_order',
+      type: 'payment_confirmed',
       title: '✅ Payment Confirmed',
       message: `Order ${order.orderNumber} payment received via ${gateway}`,
       link: `/admin/orders/${order._id}`,
     });
+
+    // Email customer: payment confirmed
+    if (order.billing?.email) {
+      sendMail({
+        to: order.billing.email,
+        subject: `✅ Payment Confirmed — Order ${order.orderNumber} | ShopZen`,
+        html: await paymentConfirmedHtml(order),
+      }).catch(() => {});
+    }
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -514,6 +577,7 @@ router.post('/:id/payment-slip', uploadSlip.single('slip'), async (req, res) => 
     order.paymentSlipUploadedAt = new Date();
     await order.save();
 
+    // ── Admin in-app notification ──
     await Notification.create({
       type: 'payment_slip',
       title: '📎 Payment Slip Uploaded',
@@ -521,21 +585,23 @@ router.post('/:id/payment-slip', uploadSlip.single('slip'), async (req, res) => 
       link: `/admin/orders/${order._id}`,
     }).catch(() => {});
 
-    const adminEmail = process.env.ADMIN_EMAIL || process.env.EMAIL_USER;
+    // ── Email admin: slip uploaded ──
+    const adminEmail = await getAdminEmail();
     if (adminEmail) {
       sendMail({
         to: adminEmail,
         subject: `📎 Payment Slip Uploaded — ${order.orderNumber} | ShopZen`,
         html: await slipUploadedAdminHtml(order, slipUrl),
-      }).catch(() => {});
+      }).catch(err => console.error('[SLIP ADMIN EMAIL]', err.message));
     }
 
+    // ── Email customer: slip received ──
     if (order.billing?.email) {
       sendMail({
         to: order.billing.email,
         subject: `Payment Slip Received — ${order.orderNumber} | ShopZen`,
         html: await slipReceivedCustomerHtml(order),
-      }).catch(() => {});
+      }).catch(err => console.error('[SLIP CUSTOMER EMAIL]', err.message));
     }
 
     res.json({ success: true, slipUrl: slipRelPath });
@@ -562,17 +628,13 @@ router.post('/:id/cancel-request', auth, async (req, res) => {
 
     const windowSetting  = await Settings.findOne({ key: 'cancelWindowMinutes' });
     const rawWindow      = windowSetting ? windowSetting.value : null;
-    // Robust parse: treat missing/null/undefined/NaN as default 60 min
     const parsedWindow   = (rawWindow !== null && rawWindow !== undefined && String(rawWindow).trim() !== '')
-      ? Number(rawWindow)
-      : 60;
+      ? Number(rawWindow) : 60;
     const windowMinutes  = (!isNaN(parsedWindow) && isFinite(parsedWindow)) ? parsedWindow : 60;
 
-    // Admin has disabled cancellations entirely
     if (windowMinutes === 0) {
       return res.status(400).json({ message: 'Order cancellations are disabled by the store' });
     }
-    // Guard: if order has no valid createdAt, deny cancellation
     const orderPlacedAt = new Date(order.createdAt).getTime();
     if (!isFinite(orderPlacedAt) || orderPlacedAt <= 0) {
       return res.status(400).json({ message: 'Cannot determine order placement time' });
@@ -601,8 +663,8 @@ router.post('/:id/cancel-request', auth, async (req, res) => {
       data: { orderId: order._id, reason },
     }).catch(() => {});
 
-    // ── Email to admin ──
-    const adminEmail = process.env.ADMIN_EMAIL || process.env.EMAIL_USER;
+    // ── Email admin: cancel request ──
+    const adminEmail = await getAdminEmail();
     if (adminEmail) {
       sendMail({
         to: adminEmail,
@@ -611,7 +673,7 @@ router.post('/:id/cancel-request', auth, async (req, res) => {
       }).catch(() => {});
     }
 
-    // ── Confirmation email to customer ──
+    // ── Email customer: request received confirmation ──
     if (order.billing?.email) {
       sendMail({
         to: order.billing.email,
@@ -639,6 +701,8 @@ router.put('/admin/:id/cancel-decision', adminAuth, async (req, res) => {
     order.cancelRequest.resolvedAt = new Date();
     order.cancelRequest.resolvedBy = req.user.email;
 
+    const adminEmail = await getAdminEmail();
+
     if (decision === 'approved') {
       order.orderStatus = 'cancelled';
       order.statusHistory.push({
@@ -646,13 +710,19 @@ router.put('/admin/:id/cancel-decision', adminAuth, async (req, res) => {
         note: `Cancelled by admin. Customer reason: ${order.cancelRequest.reason || 'None'}`,
         updatedBy: req.user.email,
       });
-      // Restore stock
       for (const item of order.items) {
         await Product.findByIdAndUpdate(item.product, {
           $inc: { stock: item.quantity, soldCount: -item.quantity },
         }).catch(() => {});
       }
-      // Email customer — approved
+
+      await Notification.create({
+        type: 'cancel_approved',
+        title: '✅ Cancellation Approved',
+        message: `Order ${order.orderNumber} — cancellation approved, stock restored`,
+        link: `/admin/orders/${order._id}`,
+      }).catch(() => {});
+
       if (order.billing?.email) {
         sendMail({
           to: order.billing.email,
@@ -660,8 +730,6 @@ router.put('/admin/:id/cancel-decision', adminAuth, async (req, res) => {
           html: await orderCancelledHtml(order),
         }).catch(() => {});
       }
-      // Email admin — confirmation of their action
-      const adminEmail = process.env.ADMIN_EMAIL || process.env.EMAIL_USER;
       if (adminEmail) {
         sendMail({
           to: adminEmail,
@@ -670,7 +738,13 @@ router.put('/admin/:id/cancel-decision', adminAuth, async (req, res) => {
         }).catch(() => {});
       }
     } else {
-      // Email customer — rejected
+      await Notification.create({
+        type: 'cancel_rejected',
+        title: '❌ Cancellation Rejected',
+        message: `Order ${order.orderNumber} — cancellation request rejected`,
+        link: `/admin/orders/${order._id}`,
+      }).catch(() => {});
+
       if (order.billing?.email) {
         sendMail({
           to: order.billing.email,
@@ -678,8 +752,6 @@ router.put('/admin/:id/cancel-decision', adminAuth, async (req, res) => {
           html: await cancelRejectedHtml(order),
         }).catch(() => {});
       }
-      // Email admin — confirmation of their action
-      const adminEmail = process.env.ADMIN_EMAIL || process.env.EMAIL_USER;
       if (adminEmail) {
         sendMail({
           to: adminEmail,
@@ -696,7 +768,7 @@ router.put('/admin/:id/cancel-decision', adminAuth, async (req, res) => {
   }
 });
 
-// Get single order (public — works for guest and logged-in)
+// ── Get single order (public — guest + logged-in) ─────────────────────────────
 router.get('/:id', async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
@@ -709,7 +781,7 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// Claim a guest order after registration
+// ── Claim a guest order after registration ────────────────────────────────────
 router.patch('/:id/claim', auth, async (req, res) => {
   try {
     const order = await Order.findById(req.params.id);
@@ -728,56 +800,5 @@ router.patch('/:id/claim', auth, async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
-
-// ── Inline helper — cancel request received email to customer ─────────────────
-// (kept here so mailer.js stays clean; it only uses locals already imported)
-async function cancelRequestReceivedCustomerHtml(order) {
-  const { sendMail: _s, ...mailerExports } = require('../utils/mailer');
-  // Re-use the theme+wrapper from mailer by building HTML inline
-  const nodemailer = require('nodemailer');
-  const { Settings } = require('../models/index');
-
-  let primary = '#b5451b', storeName = 'ShopZen';
-  try {
-    const rows = await Settings.find({ key: { $in: ['primaryColor', 'storeName'] } }).lean();
-    rows.forEach(r => { if (r.key === 'primaryColor') primary = r.value; if (r.key === 'storeName') storeName = r.value; });
-  } catch {}
-
-  const lighten = (hex) => {
-    try {
-      const h = hex.replace('#', '');
-      const r = parseInt(h.slice(0,2),16), g = parseInt(h.slice(2,4),16), b = parseInt(h.slice(4,6),16);
-      const mix = (c) => Math.min(255, Math.round(c + (255-c)*0.35));
-      return `rgb(${mix(r)},${mix(g)},${mix(b)})`;
-    } catch { return '#e8643c'; }
-  };
-
-  return `<!DOCTYPE html><html><body style="font-family:sans-serif;background:#f1f5f9;padding:40px 20px;margin:0">
-  <div style="max-width:560px;margin:0 auto;background:white;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.09)">
-    <div style="background:linear-gradient(135deg,${primary},${lighten(primary)});padding:32px;text-align:center">
-      <h1 style="color:white;margin:0;font-size:26px;font-family:sans-serif">${storeName}</h1>
-      <p style="color:rgba(255,255,255,0.85);margin:6px 0 0;font-size:14px;font-family:sans-serif">Cancellation Request Received</p>
-    </div>
-    <div style="padding:32px">
-      <p style="color:#374151">Hi <strong>${order.billing?.firstName}</strong>,</p>
-      <p style="color:#6b7280;font-size:14px;margin-bottom:20px">
-        We received your cancellation request for order <strong style="color:${primary}">${order.orderNumber}</strong>. Our team will review it and respond within the time specified by our policy.
-      </p>
-      <div style="background:#fefce8;border:1px solid #fde047;border-radius:10px;padding:16px;margin-bottom:20px">
-        <p style="margin:0 0 4px;font-size:12px;color:#854d0e;font-weight:600">Cancellation Under Review</p>
-        <p style="margin:0;font-size:20px;font-weight:800;color:#854d0e;font-family:monospace">${order.orderNumber}</p>
-        <p style="margin:8px 0 0;font-size:13px;color:#854d0e">Total: Rs. ${order.total?.toLocaleString()}</p>
-      </div>
-      ${order.cancelRequest?.reason ? `<div style="background:#f8fafc;border-radius:10px;padding:14px;font-size:13px;color:#374151;margin-bottom:16px"><strong>Your reason:</strong> ${order.cancelRequest.reason}</div>` : ''}
-      <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:14px;font-size:13px;color:#0369a1;margin-bottom:20px">
-        ℹ️ You will receive an email once the decision is made. Do not re-order until your cancellation is confirmed.
-      </div>
-      <p style="color:#9ca3af;font-size:12px;text-align:center">Thank you for shopping with ${storeName}!</p>
-    </div>
-    <div style="background:#f8fafc;padding:16px;text-align:center;border-top:1px solid #e5e7eb">
-      <p style="color:#9ca3af;font-size:12px;margin:0;font-family:sans-serif">© ${new Date().getFullYear()} ${storeName} · All rights reserved</p>
-    </div>
-  </div></body></html>`;
-}
 
 module.exports = router;

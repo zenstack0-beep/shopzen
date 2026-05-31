@@ -51,6 +51,7 @@ export default function Checkout() {
 
   const sym = settings?.currencySymbol || 'Rs.';
 
+  const orderPlaced = useRef(false);
   const [loading, setLoading] = useState(false);
   const [couponCode, setCouponCode] = useState('');
   const [couponData, setCouponData] = useState(null);
@@ -90,7 +91,7 @@ export default function Checkout() {
     return { firstName: '', lastName: '', country: 'Sri Lanka', street: '', city: '', phone: '' };
   });
 
-  useEffect(() => { if (items.length === 0) navigate('/cart'); }, [items, navigate]);
+  useEffect(() => { if (items.length === 0 && !orderPlaced.current) navigate('/cart'); }, [items, navigate]);
 
   // Restore remaining saved state after returning from register
   useEffect(() => {
@@ -260,6 +261,7 @@ export default function Checkout() {
           city: billing.city,
           country: billing.country,
         });
+        orderPlaced.current = true;
         clearCart();
         sessionStorage.removeItem('checkout_state');
         setPayHereData(phData.data);
@@ -269,12 +271,14 @@ export default function Checkout() {
 
       // Handle Stripe / other gateways — go to My Orders with new order highlighted
       if (paymentMethod === 'stripe') {
+        orderPlaced.current = true;
         clearCart();
         sessionStorage.removeItem('checkout_state');
         navigate(`/my-orders?new=${data.orderId}`);
         return;
       }
 
+      orderPlaced.current = true;
       clearCart();
       sessionStorage.removeItem('checkout_state');
 
@@ -324,7 +328,7 @@ export default function Checkout() {
       }
     }
     // Navigate to My Orders (Account page) with the new order highlighted
-    navigate(`/my-orders?new=${pendingBankOrder.orderId}`);
+    navigate(`/my-orders?new=${pendingBankOrder.orderId}&payment=bank_transfer`);
   };
 
   if (pendingBankOrder) {

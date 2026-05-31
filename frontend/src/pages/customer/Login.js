@@ -211,6 +211,10 @@ export function Login() {
   const { login, loginWithGoogle } = useAuth();
   const { settings } = useTheme();
   const navigate = useNavigate();
+  const location = useLocation();
+  const from = location.state?.from?.pathname
+    ? (location.state.from.pathname + (location.state.from.search || ''))
+    : null;
   const [form, setForm] = useState({ email: '', password: '' });
   const [loading, setLoading] = useState(false);
   const [showPass, setShowPass] = useState(false);
@@ -221,7 +225,7 @@ export function Login() {
     try {
       const user = await login(form.email, form.password);
       toast.success(`Welcome back, ${user.firstName}! 👋`);
-      navigate(user.role === 'admin' ? '/admin' : '/');
+      navigate(user.role === 'admin' ? '/admin' : (from || '/'));
     } catch (err) {
       toast.error(err.response?.data?.message || 'Invalid email or password');
     } finally {
@@ -232,8 +236,8 @@ export function Login() {
   const handleGoogleSuccess = useCallback((user, token) => {
     loginWithGoogle(user, token);
     toast.success(`Welcome back, ${user.firstName}! 👋`);
-    navigate(user.role === 'admin' ? '/admin' : '/');
-  }, [loginWithGoogle, navigate]);
+    navigate(user.role === 'admin' ? '/admin' : (from || '/'));
+  }, [loginWithGoogle, navigate, from]);
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4 py-12" style={{ background: 'var(--body-bg)' }}>
