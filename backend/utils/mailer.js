@@ -14,30 +14,25 @@ const verifySmtp = async () => {
 };
 
 // ── Lazy transporter — built fresh per send so DB-saved SMTP settings work ────
-// Priority: env vars → DB settings → error
 const getTransporter = async () => {
-  // Fast path: env vars are set
   if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
     const port   = Number(process.env.EMAIL_PORT) || 587;
-    const secure = process.env.EMAIL_SECURE === 'true' || port === 465;
+    const secure = port === 465;
     return nodemailer.createTransport({
-      host:   process.env.EMAIL_HOST || 'smtp.gmail.com',
+      host:       process.env.EMAIL_HOST || 'smtp.gmail.com',
       port,
       secure,
-      // For port 587 (STARTTLS) on some hosts we must explicitly allow TLS upgrade
       requireTLS: !secure && port === 587,
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
       },
       tls: {
-        // Needed on Railway / Render where the outbound hostname may differ
-        rejectUnauthorized: process.env.NODE_ENV === 'production' ? true : false,
+        rejectUnauthorized: false,
       },
     });
   }
 
-  // Slow path: try to read SMTP settings from DB
   try {
     const { Settings } = require('../models/index');
     const keys = ['smtpHost', 'smtpPort', 'smtpUser', 'smtpPass', 'smtpSecure', 'emailFrom'];
@@ -53,14 +48,14 @@ const getTransporter = async () => {
     }
 
     const port   = Number(cfg.smtpPort) || 587;
-    const secure = cfg.smtpSecure === true || cfg.smtpSecure === 'true' || port === 465;
+    const secure = port === 465;
     return nodemailer.createTransport({
-      host:   cfg.smtpHost   || 'smtp.gmail.com',
+      host:       cfg.smtpHost || 'smtp.gmail.com',
       port,
       secure,
       requireTLS: !secure && port === 587,
       auth: { user: cfg.smtpUser, pass: cfg.smtpPass },
-      tls: { rejectUnauthorized: process.env.NODE_ENV === 'production' ? true : false },
+      tls: { rejectUnauthorized: false },
     });
   } catch (err) {
     throw err;
@@ -83,8 +78,6 @@ const getFromAddress = async (theme) => {
 };
 
 // ── sendMail — throws on failure so callers can catch and return 500 ──────────
-// In production the real SMTP error is now propagated all the way back to the
-// API response so the frontend/logs always show the true root cause.
 const sendMail = async ({ to, subject, html }) => {
   try {
     const transporter = await getTransporter();
@@ -94,16 +87,14 @@ const sendMail = async ({ to, subject, html }) => {
     console.log(`[MAIL SENT] To:${to} | ${subject} | msgId:${info.messageId}`);
     return info;
   } catch (e) {
-    // Log the full stack so Railway/Render logs show exactly what failed
     console.error('[MAIL ERROR]', e.message);
-    // Re-throw with a clear message (don't lose the original)
     const wrapped = new Error(`Failed to send email to ${to}: ${e.message}`);
     wrapped.originalError = e;
     throw wrapped;
   }
 };
 
-// ── Admin email helper — reads ADMIN_EMAIL env or falls back to EMAIL_USER ────
+// ── Admin email helper ────────────────────────────────────────────────────────
 const getAdminEmail = async () => {
   if (process.env.ADMIN_EMAIL) return process.env.ADMIN_EMAIL;
   if (process.env.EMAIL_USER)  return process.env.EMAIL_USER;
@@ -551,7 +542,6 @@ const cancelRejectedAdminHtml = async (order) => {
 };
 
 // ── Run SMTP check on startup (non-blocking) ──────────────────────────────────
-// Delay slightly so server has time to fully init before we test SMTP
 setTimeout(() => verifySmtp(), 3000);
 
 module.exports = {
