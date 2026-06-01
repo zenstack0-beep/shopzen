@@ -22,6 +22,7 @@ const TABS = [
   { id:'features', label:'⚙️ Features', group:'advanced' },
   { id:'advanced', label:'🔧 Advanced', group:'advanced' },
   { id:'admins', label:'👑 Admins', group:'advanced' },
+  { id:'emails', label:'📧 Email Notifications', group:'advanced' },
 ];
 
 const GROUPS = [
@@ -117,6 +118,13 @@ export default function AdminSettings() {
     businessType:'ecommerce', enableNewsletter:true, enableWishlist:true,
     enableReviews:true, enableGiftCards:true, enableReturns:true, maxReturnDays:7,
     taxEnabled:false, taxRate:0, taxLabel:'VAT',
+    emailNotif_order_placed_customer:true, emailNotif_order_placed_admin:true,
+    emailNotif_slip_uploaded_admin:true, emailNotif_slip_received_customer:true,
+    emailNotif_payment_confirmed_customer:true,
+    emailNotif_order_status_customer:true,
+    emailNotif_cancel_request_admin:true, emailNotif_cancel_request_customer:true,
+    emailNotif_cancel_approved_customer:true, emailNotif_cancel_approved_admin:true,
+    emailNotif_cancel_rejected_customer:true, emailNotif_cancel_rejected_admin:true,
     heroStyle:'gradient', headerStyle:'default', footerStyle:'default',
     customHeaderCode:'', customFooterCode:'',
     termsUrl:'', privacyUrl:'',
@@ -148,7 +156,19 @@ export default function AdminSettings() {
   const [savingWA, setSavingWA] = useState(false);
 
   useEffect(() => {
-    API.get('/settings').then(r => setSettings(p => ({ ...p, ...r.data }))).catch(() => {});
+    API.get('/settings').then(r => {
+      const raw = r.data;
+      const coerced = {};
+      Object.keys(raw).forEach(k => {
+        if (k.startsWith('emailNotif_')) {
+          const v = raw[k];
+          coerced[k] = v === true || v === 'true' || v === 1;
+        } else {
+          coerced[k] = raw[k];
+        }
+      });
+      setSettings(p => ({ ...p, ...coerced }));
+    }).catch(() => {});
     API.get('/payments/admin/all').then(r => { setGateways(r.data); const cfgs = {}; r.data.forEach(g => { cfgs[g.gateway] = { ...g.config, isEnabled: g.isEnabled, isLive: g.isLive, displayName: g.displayName }; }); setGwConfigs(cfgs); }).catch(() => {});
     API.get('/delivery/admin/all').then(r => setDeliveryServices(r.data)).catch(() => {});
     API.get('/whatsapp/config').then(r => setWhatsappConfig(p => ({ ...p, ...r.data }))).catch(() => {});
@@ -1207,6 +1227,172 @@ export default function AdminSettings() {
                 </div>
                 <Toggle label="✅ Auto-Confirm Orders" desc="Automatically confirm orders after placement" value={settings.autoConfirmOrders} onChange={()=>setSettings(p=>({...p,autoConfirmOrders:!p.autoConfirmOrders}))} />
                 <Toggle label="⚠️ Maintenance Mode" desc="Show maintenance page to all visitors" value={settings.maintenanceMode} onChange={()=>setSettings(p=>({...p,maintenanceMode:!p.maintenanceMode}))} />
+                <SaveBar onSave={save} saving={saving}/>
+              </div>
+            )}
+
+
+            {/* ── EMAIL NOTIFICATIONS ── */}
+            {tab === 'emails' && (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="font-semibold text-gray-900 text-lg">📧 Email Notifications</h3>
+                  <p className="text-sm text-gray-500 mt-1">Control which emails are sent automatically. Toggles take effect immediately — no server restart needed.</p>
+                </div>
+
+                {/* Orders */}
+                <div className="rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
+                    <p className="font-semibold text-gray-800 text-sm">🛒 Order Emails</p>
+                  </div>
+                  <div className="divide-y divide-gray-100">
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">Order Placed — Customer Confirmation</p>
+                        <p className="text-xs text-gray-500">Customer receives order confirmation after checkout</p>
+                      </div>
+                      <button onClick={()=>setSettings(p=>({...p,emailNotif_order_placed_customer:!p.emailNotif_order_placed_customer}))}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.emailNotif_order_placed_customer?'bg-green-500':'bg-gray-300'}`}>
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.emailNotif_order_placed_customer?'translate-x-6':'translate-x-1'}`}/>
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">Order Placed — Admin Alert</p>
+                        <p className="text-xs text-gray-500">Admin receives a new order notification email</p>
+                      </div>
+                      <button onClick={()=>setSettings(p=>({...p,emailNotif_order_placed_admin:!p.emailNotif_order_placed_admin}))}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.emailNotif_order_placed_admin?'bg-green-500':'bg-gray-300'}`}>
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.emailNotif_order_placed_admin?'translate-x-6':'translate-x-1'}`}/>
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">Order Status Update — Customer</p>
+                        <p className="text-xs text-gray-500">Customer is notified when order status changes (confirmed, shipped, delivered, etc.)</p>
+                      </div>
+                      <button onClick={()=>setSettings(p=>({...p,emailNotif_order_status_customer:!p.emailNotif_order_status_customer}))}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.emailNotif_order_status_customer?'bg-green-500':'bg-gray-300'}`}>
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.emailNotif_order_status_customer?'translate-x-6':'translate-x-1'}`}/>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Payment Slip */}
+                <div className="rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
+                    <p className="font-semibold text-gray-800 text-sm">📎 Payment Slip Emails</p>
+                  </div>
+                  <div className="divide-y divide-gray-100">
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">Slip Uploaded — Admin Notification</p>
+                        <p className="text-xs text-gray-500">Admin receives email when a customer uploads a bank transfer slip</p>
+                      </div>
+                      <button onClick={()=>setSettings(p=>({...p,emailNotif_slip_uploaded_admin:!p.emailNotif_slip_uploaded_admin}))}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.emailNotif_slip_uploaded_admin?'bg-green-500':'bg-gray-300'}`}>
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.emailNotif_slip_uploaded_admin?'translate-x-6':'translate-x-1'}`}/>
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">Slip Received — Customer Confirmation</p>
+                        <p className="text-xs text-gray-500">Customer receives email confirming their slip was received and is under review</p>
+                      </div>
+                      <button onClick={()=>setSettings(p=>({...p,emailNotif_slip_received_customer:!p.emailNotif_slip_received_customer}))}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.emailNotif_slip_received_customer?'bg-green-500':'bg-gray-300'}`}>
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.emailNotif_slip_received_customer?'translate-x-6':'translate-x-1'}`}/>
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">Payment Confirmed — Customer Email</p>
+                        <p className="text-xs text-gray-500">Customer receives email when admin confirms their bank transfer payment</p>
+                      </div>
+                      <button onClick={()=>setSettings(p=>({...p,emailNotif_payment_confirmed_customer:!p.emailNotif_payment_confirmed_customer}))}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.emailNotif_payment_confirmed_customer?'bg-green-500':'bg-gray-300'}`}>
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.emailNotif_payment_confirmed_customer?'translate-x-6':'translate-x-1'}`}/>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Cancellations */}
+                <div className="rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
+                    <p className="font-semibold text-gray-800 text-sm">🚫 Cancellation Emails</p>
+                  </div>
+                  <div className="divide-y divide-gray-100">
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">Cancel Request — Admin Notification</p>
+                        <p className="text-xs text-gray-500">Admin receives email when a customer submits a cancellation request</p>
+                      </div>
+                      <button onClick={()=>setSettings(p=>({...p,emailNotif_cancel_request_admin:!p.emailNotif_cancel_request_admin}))}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.emailNotif_cancel_request_admin?'bg-green-500':'bg-gray-300'}`}>
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.emailNotif_cancel_request_admin?'translate-x-6':'translate-x-1'}`}/>
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">Cancel Request Received — Customer</p>
+                        <p className="text-xs text-gray-500">Customer receives confirmation that their cancellation request was received</p>
+                      </div>
+                      <button onClick={()=>setSettings(p=>({...p,emailNotif_cancel_request_customer:!p.emailNotif_cancel_request_customer}))}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.emailNotif_cancel_request_customer?'bg-green-500':'bg-gray-300'}`}>
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.emailNotif_cancel_request_customer?'translate-x-6':'translate-x-1'}`}/>
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">Cancellation Approved — Customer</p>
+                        <p className="text-xs text-gray-500">Customer receives email when their order is cancelled (manual or auto)</p>
+                      </div>
+                      <button onClick={()=>setSettings(p=>({...p,emailNotif_cancel_approved_customer:!p.emailNotif_cancel_approved_customer}))}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.emailNotif_cancel_approved_customer?'bg-green-500':'bg-gray-300'}`}>
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.emailNotif_cancel_approved_customer?'translate-x-6':'translate-x-1'}`}/>
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">Cancellation Approved — Admin Confirmation</p>
+                        <p className="text-xs text-gray-500">Admin receives a copy when a cancellation is approved</p>
+                      </div>
+                      <button onClick={()=>setSettings(p=>({...p,emailNotif_cancel_approved_admin:!p.emailNotif_cancel_approved_admin}))}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.emailNotif_cancel_approved_admin?'bg-green-500':'bg-gray-300'}`}>
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.emailNotif_cancel_approved_admin?'translate-x-6':'translate-x-1'}`}/>
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">Cancellation Rejected — Customer</p>
+                        <p className="text-xs text-gray-500">Customer receives email when their cancellation request is rejected</p>
+                      </div>
+                      <button onClick={()=>setSettings(p=>({...p,emailNotif_cancel_rejected_customer:!p.emailNotif_cancel_rejected_customer}))}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.emailNotif_cancel_rejected_customer?'bg-green-500':'bg-gray-300'}`}>
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.emailNotif_cancel_rejected_customer?'translate-x-6':'translate-x-1'}`}/>
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">Cancellation Rejected — Admin Confirmation</p>
+                        <p className="text-xs text-gray-500">Admin receives a copy when a cancellation request is rejected</p>
+                      </div>
+                      <button onClick={()=>setSettings(p=>({...p,emailNotif_cancel_rejected_admin:!p.emailNotif_cancel_rejected_admin}))}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.emailNotif_cancel_rejected_admin?'bg-green-500':'bg-gray-300'}`}>
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.emailNotif_cancel_rejected_admin?'translate-x-6':'translate-x-1'}`}/>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl bg-blue-50 border border-blue-200 p-4">
+                  <p className="text-sm text-blue-800">
+                    <strong>ℹ️ Note:</strong> All toggles are <strong>enabled by default</strong>. Disabling a toggle stops that specific email from sending immediately — no restart required. Admin emails go to the address in <em>Advanced → Order Notification Email</em>.
+                  </p>
+                </div>
+
                 <SaveBar onSave={save} saving={saving}/>
               </div>
             )}

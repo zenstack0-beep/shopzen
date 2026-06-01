@@ -24,6 +24,30 @@ const NAV = [
   { path:'/admin/settings',     label:'Settings',                   icon:'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z' },
 ];
 
+
+// ── Notification type → icon + colour ────────────────────────────────────────
+const NOTIF_META = {
+  new_order:          { icon: '🛒', bg: 'bg-blue-50',   dot: 'bg-blue-500'   },
+  order_status:       { icon: '📦', bg: 'bg-indigo-50', dot: 'bg-indigo-500' },
+  payment_slip:       { icon: '🏦', bg: 'bg-amber-50',  dot: 'bg-amber-500'  },
+  payment_confirmed:  { icon: '✅', bg: 'bg-green-50',  dot: 'bg-green-500'  },
+  cancel_request:     { icon: '🚫', bg: 'bg-red-50',    dot: 'bg-red-500'    },
+  cancel_approved:    { icon: '✅', bg: 'bg-green-50',  dot: 'bg-green-500'  },
+  cancel_rejected:    { icon: '❌', bg: 'bg-red-50',    dot: 'bg-red-500'    },
+  cancel_auto_decision:{ icon: '🤖', bg: 'bg-gray-50',  dot: 'bg-gray-400'   },
+  follow_up:          { icon: '🔔', bg: 'bg-blue-50',   dot: 'bg-blue-500'   },
+  followup_reminder:  { icon: '⏰', bg: 'bg-orange-50', dot: 'bg-orange-500' },
+  sla_breach:         { icon: '⚠️', bg: 'bg-red-50',    dot: 'bg-red-600'    },
+  order_stuck:        { icon: '🔴', bg: 'bg-orange-50', dot: 'bg-orange-600' },
+  low_stock:          { icon: '📉', bg: 'bg-yellow-50', dot: 'bg-yellow-500' },
+  new_review:         { icon: '⭐', bg: 'bg-purple-50', dot: 'bg-purple-500' },
+  new_user:           { icon: '👤', bg: 'bg-teal-50',   dot: 'bg-teal-500'   },
+  return_request:     { icon: '↩️',  bg: 'bg-pink-50',   dot: 'bg-pink-500'   },
+  gift_card:          { icon: '🎁', bg: 'bg-rose-50',   dot: 'bg-rose-500'   },
+  system:             { icon: '⚙️', bg: 'bg-gray-50',   dot: 'bg-gray-400'   },
+};
+const notifMeta = (type) => NOTIF_META[type] || { icon: '🔔', bg: 'bg-gray-50', dot: 'bg-gray-400' };
+
 // ─── Sidebar is extracted as a REAL component (not inline) so refs stay stable ─
 // Defining it inside AdminLayout caused it to remount every render, which is
 // what made the nav scroll to top on every route change.
@@ -338,33 +362,57 @@ export default function AdminLayout() {
                       width:     'min(320px, calc(100vw - 24px))',   // never overflows on small screens
                     }}
                   >
-                    <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-                      <h3 className="font-semibold text-gray-900 text-sm">Notifications</h3>
+                    <div className="px-4 py-3 border-b border-gray-100">
+                      <div className="flex items-center justify-between mb-2">
+                        <h3 className="font-semibold text-gray-900 text-sm">Notifications</h3>
+                        <div className="flex items-center gap-2">
+                          {unreadCount > 0 && (
+                            <button onClick={markAllRead} className="text-xs text-primary hover:underline">
+                              Mark all read
+                            </button>
+                          )}
+                          <button
+                            onClick={async () => { await API.delete('/notifications/clear-read'); fetchNotifications(); }}
+                            className="text-xs text-gray-400 hover:text-red-500 hover:underline"
+                            title="Clear read notifications"
+                          >
+                            Clear read
+                          </button>
+                        </div>
+                      </div>
+                      {/* Unread count badge */}
                       {unreadCount > 0 && (
-                        <button onClick={markAllRead} className="text-xs text-primary hover:underline">
-                          Mark all read
-                        </button>
+                        <p className="text-xs text-gray-500">{unreadCount} unread notification{unreadCount !== 1 ? 's' : ''}</p>
                       )}
                     </div>
-                    <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+                    <div style={{ maxHeight: 420, overflowY: 'auto' }}>
                       {notifications.length === 0 ? (
                         <div className="py-8 text-center text-sm text-gray-400">No notifications</div>
-                      ) : notifications.map(n => (
-                        <button
-                          key={n._id}
-                          onClick={() => handleNotifClick(n)}
-                          className={`w-full text-left px-4 py-3 hover:bg-gray-50 border-b border-gray-50 transition-colors ${!n.isRead ? 'bg-blue-50/50' : ''}`}
-                        >
-                          <div className="flex items-start gap-2">
-                            <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${!n.isRead ? 'bg-primary' : 'bg-gray-300'}`}/>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <p className="text-xs font-semibold text-gray-800 truncate">{n.title}</p>
-                              <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{n.message}</p>
-                              <p className="text-xs text-gray-400 mt-1">{new Date(n.createdAt).toLocaleString()}</p>
+                      ) : notifications.map(n => {
+                        const meta = notifMeta(n.type);
+                        return (
+                          <button
+                            key={n._id}
+                            onClick={() => handleNotifClick(n)}
+                            className={`w-full text-left px-3 py-3 hover:bg-gray-50 border-b border-gray-50 transition-colors ${!n.isRead ? meta.bg : ''}`}
+                          >
+                            <div className="flex items-start gap-2.5">
+                              {/* Type icon */}
+                              <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 text-sm ${meta.bg} border border-gray-100`}>
+                                {meta.icon}
+                              </div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div className="flex items-start justify-between gap-1">
+                                  <p className="text-xs font-semibold text-gray-800 leading-tight">{n.title}</p>
+                                  {!n.isRead && <div className={`w-2 h-2 rounded-full flex-shrink-0 mt-0.5 ${meta.dot}`}/>}
+                                </div>
+                                <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{n.message}</p>
+                                <p className="text-xs text-gray-400 mt-1">{new Date(n.createdAt).toLocaleString()}</p>
+                              </div>
                             </div>
-                          </div>
-                        </button>
-                      ))}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 </>

@@ -498,6 +498,22 @@ const cancelRejectedAdminHtml = async (order) => {
 // ── Run verify on startup (non-blocking) ──────────────────────────────────────
 setTimeout(() => verifySmtp(), 3000);
 
+// ── Email notification guard ──────────────────────────────────────────────────
+// Checks if a specific email notification type is enabled in Settings.
+// Keys stored in DB: emailNotif_<key> with value true/false (string or bool).
+// Returns true by default if the key is missing (safe for existing installs).
+const isEmailEnabled = async (key) => {
+  try {
+    const { Settings } = require("./../models/index");
+    const row = await Settings.findOne({ key: `emailNotif_${key}` }).lean();
+    if (!row) return true; // default enabled
+    const v = row.value;
+    if (typeof v === "boolean") return v;
+    if (typeof v === "string") return v !== "false" && v !== "0";
+    return Boolean(v);
+  } catch { return true; }
+};
+
 module.exports = {
   sendMail,
   getAdminEmail,
@@ -516,4 +532,5 @@ module.exports = {
   cancelRejectedAdminHtml,
   cancelAutoDecisionAdminHtml,
   orderStatusUpdateHtml,
+  isEmailEnabled,
 };

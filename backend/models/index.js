@@ -96,7 +96,22 @@ const Review = mongoose.model('Review', reviewSchema);
 
 // Notification
 const notificationSchema = new mongoose.Schema({
-  type: { type: String, enum: ['new_order','low_stock','new_review','new_user','return_request','gift_card','system'], required: true },
+  type: {
+    type: String,
+    enum: [
+      // Order lifecycle
+      'new_order', 'order_status',
+      // Payment
+      'payment_slip', 'payment_confirmed',
+      // Cancellations
+      'cancel_request', 'cancel_approved', 'cancel_rejected', 'cancel_auto_decision',
+      // Follow-up & SLA (auto-monitoring)
+      'follow_up', 'sla_breach', 'order_stuck', 'followup_reminder',
+      // Other
+      'low_stock', 'new_review', 'new_user', 'return_request', 'gift_card', 'system',
+    ],
+    required: true,
+  },
   title: String, message: String, link: String,
   isRead: { type: Boolean, default: false },
   data: mongoose.Schema.Types.Mixed,

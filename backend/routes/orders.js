@@ -20,6 +20,7 @@ const {
   cancelRejectedAdminHtml,
   cancelAutoDecisionAdminHtml,
   orderStatusUpdateHtml,
+  isEmailEnabled,
 } = require('../utils/mailer');
 const multer = require('multer');
 const path = require('path');
@@ -141,7 +142,7 @@ const runAutoCancelDecisions = async () => {
           }).catch(() => {});
         }
         if (order.billing?.email) {
-          sendMail({
+          if (await isEmailEnabled('cancel_approved_customer')) sendMail({
             to: order.billing.email,
             subject: `Order Cancelled — ${order.orderNumber} | ShopZen`,
             html: await orderCancelledHtml(order),
@@ -149,7 +150,7 @@ const runAutoCancelDecisions = async () => {
         }
       } else {
         if (order.billing?.email) {
-          sendMail({
+          if (await isEmailEnabled('cancel_rejected_customer')) sendMail({
             to: order.billing.email,
             subject: `Cancellation Update — ${order.orderNumber} | ShopZen`,
             html: await cancelRejectedHtml(order),
@@ -169,7 +170,7 @@ const runAutoCancelDecisions = async () => {
 
       const adminEmail = await getAdminEmail();
       if (adminEmail) {
-        sendMail({
+        if (await isEmailEnabled('cancel_request_admin')) sendMail({
           to: adminEmail,
           subject: `🤖 Auto-${action === 'approved' ? 'Cancellation' : 'Rejection'} — ${order.orderNumber} | ShopZen`,
           html: await cancelAutoDecisionAdminHtml(order, action),
@@ -185,6 +186,105 @@ const runAutoCancelDecisions = async () => {
 
 setInterval(runAutoCancelDecisions, 60 * 1000);
 setTimeout(runAutoCancelDecisions, 5000);
+
+// ── Automatic follow-up reminder scheduler (runs every 30 min) ───────────────
+// Sends in-app notifications for:
+//  1. Orders sitting in 'pending' > 30 min with no action
+//  2. Bank transfer orders with no slip uploaded after 2 hours
+//  3. Orders flagged for follow-up — reminds every 2 hours until resolved
+//  4. Cancel requests pending for > 30 min
+const runFollowUpReminders = async () => {
+  try {
+    const now = new Date();
+
+    // 1. Pending orders > 30 min — needs confirmation
+    const pendingCutoff = new Date(now - 30 * 60 * 1000);
+    const stalePending = await Order.find({
+      orderStatus: 'pending',
+      createdAt: { $lte: pendingCutoff },
+    }).select('orderNumber _id billing createdAt');
+
+    for (const o of stalePending) {
+      const mins = Math.round((now - new Date(o.createdAt)) / 60000);
+      await Notification.create({
+        type: 'followup_reminder',
+        title: `⏰ Pending Order Needs Confirmation`,
+        message: `Order ${o.orderNumber} (${o.billing?.firstName} ${o.billing?.lastName}) has been pending for ${mins} minutes — please confirm or action it`,
+        link: `/admin/orders/${o._id}`,
+        data: { orderId: o._id, reason: 'pending_too_long' },
+      }).catch(() => {});
+    }
+
+    // 2. Bank transfer orders with no slip > 2 hours
+    const slipCutoff = new Date(now - 2 * 60 * 60 * 1000);
+    const noSlip = await Order.find({
+      paymentMethod: 'bank_transfer',
+      paymentStatus: 'pending',
+      paymentSlip: { $in: [null, undefined, ''] },
+      orderStatus: { $nin: ['cancelled', 'refunded'] },
+      createdAt: { $lte: slipCutoff },
+    }).select('orderNumber _id billing createdAt');
+
+    for (const o of noSlip) {
+      const hrs = (now - new Date(o.createdAt)) / 3600000;
+      await Notification.create({
+        type: 'followup_reminder',
+        title: `🏦 No Payment Slip Uploaded`,
+        message: `Order ${o.orderNumber} — bank transfer selected ${hrs.toFixed(1)}h ago but no payment slip uploaded yet`,
+        link: `/admin/orders/${o._id}`,
+        data: { orderId: o._id, reason: 'no_slip' },
+      }).catch(() => {});
+    }
+
+    // 3. Flagged follow-up orders — remind every 2 hours
+    const flagRemindCutoff = new Date(now - 2 * 60 * 60 * 1000);
+    const flagged = await Order.find({
+      followUpFlag: true,
+      orderStatus: { $nin: ['delivered', 'cancelled', 'refunded'] },
+      lastActionAt: { $lte: flagRemindCutoff },
+    }).select('orderNumber _id billing followUpNote priority');
+
+    for (const o of flagged) {
+      await Notification.create({
+        type: 'follow_up',
+        title: `🔔 Follow-up Reminder${o.priority === 'urgent' ? ' 🚨 URGENT' : o.priority === 'high' ? ' 🔶 HIGH' : ''}`,
+        message: `Order ${o.orderNumber} (${o.billing?.firstName} ${o.billing?.lastName}) is still flagged for follow-up${o.followUpNote ? ` — "${o.followUpNote}"` : ''} — no action in 2+ hours`,
+        link: `/admin/orders/${o._id}`,
+        data: { orderId: o._id, reason: 'flagged_reminder' },
+      }).catch(() => {});
+    }
+
+    // 4. Cancel requests pending > 30 min
+    const cancelCutoff = new Date(now - 30 * 60 * 1000);
+    const pendingCancels = await Order.find({
+      'cancelRequest.requested': true,
+      'cancelRequest.status': 'pending',
+      'cancelRequest.requestedAt': { $lte: cancelCutoff },
+    }).select('orderNumber _id billing cancelRequest');
+
+    for (const o of pendingCancels) {
+      const mins = Math.round((now - new Date(o.cancelRequest.requestedAt)) / 60000);
+      await Notification.create({
+        type: 'cancel_request',
+        title: `🚫 Cancel Request Awaiting Decision`,
+        message: `Order ${o.orderNumber} — cancellation requested ${mins} minutes ago by ${o.billing?.firstName} ${o.billing?.lastName} and still pending${o.cancelRequest.reason ? `: "${o.cancelRequest.reason}"` : ''}`,
+        link: `/admin/orders/${o._id}`,
+        data: { orderId: o._id, reason: 'cancel_pending_long' },
+      }).catch(() => {});
+    }
+
+    const totalReminders = stalePending.length + noSlip.length + flagged.length + pendingCancels.length;
+    if (totalReminders > 0) {
+      console.log(`[FOLLOW-UP] Sent ${totalReminders} reminder notifications`);
+    }
+  } catch (err) {
+    console.error('[FOLLOW-UP SCHEDULER]', err.message);
+  }
+};
+
+setInterval(runFollowUpReminders, 30 * 60 * 1000); // every 30 min
+setTimeout(runFollowUpReminders, 30000);            // 30s after server start
+
 
 // ── Admin — Get all orders ────────────────────────────────────────────────────
 router.get('/admin/all', adminAuth, async (req, res) => {
@@ -254,7 +354,7 @@ router.put('/admin/:id/status', adminAuth, async (req, res) => {
     // Email customer
     const notifyStatuses = ['confirmed', 'processing', 'shipped', 'out_for_delivery', 'delivered', 'cancelled'];
     if (order.billing?.email && notifyStatuses.includes(status)) {
-      sendMail({
+      if (await isEmailEnabled('order_status_customer')) sendMail({
         to: order.billing.email,
         subject: `Order Update — ${order.orderNumber} | ShopZen`,
         html: await orderStatusUpdateHtml(order, status, note),
@@ -309,7 +409,7 @@ router.put('/admin/:id/confirm-payment', adminAuth, async (req, res) => {
 
     // FIX: Email customer on manual payment confirmation too
     if (order.billing?.email) {
-      sendMail({
+      if (await isEmailEnabled('payment_confirmed_customer')) sendMail({
         to: order.billing.email,
         subject: `✅ Payment Confirmed — Order ${order.orderNumber} | ShopZen`,
         html: await paymentConfirmedHtml(order),
@@ -511,7 +611,7 @@ router.post('/', async (req, res) => {
 
     // ── Email customer: order confirmation ──
     if (billing?.email) {
-      sendMail({
+      if (await isEmailEnabled('order_placed_customer')) sendMail({
         to: billing.email,
         subject: `Order Confirmed — ${order.orderNumber} | ShopZen`,
         html: await orderConfirmHtml(order),
@@ -521,7 +621,7 @@ router.post('/', async (req, res) => {
     // ── Email admin: new order alert ──
     const adminEmail = await getAdminEmail();
     if (adminEmail) {
-      sendMail({
+      if (await isEmailEnabled('order_placed_admin')) sendMail({
         to: adminEmail,
         subject: `🛒 New Order ${order.orderNumber} — Rs. ${total.toLocaleString()} | ShopZen`,
         html: await newOrderAdminHtml(order),
@@ -561,7 +661,7 @@ router.post('/payment-success', async (req, res) => {
     });
 
     if (order.billing?.email) {
-      sendMail({
+      if (await isEmailEnabled('payment_confirmed_customer')) sendMail({
         to: order.billing.email,
         subject: `✅ Payment Confirmed — Order ${order.orderNumber} | ShopZen`,
         html: await paymentConfirmedHtml(order),
@@ -605,7 +705,7 @@ router.post('/:id/payment-slip', uploadSlip.single('slip'), async (req, res) => 
     // ── Email admin: slip uploaded ──
     const adminEmail = await getAdminEmail();
     if (adminEmail) {
-      sendMail({
+      if (await isEmailEnabled('slip_uploaded_admin')) sendMail({
         to: adminEmail,
         subject: `📎 Payment Slip Uploaded — ${order.orderNumber} | ShopZen`,
         html: await slipUploadedAdminHtml(order, slipUrl),
@@ -614,7 +714,7 @@ router.post('/:id/payment-slip', uploadSlip.single('slip'), async (req, res) => 
 
     // ── Email customer: slip received ──
     if (order.billing?.email) {
-      sendMail({
+      if (await isEmailEnabled('slip_received_customer')) sendMail({
         to: order.billing.email,
         subject: `Payment Slip Received — ${order.orderNumber} | ShopZen`,
         html: await slipReceivedCustomerHtml(order),
@@ -683,7 +783,7 @@ router.post('/:id/cancel-request', auth, async (req, res) => {
     // ── Email admin: cancel request ──
     const adminEmail = await getAdminEmail();
     if (adminEmail) {
-      sendMail({
+      if (await isEmailEnabled('cancel_request_admin')) sendMail({
         to: adminEmail,
         subject: `🚫 Cancel Request — ${order.orderNumber} | ShopZen`,
         html: await cancelRequestAdminHtml(order),
@@ -692,7 +792,7 @@ router.post('/:id/cancel-request', auth, async (req, res) => {
 
     // ── Email customer: request received confirmation ──
     if (order.billing?.email) {
-      sendMail({
+      if (await isEmailEnabled('cancel_request_customer')) sendMail({
         to: order.billing.email,
         subject: `Cancellation Request Received — ${order.orderNumber} | ShopZen`,
         html: await cancelRequestReceivedCustomerHtml(order),
@@ -741,14 +841,14 @@ router.put('/admin/:id/cancel-decision', adminAuth, async (req, res) => {
       }).catch(() => {});
 
       if (order.billing?.email) {
-        sendMail({
+        if (await isEmailEnabled('cancel_approved_customer')) sendMail({
           to: order.billing.email,
           subject: `Order Cancelled — ${order.orderNumber} | ShopZen`,
           html: await orderCancelledHtml(order),
         }).catch(() => {});
       }
       if (adminEmail) {
-        sendMail({
+        if (await isEmailEnabled('cancel_approved_admin')) sendMail({
           to: adminEmail,
           subject: `✅ Cancellation Approved — ${order.orderNumber} | ShopZen`,
           html: await cancelApprovedAdminHtml(order),
@@ -763,14 +863,14 @@ router.put('/admin/:id/cancel-decision', adminAuth, async (req, res) => {
       }).catch(() => {});
 
       if (order.billing?.email) {
-        sendMail({
+        if (await isEmailEnabled('cancel_rejected_customer')) sendMail({
           to: order.billing.email,
           subject: `Cancellation Update — ${order.orderNumber} | ShopZen`,
           html: await cancelRejectedHtml(order),
         }).catch(() => {});
       }
       if (adminEmail) {
-        sendMail({
+        if (await isEmailEnabled('cancel_rejected_admin')) sendMail({
           to: adminEmail,
           subject: `❌ Cancellation Rejected — ${order.orderNumber} | ShopZen`,
           html: await cancelRejectedAdminHtml(order),
