@@ -12,6 +12,9 @@ const {
   slipUploadedAdminHtml,
   slipReceivedCustomerHtml,
   paymentConfirmedHtml,
+  paymentConfirmedAdminHtml,
+  orderDeliveredCustomerHtml,
+  orderStatusAdminHtml,
   orderCancelledHtml,
   cancelRequestAdminHtml,
   cancelRequestReceivedCustomerHtml,
@@ -354,11 +357,30 @@ router.put('/admin/:id/status', adminAuth, async (req, res) => {
     // Email customer
     const notifyStatuses = ['confirmed', 'processing', 'shipped', 'out_for_delivery', 'delivered', 'cancelled'];
     if (order.billing?.email && notifyStatuses.includes(status)) {
-      if (await isEmailEnabled('order_status_customer')) sendMail({
-        to: order.billing.email,
-        subject: `Order Update — ${order.orderNumber} | ShopZen`,
-        html: await orderStatusUpdateHtml(order, status, note),
-      }).catch(err => console.error('[STATUS EMAIL]', err.message));
+      // Dedicated delivered email (richer template with review prompt)
+      if (status === 'delivered') {
+        if (await isEmailEnabled('order_delivered_customer')) sendMail({
+          to: order.billing.email,
+          subject: `📦 Your Order has been Delivered! — ${order.orderNumber} | ShopZen`,
+          html: await orderDeliveredCustomerHtml(order, note),
+        }).catch(err => console.error('[DELIVERED EMAIL]', err.message));
+      } else {
+        if (await isEmailEnabled('order_status_customer')) sendMail({
+          to: order.billing.email,
+          subject: `Order Update — ${order.orderNumber} | ShopZen`,
+          html: await orderStatusUpdateHtml(order, status, note),
+        }).catch(err => console.error('[STATUS EMAIL]', err.message));
+      }
+    }
+
+    // Email admin on status change
+    if (await isEmailEnabled('order_status_admin')) {
+      const adminEmail = await getAdminEmail();
+      if (adminEmail) sendMail({
+        to: adminEmail,
+        subject: `[Admin] Order ${order.orderNumber} → ${status.replace(/_/g, ' ').toUpperCase()}`,
+        html: await orderStatusAdminHtml(order, status, note),
+      }).catch(err => console.error('[STATUS ADMIN EMAIL]', err.message));
     }
 
     res.json(order);
@@ -416,6 +438,16 @@ router.put('/admin/:id/confirm-payment', adminAuth, async (req, res) => {
       }).catch(err => console.error('[PAYMENT CONFIRM EMAIL]', err.message));
     }
 
+    // Email admin copy on payment confirmation
+    if (await isEmailEnabled('payment_confirmed_admin')) {
+      const adminEmail = await getAdminEmail();
+      if (adminEmail) sendMail({
+        to: adminEmail,
+        subject: `[Admin] ✅ Payment Confirmed — Order ${order.orderNumber}`,
+        html: await paymentConfirmedAdminHtml(order),
+      }).catch(err => console.error('[PAYMENT CONFIRM ADMIN EMAIL]', err.message));
+    }
+
     res.json(order);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -458,6 +490,16 @@ router.put('/admin/:id/confirm-slip', adminAuth, async (req, res) => {
         subject: `✅ Payment Confirmed — Order ${order.orderNumber} | ShopZen`,
         html: await paymentConfirmedHtml(order),
       }).catch(err => console.error('[SLIP CONFIRM EMAIL]', err.message));
+    }
+
+    // Email admin copy on slip verification
+    if (await isEmailEnabled('payment_confirmed_admin')) {
+      const adminEmail = await getAdminEmail();
+      if (adminEmail) sendMail({
+        to: adminEmail,
+        subject: `[Admin] ✅ Payment Confirmed (Slip) — Order ${order.orderNumber}`,
+        html: await paymentConfirmedAdminHtml(order),
+      }).catch(err => console.error('[SLIP CONFIRM ADMIN EMAIL]', err.message));
     }
 
     res.json(order);
@@ -665,6 +707,16 @@ router.post('/payment-success', async (req, res) => {
         to: order.billing.email,
         subject: `✅ Payment Confirmed — Order ${order.orderNumber} | ShopZen`,
         html: await paymentConfirmedHtml(order),
+      }).catch(() => {});
+    }
+
+    // Email admin on gateway payment confirmation
+    if (await isEmailEnabled('payment_confirmed_admin')) {
+      const adminEmail = await getAdminEmail();
+      if (adminEmail) sendMail({
+        to: adminEmail,
+        subject: `[Admin] ✅ Payment Confirmed (${gateway}) — Order ${order.orderNumber}`,
+        html: await paymentConfirmedAdminHtml(order),
       }).catch(() => {});
     }
 

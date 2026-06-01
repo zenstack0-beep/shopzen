@@ -441,7 +441,348 @@ const orderStatusUpdateHtml = async (order, newStatus, note) => {
     </div>`, t);
 };
 
+// ── Payment confirmed notification to admin ───────────────────────────────────
+const paymentConfirmedAdminHtml = async (order) => {
+  const t = await getTheme();
+  const sym = 'Rs.';
+  const paymentLabels = {
+    bank_transfer: '🏦 Bank Transfer (Slip Verified)',
+    cod: '💵 Cash on Delivery',
+    payhere: '💳 PayHere',
+    stripe: '💳 Stripe',
+    paypal: '💳 PayPal',
+  };
+  return wrapper(`
+    ${header('✅ Payment Confirmed — Admin Copy', t)}
+    <div style="padding:32px">
+      <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:16px;margin-bottom:20px;text-align:center">
+        <p style="margin:0 0 4px;font-size:12px;color:#166534">Payment Verified</p>
+        <p style="margin:0;font-size:24px;font-weight:800;color:#15803d;font-family:monospace">${order.orderNumber}</p>
+        <p style="margin:8px 0 0;font-size:18px;font-weight:700;color:#166534">${sym} ${order.total?.toLocaleString()}</p>
+      </div>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+        <tr><td style="padding:8px 0;color:#6b7280;font-size:13px;width:40%">Customer</td><td style="padding:8px 0;font-size:13px;font-weight:600;color:#111">${order.billing?.firstName} ${order.billing?.lastName}</td></tr>
+        <tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Email</td><td style="padding:8px 0;font-size:13px;color:#111">${order.billing?.email}</td></tr>
+        <tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Phone</td><td style="padding:8px 0;font-size:13px;color:#111">${order.billing?.phone}</td></tr>
+        <tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Payment Method</td><td style="padding:8px 0;font-size:13px;color:#111">${paymentLabels[order.paymentMethod] || order.paymentMethod}</td></tr>
+        ${order.paymentReference ? `<tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Reference</td><td style="padding:8px 0;font-size:13px;font-family:monospace;color:#111">${order.paymentReference}</td></tr>` : ''}
+        <tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Confirmed At</td><td style="padding:8px 0;font-size:13px;color:#111">${new Date().toLocaleString('en-LK')}</td></tr>
+      </table>
+      <p style="font-size:13px;color:#6b7280;margin-bottom:16px">The customer has been notified by email. The order is now confirmed and ready for processing.</p>
+      <a href="${process.env.ADMIN_URL || process.env.FRONTEND_URL || ''}/admin/orders/${order._id}"
+         style="display:inline-block;background:linear-gradient(135deg,${t.primary},${lighten(t.primary)});color:white;padding:12px 24px;border-radius:10px;font-weight:700;font-size:14px;text-decoration:none">
+        View Order in Dashboard →
+      </a>
+    </div>`, t);
+};
+
+// ── Order delivered email to customer (dedicated) ─────────────────────────────
+const orderDeliveredCustomerHtml = async (order, note) => {
+  const t = await getTheme();
+  const sym = 'Rs.';
+  const itemRows = (order.items || []).map(item => `
+    <tr>
+      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;color:#374151">${item.name} × ${item.quantity}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;color:#374151;text-align:right;font-weight:600">${sym} ${item.subtotal?.toLocaleString()}</td>
+    </tr>`).join('');
+  return wrapper(`
+    ${header('📦 Order Delivered! 🎉', t)}
+    <div style="padding:32px">
+      <p style="color:#374151">Hi <strong>${order.billing?.firstName}</strong>,</p>
+      <p style="color:#6b7280;font-size:14px;margin-bottom:20px">Your order has been delivered successfully. We hope you love your purchase!</p>
+      <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:20px;text-align:center;margin-bottom:20px">
+        <p style="margin:0 0 4px;font-size:12px;color:#166534">Delivered ✅</p>
+        <p style="margin:0;font-size:24px;font-weight:800;color:#15803d;font-family:monospace">${order.orderNumber}</p>
+        <p style="margin:8px 0 0;font-size:13px;color:#166534">Delivered on ${new Date().toLocaleDateString('en-LK', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+        ${note ? `<p style="margin:8px 0 0;font-size:13px;color:#166534;font-style:italic">${note}</p>` : ''}
+      </div>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+        <thead><tr style="background:#f8fafc">
+          <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600">ITEM</th>
+          <th style="padding:10px 12px;text-align:right;font-size:12px;color:#6b7280;font-weight:600">AMOUNT</th>
+        </tr></thead>
+        <tbody>${itemRows}</tbody>
+        <tfoot>
+          <tr style="border-top:2px solid #e5e7eb"><td style="padding:12px;font-size:15px;font-weight:700;color:#111">Total Paid</td><td style="padding:12px;font-size:15px;font-weight:700;color:#15803d;text-align:right">${sym} ${order.total?.toLocaleString()}</td></tr>
+        </tfoot>
+      </table>
+      <div style="background:#fefce8;border:1px solid #fde047;border-radius:10px;padding:16px;text-align:center;margin-bottom:20px">
+        <p style="margin:0;font-size:14px;font-weight:600;color:#854d0e">Enjoyed your order? Leave us a review! ⭐</p>
+        <p style="margin:6px 0 0;font-size:13px;color:#92400e">Your feedback helps us serve you better.</p>
+      </div>
+      <p style="color:#9ca3af;font-size:12px;text-align:center">Thank you for shopping with ${t.storeName}! 🙏</p>
+    </div>`, t);
+};
+
+// ── Order status change notification to admin ─────────────────────────────────
+const orderStatusAdminHtml = async (order, newStatus, note) => {
+  const t = await getTheme();
+  const sym = 'Rs.';
+  const statusLabels = {
+    confirmed: 'Confirmed ✅', processing: 'Processing 🔄', shipped: 'Shipped 📦',
+    out_for_delivery: 'Out for Delivery 🚚', delivered: 'Delivered ✅',
+    cancelled: 'Cancelled ❌', refunded: 'Refunded 💰',
+  };
+  const statusColors = {
+    confirmed: '#16a34a', processing: '#d97706', shipped: '#2563eb',
+    out_for_delivery: '#7c3aed', delivered: '#16a34a',
+    cancelled: '#dc2626', refunded: '#6b7280',
+  };
+  const color = statusColors[newStatus] || t.primary;
+  const label = statusLabels[newStatus] || newStatus;
+  const paymentLabels = {
+    bank_transfer: '🏦 Bank Transfer', cod: '💵 Cash on Delivery',
+    payhere: '💳 PayHere', stripe: '💳 Stripe', paypal: '💳 PayPal',
+  };
+  return wrapper(`
+    ${header(`Order Status: ${label}`, t)}
+    <div style="padding:32px">
+      <p style="color:#374151;margin:0 0 16px">An order status has been updated in your store.</p>
+      <div style="background:#f8fafc;border-radius:10px;padding:16px;text-align:center;margin-bottom:20px;border:2px solid ${color}30">
+        <p style="margin:0 0 4px;font-size:12px;color:#6b7280">Order ${order.orderNumber}</p>
+        <p style="margin:0;font-size:22px;font-weight:800;color:${color}">${label}</p>
+        ${note ? `<p style="margin:8px 0 0;font-size:13px;color:#6b7280">${note}</p>` : ''}
+      </div>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+        <tr><td style="padding:8px 0;color:#6b7280;font-size:13px;width:40%">Customer</td><td style="padding:8px 0;font-size:13px;font-weight:600;color:#111">${order.billing?.firstName} ${order.billing?.lastName}</td></tr>
+        <tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Email</td><td style="padding:8px 0;font-size:13px;color:#111">${order.billing?.email}</td></tr>
+        <tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Phone</td><td style="padding:8px 0;font-size:13px;color:#111">${order.billing?.phone}</td></tr>
+        <tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Order Total</td><td style="padding:8px 0;font-size:13px;font-weight:700;color:${t.primary}">${sym} ${order.total?.toLocaleString()}</td></tr>
+        <tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Payment</td><td style="padding:8px 0;font-size:13px;color:#111">${paymentLabels[order.paymentMethod] || order.paymentMethod}</td></tr>
+        ${order.trackingNumber ? `<tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Tracking</td><td style="padding:8px 0;font-size:13px;font-family:monospace;font-weight:700;color:#111">${order.trackingNumber}${order.deliveryPartner ? ` via ${order.deliveryPartner}` : ''}</td></tr>` : ''}
+      </table>
+      <a href="${process.env.ADMIN_URL || process.env.FRONTEND_URL || ''}/admin/orders/${order._id}"
+         style="display:inline-block;background:linear-gradient(135deg,${t.primary},${lighten(t.primary)});color:white;padding:12px 24px;border-radius:10px;font-weight:700;font-size:14px;text-decoration:none">
+        View Order in Dashboard →
+      </a>
+    </div>`, t);
+};
+
 // ── Auto cancel-decision notification to admin ────────────────────────────────
+
+// ── Return request submitted — customer confirmation ──────────────────────────
+const returnRequestCustomerHtml = async ({ customerName, orderNumber, returnId, reason, items, description }) => {
+  const t = await getTheme();
+  const itemRows = (items || []).map(item => `
+    <tr>
+      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;color:#374151">${item.name}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;color:#6b7280;text-align:center">${item.quantity}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;color:#6b7280;text-align:right;text-transform:capitalize">${item.condition || 'opened'}</td>
+    </tr>`).join('');
+  return wrapper(`
+    ${header('Return Request Received \u{1F504}', t)}
+    <div style="padding:32px">
+      <p style="color:#374151">Hi <strong>${customerName}</strong>,</p>
+      <p style="color:#6b7280;font-size:14px;margin-bottom:20px">We have received your return request for order <strong style="color:${t.primary}">${orderNumber}</strong>. Our team will review it within 24 hours and get back to you.</p>
+      <div style="background:#fefce8;border:1px solid #fde047;border-radius:10px;padding:16px;text-align:center;margin-bottom:20px">
+        <p style="margin:0 0 4px;font-size:12px;color:#854d0e;font-weight:600">Return Request ID</p>
+        <p style="margin:0;font-size:18px;font-weight:800;color:#854d0e;font-family:monospace">#${returnId}</p>
+        <p style="margin:8px 0 0;font-size:13px;color:#92400e">Under Review - typically 24 hours</p>
+      </div>
+      <div style="background:#f8fafc;border-radius:10px;padding:14px;margin-bottom:20px">
+        <p style="margin:0 0 6px;font-size:12px;color:#6b7280;font-weight:600;text-transform:uppercase">Reason</p>
+        <p style="margin:0;font-size:13px;color:#374151;font-weight:600">${reason}</p>
+        ${description ? `<p style="margin:6px 0 0;font-size:13px;color:#6b7280">${description}</p>` : ''}
+      </div>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+        <thead><tr style="background:#f8fafc">
+          <th style="padding:8px 12px;text-align:left;font-size:11px;color:#6b7280;font-weight:600">ITEM</th>
+          <th style="padding:8px 12px;text-align:center;font-size:11px;color:#6b7280;font-weight:600">QTY</th>
+          <th style="padding:8px 12px;text-align:right;font-size:11px;color:#6b7280;font-weight:600">CONDITION</th>
+        </tr></thead>
+        <tbody>${itemRows}</tbody>
+      </table>
+      <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:14px;font-size:13px;color:#0369a1;margin-bottom:20px">
+        <strong>What happens next?</strong> Our team will inspect your request and you will receive an email with our decision. Please do not ship the item until you hear from us.
+      </div>
+      <p style="color:#9ca3af;font-size:12px;text-align:center">Thank you for shopping with ${t.storeName}!</p>
+    </div>`, t);
+};
+
+// ── Return request submitted — admin notification ─────────────────────────────
+const returnRequestAdminHtml = async ({ customerName, customerEmail, customerPhone, orderNumber, orderId, returnId, reason, description, items }) => {
+  const t = await getTheme();
+  const itemRows = (items || []).map(item => `
+    <tr>
+      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;color:#374151">${item.name}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;color:#6b7280;text-align:center">${item.quantity}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;color:#6b7280;text-align:right;text-transform:capitalize">${item.condition || 'opened'}</td>
+    </tr>`).join('');
+  return wrapper(`
+    ${header('New Return Request', t)}
+    <div style="padding:32px">
+      <div style="background:#fefce8;border:1px solid #fde047;border-radius:10px;padding:16px;margin-bottom:20px;text-align:center">
+        <p style="margin:0 0 4px;font-size:12px;color:#854d0e">New Return - Order</p>
+        <p style="margin:0;font-size:22px;font-weight:800;color:#854d0e;font-family:monospace">${orderNumber}</p>
+      </div>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+        <tr><td style="padding:8px 0;color:#6b7280;font-size:13px;width:40%">Customer</td><td style="padding:8px 0;font-size:13px;font-weight:600;color:#111">${customerName}</td></tr>
+        <tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Email</td><td style="padding:8px 0;font-size:13px;color:#111">${customerEmail}</td></tr>
+        ${customerPhone ? `<tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Phone</td><td style="padding:8px 0;font-size:13px;color:#111">${customerPhone}</td></tr>` : ''}
+        <tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Return ID</td><td style="padding:8px 0;font-size:13px;font-family:monospace;font-weight:700;color:${t.primary}">#${returnId}</td></tr>
+        <tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Reason</td><td style="padding:8px 0;font-size:13px;color:#111;font-weight:600">${reason}</td></tr>
+        ${description ? `<tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Description</td><td style="padding:8px 0;font-size:13px;color:#374151">${description}</td></tr>` : ''}
+      </table>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+        <thead><tr style="background:#f8fafc">
+          <th style="padding:8px 12px;text-align:left;font-size:11px;color:#6b7280;font-weight:600">ITEM</th>
+          <th style="padding:8px 12px;text-align:center;font-size:11px;color:#6b7280;font-weight:600">QTY</th>
+          <th style="padding:8px 12px;text-align:right;font-size:11px;color:#6b7280;font-weight:600">CONDITION</th>
+        </tr></thead>
+        <tbody>${itemRows}</tbody>
+      </table>
+      <a href="${process.env.ADMIN_URL || process.env.FRONTEND_URL || ''}/admin/returns/${returnId}"
+         style="display:inline-block;background:linear-gradient(135deg,${t.primary},${lighten(t.primary)});color:white;padding:12px 24px;border-radius:10px;font-weight:700;font-size:14px;text-decoration:none">
+        Review Return Request
+      </a>
+    </div>`, t);
+};
+
+// ── Return approved — customer ─────────────────────────────────────────────────
+const returnApprovedCustomerHtml = async ({ customerName, orderNumber, returnId, refundAmount, refundMethod, adminNote }) => {
+  const t = await getTheme();
+  const sym = 'Rs.';
+  const methodLabels = { original: 'Original Payment Method', store_credit: 'Store Credit', gift_card: 'Gift Card' };
+  return wrapper(`
+    ${header('Return Request Approved!', t)}
+    <div style="padding:32px">
+      <p style="color:#374151">Hi <strong>${customerName}</strong>,</p>
+      <p style="color:#6b7280;font-size:14px;margin-bottom:20px">Great news! Your return request for order <strong style="color:${t.primary}">${orderNumber}</strong> has been <strong style="color:#16a34a">approved</strong>.</p>
+      <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:20px;text-align:center;margin-bottom:20px">
+        <p style="margin:0 0 4px;font-size:12px;color:#166534;font-weight:600">Return #${returnId}</p>
+        <p style="margin:0;font-size:20px;font-weight:800;color:#15803d">Approved</p>
+        ${refundAmount ? `<p style="margin:8px 0 0;font-size:22px;font-weight:800;color:#15803d">${sym} ${Number(refundAmount).toLocaleString()} Refund</p>` : ''}
+      </div>
+      ${refundMethod ? `
+      <div style="background:#f8fafc;border-radius:10px;padding:14px;margin-bottom:20px">
+        <p style="margin:0 0 4px;font-size:12px;color:#6b7280;font-weight:600;text-transform:uppercase">Refund Via</p>
+        <p style="margin:0;font-size:14px;font-weight:700;color:#374151">${methodLabels[refundMethod] || refundMethod}</p>
+        <p style="margin:6px 0 0;font-size:12px;color:#9ca3af">Refunds typically appear within 5-7 business days depending on your bank.</p>
+      </div>` : ''}
+      ${adminNote ? `
+      <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:14px;margin-bottom:20px">
+        <p style="margin:0 0 4px;font-size:12px;color:#0369a1;font-weight:600;text-transform:uppercase">Note from our team</p>
+        <p style="margin:0;font-size:13px;color:#0369a1">${adminNote}</p>
+      </div>` : ''}
+      <div style="background:#fefce8;border:1px solid #fde047;border-radius:10px;padding:14px;font-size:13px;color:#92400e;margin-bottom:20px">
+        <strong>Next step:</strong> Please pack the item securely and ship it back. You will receive pickup/drop-off instructions shortly if applicable.
+      </div>
+      <p style="color:#9ca3af;font-size:12px;text-align:center">Thank you for your patience. We appreciate your trust in ${t.storeName}!</p>
+    </div>`, t);
+};
+
+// ── Return rejected — customer ────────────────────────────────────────────────
+const returnRejectedCustomerHtml = async ({ customerName, orderNumber, returnId, adminNote }) => {
+  const t = await getTheme();
+  return wrapper(`
+    ${header('Return Request Update', t)}
+    <div style="padding:32px">
+      <p style="color:#374151">Hi <strong>${customerName}</strong>,</p>
+      <p style="color:#6b7280;font-size:14px;margin-bottom:20px">We have reviewed your return request for order <strong style="color:${t.primary}">${orderNumber}</strong> and unfortunately we are unable to approve it at this time.</p>
+      <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:20px;text-align:center;margin-bottom:20px">
+        <p style="margin:0 0 4px;font-size:12px;color:#991b1b;font-weight:600">Return #${returnId}</p>
+        <p style="margin:0;font-size:20px;font-weight:800;color:#dc2626">Not Approved</p>
+      </div>
+      ${adminNote ? `
+      <div style="background:#f8fafc;border-radius:10px;padding:14px;margin-bottom:20px">
+        <p style="margin:0 0 4px;font-size:12px;color:#6b7280;font-weight:600;text-transform:uppercase">Reason from our team</p>
+        <p style="margin:0;font-size:13px;color:#374151">${adminNote}</p>
+      </div>` : ''}
+      <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:14px;font-size:13px;color:#0369a1;margin-bottom:20px">
+        If you believe this decision was made in error or need further assistance, please contact our support team with your return ID <strong>#${returnId}</strong>.
+      </div>
+      <p style="color:#9ca3af;font-size:12px;text-align:center">Thank you for shopping with ${t.storeName}!</p>
+    </div>`, t);
+};
+
+// ── Item received — customer notification ─────────────────────────────────────
+const returnReceivedCustomerHtml = async ({ customerName, orderNumber, returnId, adminNote }) => {
+  const t = await getTheme();
+  return wrapper(`
+    ${header('Return Item Received', t)}
+    <div style="padding:32px">
+      <p style="color:#374151">Hi <strong>${customerName}</strong>,</p>
+      <p style="color:#6b7280;font-size:14px;margin-bottom:20px">We have received the returned item(s) for order <strong style="color:${t.primary}">${orderNumber}</strong>. Our team will inspect it and process your refund shortly.</p>
+      <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:20px;text-align:center;margin-bottom:20px">
+        <p style="margin:0 0 4px;font-size:12px;color:#166534;font-weight:600">Return #${returnId}</p>
+        <p style="margin:0;font-size:20px;font-weight:800;color:#15803d">Item Received</p>
+        <p style="margin:8px 0 0;font-size:13px;color:#166534">Inspection in progress - refund within 3-5 business days</p>
+      </div>
+      ${adminNote ? `
+      <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:14px;margin-bottom:20px">
+        <p style="margin:0 0 4px;font-size:12px;color:#0369a1;font-weight:600;text-transform:uppercase">Note from our team</p>
+        <p style="margin:0;font-size:13px;color:#0369a1">${adminNote}</p>
+      </div>` : ''}
+      <p style="color:#9ca3af;font-size:12px;text-align:center">Thank you for your patience. We will notify you once the refund is processed!</p>
+    </div>`, t);
+};
+
+// ── Refund processed — customer ───────────────────────────────────────────────
+const returnRefundedCustomerHtml = async ({ customerName, orderNumber, returnId, refundAmount, refundMethod, adminNote }) => {
+  const t = await getTheme();
+  const sym = 'Rs.';
+  const methodLabels = { original: 'Original Payment Method', store_credit: 'Store Credit', gift_card: 'Gift Card' };
+  return wrapper(`
+    ${header('Refund Processed!', t)}
+    <div style="padding:32px">
+      <p style="color:#374151">Hi <strong>${customerName}</strong>,</p>
+      <p style="color:#6b7280;font-size:14px;margin-bottom:20px">Your refund for order <strong style="color:${t.primary}">${orderNumber}</strong> has been successfully processed.</p>
+      <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:24px;text-align:center;margin-bottom:20px">
+        <p style="margin:0 0 4px;font-size:12px;color:#166534;font-weight:600">Return #${returnId}</p>
+        ${refundAmount ? `<p style="margin:0;font-size:32px;font-weight:900;color:#15803d;font-family:monospace">${sym} ${Number(refundAmount).toLocaleString()}</p>` : ''}
+        <p style="margin:6px 0 0;font-size:14px;font-weight:700;color:#166534">Refund Processed</p>
+      </div>
+      ${refundMethod ? `
+      <div style="background:#f8fafc;border-radius:10px;padding:14px;margin-bottom:20px">
+        <p style="margin:0 0 4px;font-size:12px;color:#6b7280;font-weight:600;text-transform:uppercase">Refunded Via</p>
+        <p style="margin:0;font-size:14px;font-weight:700;color:#374151">${methodLabels[refundMethod] || refundMethod}</p>
+        <p style="margin:6px 0 0;font-size:12px;color:#9ca3af">Please allow 5-7 business days for the amount to reflect in your account.</p>
+      </div>` : ''}
+      ${adminNote ? `
+      <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:14px;margin-bottom:20px">
+        <p style="margin:0 0 4px;font-size:12px;color:#0369a1;font-weight:600;text-transform:uppercase">Note from our team</p>
+        <p style="margin:0;font-size:13px;color:#0369a1">${adminNote}</p>
+      </div>` : ''}
+      <p style="color:#9ca3af;font-size:12px;text-align:center">Thank you for shopping with ${t.storeName}! We hope to serve you again soon.</p>
+    </div>`, t);
+};
+
+// ── Return status update — admin copy ─────────────────────────────────────────
+const returnStatusAdminHtml = async ({ customerName, customerEmail, orderNumber, returnId, newStatus, refundAmount, refundMethod, adminNote }) => {
+  const t = await getTheme();
+  const sym = 'Rs.';
+  const statusLabels = {
+    pending: 'Pending', approved: 'Approved', rejected: 'Rejected',
+    received: 'Item Received', refunded: 'Refunded',
+  };
+  const statusColors = {
+    pending: '#d97706', approved: '#16a34a', rejected: '#dc2626',
+    received: '#2563eb', refunded: '#16a34a',
+  };
+  const methodLabels = { original: 'Original Payment Method', store_credit: 'Store Credit', gift_card: 'Gift Card' };
+  const color = statusColors[newStatus] || t.primary;
+  return wrapper(`
+    ${header('Return Status Updated', t)}
+    <div style="padding:32px">
+      <p style="color:#374151;margin:0 0 16px">A return request status has been updated.</p>
+      <div style="background:#f8fafc;border-radius:10px;padding:16px;text-align:center;margin-bottom:20px;border:2px solid ${color}30">
+        <p style="margin:0 0 4px;font-size:12px;color:#6b7280">Return #${returnId} - Order ${orderNumber}</p>
+        <p style="margin:0;font-size:22px;font-weight:800;color:${color}">${statusLabels[newStatus] || newStatus}</p>
+      </div>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+        <tr><td style="padding:8px 0;color:#6b7280;font-size:13px;width:40%">Customer</td><td style="padding:8px 0;font-size:13px;font-weight:600;color:#111">${customerName}</td></tr>
+        <tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Email</td><td style="padding:8px 0;font-size:13px;color:#111">${customerEmail}</td></tr>
+        ${refundAmount ? `<tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Refund Amount</td><td style="padding:8px 0;font-size:13px;font-weight:700;color:${t.primary}">${sym} ${Number(refundAmount).toLocaleString()}</td></tr>` : ''}
+        ${refundMethod ? `<tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Refund Method</td><td style="padding:8px 0;font-size:13px;color:#111">${methodLabels[refundMethod] || refundMethod}</td></tr>` : ''}
+        ${adminNote ? `<tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Admin Note</td><td style="padding:8px 0;font-size:13px;color:#374151">${adminNote}</td></tr>` : ''}
+      </table>
+      <a href="${process.env.ADMIN_URL || process.env.FRONTEND_URL || ''}/admin/returns/${returnId}"
+         style="display:inline-block;background:linear-gradient(135deg,${t.primary},${lighten(t.primary)});color:white;padding:12px 24px;border-radius:10px;font-weight:700;font-size:14px;text-decoration:none">
+        View Return in Dashboard
+      </a>
+    </div>`, t);
+};
+
 const cancelAutoDecisionAdminHtml = async (order, decision) => {
   const t = await getTheme();
   const isApproved = decision === 'approved';
@@ -524,6 +865,9 @@ module.exports = {
   slipUploadedAdminHtml,
   slipReceivedCustomerHtml,
   paymentConfirmedHtml,
+  paymentConfirmedAdminHtml,
+  orderDeliveredCustomerHtml,
+  orderStatusAdminHtml,
   orderCancelledHtml,
   cancelRequestReceivedCustomerHtml,
   cancelRequestAdminHtml,
@@ -532,5 +876,13 @@ module.exports = {
   cancelRejectedAdminHtml,
   cancelAutoDecisionAdminHtml,
   orderStatusUpdateHtml,
+  // Return & Refund emails
+  returnRequestCustomerHtml,
+  returnRequestAdminHtml,
+  returnApprovedCustomerHtml,
+  returnRejectedCustomerHtml,
+  returnReceivedCustomerHtml,
+  returnRefundedCustomerHtml,
+  returnStatusAdminHtml,
   isEmailEnabled,
 };

@@ -120,11 +120,16 @@ export default function AdminSettings() {
     taxEnabled:false, taxRate:0, taxLabel:'VAT',
     emailNotif_order_placed_customer:true, emailNotif_order_placed_admin:true,
     emailNotif_slip_uploaded_admin:true, emailNotif_slip_received_customer:true,
-    emailNotif_payment_confirmed_customer:true,
-    emailNotif_order_status_customer:true,
+    emailNotif_payment_confirmed_customer:true, emailNotif_payment_confirmed_admin:true,
+    emailNotif_order_status_customer:true, emailNotif_order_status_admin:true,
+    emailNotif_order_delivered_customer:true,
     emailNotif_cancel_request_admin:true, emailNotif_cancel_request_customer:true,
     emailNotif_cancel_approved_customer:true, emailNotif_cancel_approved_admin:true,
     emailNotif_cancel_rejected_customer:true, emailNotif_cancel_rejected_admin:true,
+    emailNotif_return_request_customer:true, emailNotif_return_request_admin:true,
+    emailNotif_return_approved_customer:true, emailNotif_return_rejected_customer:true,
+    emailNotif_return_received_customer:true, emailNotif_return_refunded_customer:true,
+    emailNotif_return_status_admin:true,
     heroStyle:'gradient', headerStyle:'default', footerStyle:'default',
     customHeaderCode:'', customFooterCode:'',
     termsUrl:'', privacyUrl:'',
@@ -1276,6 +1281,26 @@ export default function AdminSettings() {
                         <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.emailNotif_order_status_customer?'translate-x-6':'translate-x-1'}`}/>
                       </button>
                     </div>
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">Order Status Update — Admin Alert</p>
+                        <p className="text-xs text-gray-500">Admin receives email when any order status changes (processing, shipped, delivered, etc.)</p>
+                      </div>
+                      <button onClick={()=>setSettings(p=>({...p,emailNotif_order_status_admin:!p.emailNotif_order_status_admin}))}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.emailNotif_order_status_admin?'bg-green-500':'bg-gray-300'}`}>
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.emailNotif_order_status_admin?'translate-x-6':'translate-x-1'}`}/>
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">Order Delivered — Customer Email</p>
+                        <p className="text-xs text-gray-500">Customer receives a dedicated delivery confirmation email with review prompt when order is marked delivered</p>
+                      </div>
+                      <button onClick={()=>setSettings(p=>({...p,emailNotif_order_delivered_customer:!p.emailNotif_order_delivered_customer}))}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.emailNotif_order_delivered_customer?'bg-green-500':'bg-gray-300'}`}>
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.emailNotif_order_delivered_customer?'translate-x-6':'translate-x-1'}`}/>
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -1313,6 +1338,16 @@ export default function AdminSettings() {
                       <button onClick={()=>setSettings(p=>({...p,emailNotif_payment_confirmed_customer:!p.emailNotif_payment_confirmed_customer}))}
                         className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.emailNotif_payment_confirmed_customer?'bg-green-500':'bg-gray-300'}`}>
                         <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.emailNotif_payment_confirmed_customer?'translate-x-6':'translate-x-1'}`}/>
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">Payment Confirmed — Admin Copy</p>
+                        <p className="text-xs text-gray-500">Admin receives a confirmation copy when a payment is verified (manual, slip, or gateway)</p>
+                      </div>
+                      <button onClick={()=>setSettings(p=>({...p,emailNotif_payment_confirmed_admin:!p.emailNotif_payment_confirmed_admin}))}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.emailNotif_payment_confirmed_admin?'bg-green-500':'bg-gray-300'}`}>
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.emailNotif_payment_confirmed_admin?'translate-x-6':'translate-x-1'}`}/>
                       </button>
                     </div>
                   </div>
@@ -1387,7 +1422,86 @@ export default function AdminSettings() {
                   </div>
                 </div>
 
-                <div className="rounded-xl bg-blue-50 border border-blue-200 p-4">
+                {/* Returns & Refunds */}
+                <div className="rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
+                    <p className="font-semibold text-gray-800 text-sm">🔄 Returns &amp; Refund Emails</p>
+                  </div>
+                  <div className="divide-y divide-gray-100">
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">Return Requested — Customer Confirmation</p>
+                        <p className="text-xs text-gray-500">Customer receives confirmation email when they submit a return request</p>
+                      </div>
+                      <button onClick={()=>setSettings(p=>({...p,emailNotif_return_request_customer:!p.emailNotif_return_request_customer}))}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.emailNotif_return_request_customer?'bg-green-500':'bg-gray-300'}`}>
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.emailNotif_return_request_customer?'translate-x-6':'translate-x-1'}`}/>
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">Return Requested — Admin Alert</p>
+                        <p className="text-xs text-gray-500">Admin receives email when a customer submits a new return request</p>
+                      </div>
+                      <button onClick={()=>setSettings(p=>({...p,emailNotif_return_request_admin:!p.emailNotif_return_request_admin}))}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.emailNotif_return_request_admin?'bg-green-500':'bg-gray-300'}`}>
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.emailNotif_return_request_admin?'translate-x-6':'translate-x-1'}`}/>
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">Return Approved — Customer</p>
+                        <p className="text-xs text-gray-500">Customer is notified when their return request is approved, with refund amount and method</p>
+                      </div>
+                      <button onClick={()=>setSettings(p=>({...p,emailNotif_return_approved_customer:!p.emailNotif_return_approved_customer}))}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.emailNotif_return_approved_customer?'bg-green-500':'bg-gray-300'}`}>
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.emailNotif_return_approved_customer?'translate-x-6':'translate-x-1'}`}/>
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">Return Rejected — Customer</p>
+                        <p className="text-xs text-gray-500">Customer is notified when their return request is rejected, with admin note/reason</p>
+                      </div>
+                      <button onClick={()=>setSettings(p=>({...p,emailNotif_return_rejected_customer:!p.emailNotif_return_rejected_customer}))}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.emailNotif_return_rejected_customer?'bg-green-500':'bg-gray-300'}`}>
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.emailNotif_return_rejected_customer?'translate-x-6':'translate-x-1'}`}/>
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">Return Item Received — Customer</p>
+                        <p className="text-xs text-gray-500">Customer is notified when their returned item arrives at the store and is being inspected</p>
+                      </div>
+                      <button onClick={()=>setSettings(p=>({...p,emailNotif_return_received_customer:!p.emailNotif_return_received_customer}))}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.emailNotif_return_received_customer?'bg-green-500':'bg-gray-300'}`}>
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.emailNotif_return_received_customer?'translate-x-6':'translate-x-1'}`}/>
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">Refund Processed — Customer</p>
+                        <p className="text-xs text-gray-500">Customer receives a refund confirmation email with amount and payment method when refund is issued</p>
+                      </div>
+                      <button onClick={()=>setSettings(p=>({...p,emailNotif_return_refunded_customer:!p.emailNotif_return_refunded_customer}))}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.emailNotif_return_refunded_customer?'bg-green-500':'bg-gray-300'}`}>
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.emailNotif_return_refunded_customer?'translate-x-6':'translate-x-1'}`}/>
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">Return Status Changed — Admin Copy</p>
+                        <p className="text-xs text-gray-500">Admin receives a copy email on every return status change (approved, rejected, received, refunded)</p>
+                      </div>
+                      <button onClick={()=>setSettings(p=>({...p,emailNotif_return_status_admin:!p.emailNotif_return_status_admin}))}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.emailNotif_return_status_admin?'bg-green-500':'bg-gray-300'}`}>
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.emailNotif_return_status_admin?'translate-x-6':'translate-x-1'}`}/>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                                <div className="rounded-xl bg-blue-50 border border-blue-200 p-4">
                   <p className="text-sm text-blue-800">
                     <strong>ℹ️ Note:</strong> All toggles are <strong>enabled by default</strong>. Disabling a toggle stops that specific email from sending immediately — no restart required. Admin emails go to the address in <em>Advanced → Order Notification Email</em>.
                   </p>
