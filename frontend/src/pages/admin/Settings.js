@@ -130,6 +130,10 @@ export default function AdminSettings() {
     emailNotif_return_approved_customer:true, emailNotif_return_rejected_customer:true,
     emailNotif_return_received_customer:true, emailNotif_return_refunded_customer:true,
     emailNotif_return_status_admin:true,
+    // Panel notification visibility toggles
+    panelNotif_new_order:true, panelNotif_new_user:true,
+    panelNotif_payment_slip:true, panelNotif_payment_confirmed:true,
+    panelNotif_cancel_request:true, panelNotif_return_request:true,
     heroStyle:'gradient', headerStyle:'default', footerStyle:'default',
     customHeaderCode:'', customFooterCode:'',
     termsUrl:'', privacyUrl:'',
@@ -1422,7 +1426,39 @@ export default function AdminSettings() {
                   </div>
                 </div>
 
-                {/* Returns & Refunds */}
+                {/* Notification Panel */}
+                <div className="rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
+                    <p className="font-semibold text-gray-800 text-sm">🔔 Notification Panel — Visible Types</p>
+                    <p className="text-xs text-gray-500 mt-0.5">Choose which event types appear in the admin notification bell. Disabled types are still stored but hidden from the panel.</p>
+                  </div>
+                  <div className="divide-y divide-gray-100">
+                    {[
+                      { key:'panelNotif_new_order',         icon:'🛒', label:'New Order',          desc:'Show when a customer places a new order' },
+                      { key:'panelNotif_new_user',          icon:'👤', label:'New User Registration', desc:'Show when a new customer account is created' },
+                      { key:'panelNotif_payment_slip',      icon:'🏦', label:'Payment Slip Uploaded', desc:'Show when a customer uploads a bank transfer slip' },
+                      { key:'panelNotif_payment_confirmed', icon:'✅', label:'Payment Confirmed',   desc:'Show when a payment is verified (manual, slip, or gateway)' },
+                      { key:'panelNotif_cancel_request',    icon:'🚫', label:'Cancel Request',      desc:'Show when a customer requests order cancellation' },
+                      { key:'panelNotif_return_request',    icon:'↩️', label:'Return Request',      desc:'Show when a customer submits a return request' },
+                    ].map(({ key, icon, label, desc }) => (
+                      <div key={key} className="flex items-center justify-between px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-lg">{icon}</span>
+                          <div>
+                            <p className="text-sm font-medium text-gray-800">{label}</p>
+                            <p className="text-xs text-gray-500">{desc}</p>
+                          </div>
+                        </div>
+                        <button onClick={()=>setSettings(p=>({...p,[key]:!p[key]}))}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0 ${settings[key]!==false?'bg-blue-500':'bg-gray-300'}`}>
+                          <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings[key]!==false?'translate-x-6':'translate-x-1'}`}/>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                                {/* Returns & Refunds */}
                 <div className="rounded-xl border border-gray-200 overflow-hidden">
                   <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
                     <p className="font-semibold text-gray-800 text-sm">🔄 Returns &amp; Refund Emails</p>
