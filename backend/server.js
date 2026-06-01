@@ -82,9 +82,32 @@ app.use('/api/subscribers',   require('./routes/subscribers'));
 app.use('/api/seo',           require('./routes/seo'));
 app.use('/api/whatsapp',      require('./routes/whatsapp'));
 
-app.use((req, res) => {
-  res.status(404).json({ message: `Route not found: ${req.method} ${req.url}` });
-});
+// ── Serve built frontend with live SEO meta injection ─────────────────────────
+// This replaces the static catch-all so Googlebot always sees real meta tags.
+// For local dev (no build folder), it falls back gracefully with a clear message.
+const { seoRenderMiddleware } = require('./routes/seo');
+const frontendBuildPath = path.join(__dirname, '..', 'frontend', 'build');
+const fs = require('fs');
+
+if (fs.existsSync(frontendBuildPath)) {
+  // Serve all static assets (JS, CSS, images, fonts) from the build folder
+  app.use(express.static(frontendBuildPath, {
+    index: false,            // do NOT serve index.html directly — we inject meta first
+    maxAge: '7d',            // cache static assets for 7 days
+    immutable: true,
+  }));
+  // All remaining routes → SSR-lite HTML with injected SEO meta
+  app.get('*', seoRenderMiddleware);
+} else {
+  // Dev mode: backend only, no built frontend
+  app.use((req, res) => {
+    if (req.path.startsWith('/api/')) {
+      res.status(404).json({ message: `Route not found: ${req.method} ${req.url}` });
+    } else {
+      res.status(200).send('<p>Frontend not built yet. Run: <code>cd frontend && npm run build</code></p>');
+    }
+  });
+}
 
 async function startServer() {
   try {
