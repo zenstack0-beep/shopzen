@@ -44,6 +44,8 @@ import AnimationSettings from './pages/admin/AnimationSettings';
 import ThemeBuilder from './pages/admin/ThemeBuilder';
 import LayoutEditor from './pages/admin/LayoutEditor';
 import AdminLayout from './pages/admin/AdminLayout';
+import SocialMediaSettings from './pages/admin/SocialMedia';
+import AutomationRules from './pages/admin/AutomationRules';
 
 // Scrolls to top on every route change — fires before browser restores position
 function ScrollToTop() {
@@ -114,23 +116,25 @@ export default function App() {
                   <Route path="/forgot-password" element={<ForgotPassword/>}/>
                   <Route path="/admin" element={<AdminRoute><AdminLayout/></AdminRoute>}>
                     <Route index element={<Dashboard/>}/>
-                    <Route path="products"    element={<AdminProducts/>}/>
-                    <Route path="orders"      element={<AdminOrders/>}/>
-                    <Route path="orders/:id"  element={<AdminOrderDetail/>}/>
-                    <Route path="categories"  element={<AdminCategories/>}/>
-                    <Route path="customers"   element={<AdminCustomers/>}/>
-                    <Route path="coupons"     element={<AdminCoupons/>}/>
-                    <Route path="banners"     element={<AdminBanners/>}/>
-                    <Route path="seasonal"    element={<AdminSeasonal/>}/>
-                    <Route path="reviews"     element={<AdminReviews/>}/>
-                    <Route path="returns"     element={<AdminReturns/>}/>
-                    <Route path="gift-cards"  element={<AdminGiftCards/>}/>
-                    <Route path="subscribers" element={<AdminSubscribers/>}/>
-                    <Route path="seo"         element={<AdminSEO/>}/>
-                    <Route path="settings"    element={<AdminSettings/>}/>
-                    <Route path="layout"      element={<LayoutEditor/>}/>
+                    <Route path="products"     element={<AdminProducts/>}/>
+                    <Route path="orders"       element={<AdminOrders/>}/>
+                    <Route path="orders/:id"   element={<AdminOrderDetail/>}/>
+                    <Route path="categories"   element={<AdminCategories/>}/>
+                    <Route path="customers"    element={<AdminCustomers/>}/>
+                    <Route path="coupons"      element={<AdminCoupons/>}/>
+                    <Route path="banners"      element={<AdminBanners/>}/>
+                    <Route path="seasonal"     element={<AdminSeasonal/>}/>
+                    <Route path="reviews"      element={<AdminReviews/>}/>
+                    <Route path="returns"      element={<AdminReturns/>}/>
+                    <Route path="gift-cards"   element={<AdminGiftCards/>}/>
+                    <Route path="subscribers"  element={<AdminSubscribers/>}/>
+                    <Route path="seo"          element={<AdminSEO/>}/>
+                    <Route path="settings"     element={<AdminSettings/>}/>
+                    <Route path="layout"       element={<LayoutEditor/>}/>
                     <Route path="animations"   element={<AnimationSettings/>}/>
                     <Route path="theme-builder" element={<ThemeBuilder/>}/>
+                    <Route path="social-media" element={<SocialMediaSettings/>}/>
+                    <Route path="automation"   element={<AutomationRules/>}/>
                   </Route>
                 </Routes>
               </BrowserRouter>

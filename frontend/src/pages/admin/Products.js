@@ -418,6 +418,49 @@ export default function AdminProducts() {
     } catch { toast.error('Failed'); }
   };
 
+  /* ── Publish to Social Media ── */
+  const [publishModal, setPublishModal] = useState(null); // { product }
+  const [publishPlatforms, setPublishPlatforms] = useState([]);
+  const [publishMsg, setPublishMsg] = useState('');
+  const [publishing, setPublishing] = useState(false);
+
+  const PLATFORMS = [
+    { id:'facebook',  label:'Facebook',  icon:'📘' },
+    { id:'instagram', label:'Instagram', icon:'📸' },
+    { id:'tiktok',    label:'TikTok',    icon:'🎵' },
+    { id:'whatsapp',  label:'WhatsApp',  icon:'💬' },
+    { id:'telegram',  label:'Telegram',  icon:'✈️' },
+  ];
+
+  const openPublishModal = (product) => {
+    setPublishModal({ product });
+    setPublishPlatforms([]);
+    setPublishMsg('');
+  };
+
+  const togglePlatform = (id) =>
+    setPublishPlatforms(p => p.includes(id) ? p.filter(x=>x!==id) : [...p, id]);
+
+  const handlePublish = async () => {
+    if (!publishPlatforms.length) { toast.error('Select at least one platform'); return; }
+    setPublishing(true);
+    try {
+      const { data } = await API.post(`/products/${publishModal.product._id}/publish`, {
+        platforms: publishPlatforms,
+        customMsg: publishMsg,
+      });
+      const ok  = data.logs.filter(l => l.status === 'success');
+      const bad = data.logs.filter(l => l.status !== 'success');
+      if (ok.length)  toast.success(`✅ Published to ${ok.map(l=>l.platform).join(', ')}`);
+      if (bad.length) toast.error(`❌ Failed: ${bad.map(l=>`${l.platform} (${l.message})`).join(', ')}`);
+      if (ok.length) setPublishModal(null);
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Publish failed');
+    } finally {
+      setPublishing(false);
+    }
+  };
+
   const deleteProduct = async (id) => {
     if (!window.confirm('Delete this product?')) return;
     await API.delete(`/products/${id}`);
@@ -512,9 +555,10 @@ export default function AdminProducts() {
                     </td>
                     <td>
                       <div className="flex items-center justify-end gap-1.5">
-                        <button onClick={()=>openEdit(p)} className="p-1.5 rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors">✏️</button>
-                        <button onClick={()=>toggleActive(p._id,p.isActive)} className="p-1.5 rounded-lg hover:bg-amber-50 text-gray-400 hover:text-amber-600 transition-colors">{p.isActive?'🙈':'👁'}</button>
-                        <button onClick={()=>deleteProduct(p._id)} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors">🗑️</button>
+                        <button onClick={()=>openEdit(p)} className="p-1.5 rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors" title="Edit">✏️</button>
+                        <button onClick={()=>openPublishModal(p)} className="p-1.5 rounded-lg hover:bg-purple-50 text-gray-400 hover:text-purple-600 transition-colors" title="Publish to Social Media">📢</button>
+                        <button onClick={()=>toggleActive(p._id,p.isActive)} className="p-1.5 rounded-lg hover:bg-amber-50 text-gray-400 hover:text-amber-600 transition-colors" title={p.isActive?'Hide':'Show'}>{p.isActive?'🙈':'👁'}</button>
+                        <button onClick={()=>deleteProduct(p._id)} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors" title="Delete">🗑️</button>
                       </div>
                     </td>
                   </tr>
@@ -533,6 +577,56 @@ export default function AdminProducts() {
           </div>
         )}
       </div>
+
+      {/* ── Publish to Social Media Modal ── */}
+      {publishModal && (
+        <Modal title={`📢 Publish: ${publishModal.product.name}`} onClose={()=>setPublishModal(null)}>
+          <div className="space-y-4">
+            <p className="text-sm text-gray-500">Choose platforms to publish this product to:</p>
+
+            <div className="grid grid-cols-2 gap-2">
+              {PLATFORMS.map(pl => (
+                <button
+                  key={pl.id}
+                  onClick={()=>togglePlatform(pl.id)}
+                  className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border-2 text-sm font-medium transition-all ${
+                    publishPlatforms.includes(pl.id)
+                      ? 'border-purple-500 bg-purple-50 text-purple-700'
+                      : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                  }`}
+                >
+                  <span className="text-base">{pl.icon}</span>
+                  {pl.label}
+                  {publishPlatforms.includes(pl.id) && <span className="ml-auto">✅</span>}
+                </button>
+              ))}
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Custom Message <span className="font-normal text-gray-400">(optional — overrides template)</span></label>
+              <textarea
+                value={publishMsg}
+                onChange={e=>setPublishMsg(e.target.value)}
+                rows={3}
+                placeholder="Leave blank to use your saved post template..."
+                className="form-input text-sm w-full resize-none"
+              />
+            </div>
+
+            <div className="flex gap-2 pt-1">
+              <button onClick={()=>setPublishModal(null)} className="btn-secondary flex-1 text-sm">Cancel</button>
+              <button
+                onClick={handlePublish}
+                disabled={publishing || !publishPlatforms.length}
+                className="flex-1 text-sm px-4 py-2 rounded-xl font-semibold text-white transition-all disabled:opacity-50"
+                style={{background:'var(--color-primary)'}}
+              >
+                {publishing ? '⏳ Publishing...' : `📢 Publish to ${publishPlatforms.length || 0} Platform${publishPlatforms.length!==1?'s':''}`}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {modal && (
         <Modal title={modal==='edit'?`Edit: ${form.name}`:'Add New Product'} onClose={closeModal} wide>

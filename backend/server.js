@@ -10,19 +10,13 @@ if (!process.env.MONGODB_URI) { console.error('❌ MONGODB_URI not defined'); pr
 console.log('🔗 MongoDB:', process.env.MONGODB_URI.replace(/\/\/(.*?):(.*)@/, '//***:***@'));
 
 // ─── CORS ─────────────────────────────────────────────────────────────────────
-// Allowed origins:
-//   1. Any localhost / 127.0.0.1 port (local dev)
-//   2. The production domain set in FRONTEND_URL env var
-//   3. ALL Vercel preview deployments for your project (*.vercel.app)
-//      This fixes: "CORS blocked: https://shopzen-xxx-yyy.vercel.app"
 const allowedOrigins = [
-  /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/,  // any localhost port
-  /^https:\/\/[a-z0-9-]+-[a-z0-9]+-[a-z0-9-]+\.vercel\.app$/,  // Vercel preview URLs
-  /^https:\/\/shopzen\.lk$/,                        // production domain
-  /^https:\/\/www\.shopzen\.lk$/,                   // www variant
+  /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/,
+  /^https:\/\/[a-z0-9-]+-[a-z0-9]+-[a-z0-9-]+\.vercel\.app$/,
+  /^https:\/\/shopzen\.lk$/,
+  /^https:\/\/www\.shopzen\.lk$/,
 ];
 
-// Also allow whatever is in FRONTEND_URL (e.g. https://shopzen.lk)
 if (process.env.FRONTEND_URL) {
   const fu = process.env.FRONTEND_URL.trim().replace(/\/$/, '');
   if (!allowedOrigins.some(o => typeof o === 'string' && o === fu)) {
@@ -30,7 +24,6 @@ if (process.env.FRONTEND_URL) {
   }
 }
 
-// Allow any extra origins listed in EXTRA_ORIGINS (comma-separated)
 if (process.env.EXTRA_ORIGINS) {
   process.env.EXTRA_ORIGINS.split(',').forEach(o => {
     const trimmed = o.trim().replace(/\/$/, '');
@@ -40,7 +33,7 @@ if (process.env.EXTRA_ORIGINS) {
 
 app.use(cors({
   origin: (origin, cb) => {
-    if (!origin) return cb(null, true); // curl / server-to-server / same-origin
+    if (!origin) return cb(null, true);
     const ok = allowedOrigins.some(o =>
       typeof o === 'string' ? o === origin : o.test(origin)
     );
@@ -81,25 +74,22 @@ app.use('/api/pages',         require('./routes/pages'));
 app.use('/api/subscribers',   require('./routes/subscribers'));
 app.use('/api/seo',           require('./routes/seo'));
 app.use('/api/whatsapp',      require('./routes/whatsapp'));
+app.use('/api/social-media',  require('./routes/socialMedia'));
+app.use('/api/automation',    require('./routes/automation'));
 
-// ── Serve built frontend with live SEO meta injection ─────────────────────────
-// This replaces the static catch-all so Googlebot always sees real meta tags.
-// For local dev (no build folder), it falls back gracefully with a clear message.
+// ── Serve built frontend ───────────────────────────────────────────────────────
 const { seoRenderMiddleware } = require('./routes/seo');
 const frontendBuildPath = path.join(__dirname, '..', 'frontend', 'build');
 const fs = require('fs');
 
 if (fs.existsSync(frontendBuildPath)) {
-  // Serve all static assets (JS, CSS, images, fonts) from the build folder
   app.use(express.static(frontendBuildPath, {
-    index: false,            // do NOT serve index.html directly — we inject meta first
-    maxAge: '7d',            // cache static assets for 7 days
+    index: false,
+    maxAge: '7d',
     immutable: true,
   }));
-  // All remaining routes → SSR-lite HTML with injected SEO meta
   app.get('*', seoRenderMiddleware);
 } else {
-  // Dev mode: backend only, no built frontend
   app.use((req, res) => {
     if (req.path.startsWith('/api/')) {
       res.status(404).json({ message: `Route not found: ${req.method} ${req.url}` });

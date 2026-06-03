@@ -1,0 +1,637 @@
+/**
+ * SocialMedia.js  — Admin Social Media Automation Settings
+ * Path: frontend/src/pages/admin/SocialMedia.js
+ *
+ * Matches ShopZen's existing design system (form-input, form-label, btn-primary,
+ * Toggle, SaveBar patterns from Settings.js) and uses the same API utility.
+ */
+
+import React, { useEffect, useState, useCallback } from 'react';
+import API from '../../utils/api';
+import toast from 'react-hot-toast';
+
+// ─── Platform meta-data ───────────────────────────────────────────────────────
+const PLATFORMS = [
+  {
+    id: 'facebook',
+    label: 'Facebook Pages',
+    color: '#1877F2',
+    icon: (
+      <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+        <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+      </svg>
+    ),
+    fields: [
+      { key: 'accountId',   label: 'Page ID',       placeholder: '123456789', hint: 'Your Facebook Page numeric ID' },
+      { key: 'accountName', label: 'Page Name',      placeholder: 'My Store Page' },
+      { key: 'appId',       label: 'App ID',         placeholder: 'Your Facebook App ID' },
+      { key: 'appSecret',   label: 'App Secret',     placeholder: '••••••••', type: 'password', hint: 'Stored encrypted — never shown after save' },
+      { key: 'accessToken', label: 'Page Access Token', placeholder: 'EAAxxxxxxx...', type: 'password', hint: 'Long-lived page access token' },
+    ],
+    guide: 'Create a Facebook App at developers.facebook.com → add Pages API → generate a long-lived Page Access Token.',
+  },
+  {
+    id: 'instagram',
+    label: 'Instagram Business',
+    color: '#E1306C',
+    icon: (
+      <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+        <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+      </svg>
+    ),
+    fields: [
+      { key: 'accountId',    label: 'Instagram Business Account ID', placeholder: '17841400000000000' },
+      { key: 'accountName',  label: 'Account Display Name',          placeholder: 'My Store' },
+      { key: 'accountHandle',label: '@Handle',                       placeholder: 'mystoreofficial' },
+      { key: 'appId',        label: 'Facebook App ID',               placeholder: 'App used for Instagram Graph API' },
+      { key: 'appSecret',    label: 'Facebook App Secret',           placeholder: '••••••••', type: 'password' },
+      { key: 'accessToken',  label: 'Long-lived Access Token',       placeholder: 'EAAxxxxxxx...', type: 'password', hint: 'Instagram Graph API uses Facebook tokens' },
+    ],
+    guide: 'Instagram Graph API requires a Facebook App. Connect your Instagram Business account to your Facebook Page → generate a long-lived token.',
+  },
+  {
+    id: 'tiktok',
+    label: 'TikTok Business',
+    color: '#010101',
+    icon: (
+      <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+        <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1-2.89-2.89 2.89 2.89 0 0 1 2.89-2.89c.28 0 .54.04.79.1V9.01a6.33 6.33 0 0 0-.79-.05 6.34 6.34 0 0 0-6.34 6.34 6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.33-6.34V8.69a8.18 8.18 0 0 0 4.78 1.52V6.76a4.84 4.84 0 0 1-1.01-.07z"/>
+      </svg>
+    ),
+    fields: [
+      { key: 'accountId',   label: 'Open ID',         placeholder: 'TikTok open_id' },
+      { key: 'accountName', label: 'Display Name',    placeholder: 'My TikTok Account' },
+      { key: 'appId',       label: 'Client Key',      placeholder: 'TikTok for Developers client key' },
+      { key: 'appSecret',   label: 'Client Secret',   placeholder: '••••••••', type: 'password' },
+      { key: 'accessToken', label: 'Access Token',    placeholder: 'act.xxxxxxx...', type: 'password', hint: 'TikTok Content Posting API access token' },
+    ],
+    guide: 'Register at developers.tiktok.com → create an app → request Content Posting API access → generate an access token.',
+  },
+  {
+    id: 'whatsapp',
+    label: 'WhatsApp Business',
+    color: '#25D366',
+    icon: (
+      <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+        <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413z"/>
+      </svg>
+    ),
+    fields: [
+      { key: 'accountId',   label: 'Phone Number ID',      placeholder: '123456789012345', hint: 'From Meta Business Suite → WhatsApp → Getting Started' },
+      { key: 'accountName', label: 'Business Display Name', placeholder: 'My Store' },
+      { key: 'appId',       label: 'WhatsApp Business Account ID', placeholder: 'WABA ID' },
+      { key: 'appSecret',   label: 'App Secret',           placeholder: '••••••••', type: 'password' },
+      { key: 'accessToken', label: 'System User Access Token', placeholder: 'EAAxxxxxxx...', type: 'password', hint: 'Permanent system user token from Meta Business Manager' },
+    ],
+    guide: 'Set up via Meta Business Manager → WhatsApp → Getting Started. Create a System User token with whatsapp_business_messaging permission.',
+  },
+  {
+    id: 'telegram',
+    label: 'Telegram Bot / Channel',
+    color: '#229ED9',
+    icon: (
+      <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+        <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+      </svg>
+    ),
+    fields: [
+      { key: 'accountId',    label: 'Bot Username / Channel ID', placeholder: '@mychannel or -1001234567890' },
+      { key: 'accountName',  label: 'Bot / Channel Name',        placeholder: 'My Store Bot' },
+      { key: 'accountHandle',label: 'Bot Username',              placeholder: 'MyStoreBot' },
+      { key: 'accessToken',  label: 'Bot Token',                 placeholder: '123456:ABCdef...', type: 'password', hint: 'Get from @BotFather on Telegram' },
+    ],
+    guide: 'Message @BotFather on Telegram → /newbot → copy the token. Add the bot as admin to your channel to send messages.',
+  },
+];
+
+const PLATFORM_IDS = PLATFORMS.map(p => p.id);
+
+// ─── Shared UI primitives (must be module-level to avoid remount on re-render) ─
+
+const F = ({ label, value, onChange, type = 'text', placeholder, hint, col2, disabled }) => (
+  <div className={col2 ? 'sm:col-span-2' : ''}>
+    <label className="form-label">{label}</label>
+    <input
+      type={type}
+      value={value ?? ''}
+      onChange={onChange}
+      placeholder={placeholder}
+      disabled={disabled}
+      autoComplete="new-password"
+      className={`form-input ${disabled ? 'bg-gray-50 text-gray-400' : ''}`}
+    />
+    {hint && <p className="text-xs text-gray-400 mt-1">{hint}</p>}
+  </div>
+);
+
+const Toggle = ({ label, desc, value, onChange }) => (
+  <div className="flex items-center justify-between py-3 border-b border-gray-50 last:border-0">
+    <div>
+      <p className="text-sm font-medium text-gray-800">{label}</p>
+      {desc && <p className="text-xs text-gray-400 mt-0.5">{desc}</p>}
+    </div>
+    <div
+      onClick={onChange}
+      className={`w-12 h-6 rounded-full cursor-pointer relative flex-shrink-0 transition-all ${value ? 'bg-primary' : 'bg-gray-200'}`}
+    >
+      <div className={`w-5 h-5 bg-white rounded-full absolute top-0.5 shadow-sm transition-all ${value ? 'left-6' : 'left-0.5'}`} />
+    </div>
+  </div>
+);
+
+const StatusBadge = ({ status }) => {
+  if (!status) return null;
+  const ok = status === 'ok';
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${ok ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${ok ? 'bg-green-500' : 'bg-red-500'}`} />
+      {ok ? 'Connected & verified' : 'Test failed'}
+    </span>
+  );
+};
+
+const Spinner = () => (
+  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+  </svg>
+);
+
+// ─── Main component ───────────────────────────────────────────────────────────
+export default function SocialMediaSettings() {
+  const [loading, setLoading]           = useState(true);
+  const [settings, setSettings]         = useState(null);
+  const [activePlatform, setActive]     = useState('facebook');
+  const [formData, setFormData]         = useState({});   // per-platform credential form state
+  const [saving, setSaving]             = useState({});   // { facebook: true, … }
+  const [testing, setTesting]           = useState({});   // { telegram: true, … }
+
+  const [automationSaving, setAutoSav]  = useState(false);
+  const [templateSaving, setTplSav]     = useState(false);
+  const [templates, setTemplates]       = useState([]);
+
+  // ── Load settings ───────────────────────────────────────────────────────────
+  const load = useCallback(async () => {
+    try {
+      setLoading(true);
+      const { data } = await API.get('/social-media');
+      setSettings(data);
+      // initialise template state
+      const initialTpls = PLATFORM_IDS.map(pid => {
+        const existing = (data.templates || []).find(t => t.platform === pid);
+        return existing || { platform: pid, template: '', hashtags: [], enabled: true };
+      });
+      setTemplates(initialTpls);
+      // initialise form data stubs (never pre-fill secrets from backend)
+      const forms = {};
+      PLATFORM_IDS.forEach(pid => {
+        forms[pid] = {
+          accountId:    data[pid]?.accountId    || '',
+          accountName:  data[pid]?.accountName  || '',
+          accountHandle:data[pid]?.accountHandle|| '',
+          appId:        data[pid]?.appId        || '',
+          // Leave secret/token fields blank — user must re-enter to update
+          appSecret:    '',
+          accessToken:  '',
+          accessSecret: '',
+        };
+      });
+      setFormData(forms);
+    } catch (err) {
+      toast.error('Failed to load social media settings');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  // ── Connect / Save credentials ───────────────────────────────────────────────
+  const handleConnect = async (pid) => {
+    setSaving(s => ({ ...s, [pid]: true }));
+    try {
+      // Only send fields that have values (don't overwrite secrets with empty strings)
+      const payload = {};
+      Object.entries(formData[pid] || {}).forEach(([k, v]) => {
+        if (v !== '') payload[k] = v;
+      });
+      await API.post(`/social-media/platform/${pid}/connect`, payload);
+      toast.success('Credentials saved — run Test Connection to verify');
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to save credentials');
+    } finally {
+      setSaving(s => ({ ...s, [pid]: false }));
+    }
+  };
+
+  // ── Disconnect ───────────────────────────────────────────────────────────────
+  const handleDisconnect = async (pid) => {
+    if (!window.confirm(`Disconnect ${pid}? This will wipe all stored credentials.`)) return;
+    setSaving(s => ({ ...s, [pid]: true }));
+    try {
+      await API.delete(`/social-media/platform/${pid}`);
+      toast.success('Account disconnected');
+      load();
+    } catch (err) {
+      toast.error('Failed to disconnect');
+    } finally {
+      setSaving(s => ({ ...s, [pid]: false }));
+    }
+  };
+
+  // ── Test connection ──────────────────────────────────────────────────────────
+  const handleTest = async (pid) => {
+    setTesting(t => ({ ...t, [pid]: true }));
+    try {
+      const { data } = await API.post(`/social-media/platform/${pid}/test`);
+      if (data.ok) toast.success(`✓ ${data.message}`);
+      else          toast.error(`✗ ${data.message}`);
+      load();
+    } catch (err) {
+      toast.error('Test request failed');
+    } finally {
+      setTesting(t => ({ ...t, [pid]: false }));
+    }
+  };
+
+  // ── Toggle enabled ───────────────────────────────────────────────────────────
+  const handleToggle = async (pid, enabled) => {
+    try {
+      await API.patch(`/social-media/platform/${pid}/toggle`, { enabled });
+      setSettings(s => ({ ...s, [pid]: { ...s[pid], enabled } }));
+    } catch {
+      toast.error('Failed to toggle platform');
+    }
+  };
+
+  // ── Automation settings ──────────────────────────────────────────────────────
+  const handleAutomation = async (field, value) => {
+    const next = { ...settings, [field]: value };
+    setSettings(next);
+    setAutoSav(true);
+    try {
+      await API.put('/social-media/automation', {
+        automationEnabled: next.automationEnabled,
+        enabledPlatforms: next.enabledPlatforms,
+      });
+    } catch {
+      toast.error('Failed to update automation settings');
+    } finally {
+      setAutoSav(false);
+    }
+  };
+
+  const toggleEnabledPlatform = (pid) => {
+    const cur = settings?.enabledPlatforms || [];
+    const next = cur.includes(pid) ? cur.filter(p => p !== pid) : [...cur, pid];
+    handleAutomation('enabledPlatforms', next);
+  };
+
+  // ── Templates ────────────────────────────────────────────────────────────────
+  const updateTemplate = (pid, field, value) => {
+    setTemplates(ts => ts.map(t => t.platform === pid ? { ...t, [field]: value } : t));
+  };
+
+  const saveTemplates = async () => {
+    setTplSav(true);
+    try {
+      await API.put('/social-media/templates', { templates });
+      toast.success('Templates saved');
+    } catch {
+      toast.error('Failed to save templates');
+    } finally {
+      setTplSav(false);
+    }
+  };
+
+  // ── Form field helper ─────────────────────────────────────────────────────────
+  const setField = (pid, key, val) => {
+    setFormData(f => ({ ...f, [pid]: { ...f[pid], [key]: val } }));
+  };
+
+  // ─── Loading skeleton ────────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div className="p-6 space-y-4 animate-pulse">
+        <div className="h-8 bg-gray-100 rounded-lg w-48" />
+        <div className="h-32 bg-gray-100 rounded-2xl" />
+        <div className="h-64 bg-gray-100 rounded-2xl" />
+      </div>
+    );
+  }
+
+  const activeMeta  = PLATFORMS.find(p => p.id === activePlatform);
+  const activeData  = settings?.[activePlatform] || {};
+  const activeForm  = formData[activePlatform]   || {};
+  const activeTpl   = templates.find(t => t.platform === activePlatform) || { template: '', hashtags: [], enabled: true };
+
+  return (
+    <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-6">
+
+      {/* ── Header ── */}
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-pink-500 flex items-center justify-center text-white shadow-lg">
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+          </svg>
+        </div>
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">Social Media Automation</h1>
+          <p className="text-sm text-gray-500">Connect accounts and configure auto-posting</p>
+        </div>
+      </div>
+
+      {/* ── Global automation toggle ── */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+        <h2 className="text-sm font-semibold text-gray-800 mb-3">Global Automation</h2>
+        <Toggle
+          label="Enable Social Media Automation"
+          desc="When enabled, new products and promotions can be auto-posted to connected platforms"
+          value={!!settings?.automationEnabled}
+          onChange={() => handleAutomation('automationEnabled', !settings?.automationEnabled)}
+        />
+        {settings?.automationEnabled && (
+          <div className="mt-4">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Platforms enabled for automation</p>
+            <div className="flex flex-wrap gap-2">
+              {PLATFORMS.map(p => {
+                const on = (settings?.enabledPlatforms || []).includes(p.id);
+                const connected = settings?.[p.id]?.connected;
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => connected && toggleEnabledPlatform(p.id)}
+                    title={!connected ? 'Connect this platform first' : ''}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                      on && connected
+                        ? 'border-transparent text-white shadow-sm'
+                        : 'border-gray-200 text-gray-400 bg-gray-50'
+                    } ${!connected ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+                    style={{ background: on && connected ? p.color : undefined }}
+                  >
+                    <span className="opacity-90">{p.icon}</span>
+                    {p.label}
+                    {on && connected && <span className="opacity-80">✓</span>}
+                  </button>
+                );
+              })}
+            </div>
+            {automationSaving && <p className="text-xs text-gray-400 mt-2">Saving…</p>}
+          </div>
+        )}
+      </div>
+
+      {/* ── Platform tabs + detail ── */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+
+        {/* Tab strip */}
+        <div className="flex overflow-x-auto border-b border-gray-100 scrollbar-none" style={{ scrollbarWidth: 'none' }}>
+          {PLATFORMS.map(p => {
+            const pd = settings?.[p.id] || {};
+            const isActive = activePlatform === p.id;
+            return (
+              <button
+                key={p.id}
+                onClick={() => setActive(p.id)}
+                className={`flex items-center gap-2 px-4 py-3.5 text-sm font-medium whitespace-nowrap border-b-2 transition-all flex-shrink-0 ${
+                  isActive ? 'border-primary text-primary bg-primary/5' : 'border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-50'
+                }`}
+              >
+                <span style={{ color: isActive ? p.color : undefined }}>{p.icon}</span>
+                <span className="hidden sm:inline">{p.label.split(' ')[0]}</span>
+                {/* status dot */}
+                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                  pd.connected && pd.lastTestStatus === 'ok'    ? 'bg-green-400' :
+                  pd.connected && pd.lastTestStatus === 'error' ? 'bg-red-400' :
+                  pd.connected                                  ? 'bg-yellow-400' :
+                                                                  'bg-gray-200'
+                }`} />
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Platform detail */}
+        <div className="p-5 sm:p-6">
+          <div className="flex items-start justify-between flex-wrap gap-3 mb-5">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white" style={{ background: activeMeta.color }}>
+                {activeMeta.icon}
+              </div>
+              <div>
+                <p className="font-semibold text-gray-900">{activeMeta.label}</p>
+                {activeData.connected ? (
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
+                    <span className="text-xs text-green-600 font-medium">Connected</span>
+                    {activeData.accountName && (
+                      <span className="text-xs text-gray-400">— {activeData.accountName}</span>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-gray-300 inline-block" />
+                    <span className="text-xs text-gray-400">Not connected</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {activeData.connected && (
+                <>
+                  <StatusBadge status={activeData.lastTestStatus} />
+                  <Toggle
+                    label="Enabled"
+                    value={!!activeData.enabled}
+                    onChange={() => handleToggle(activePlatform, !activeData.enabled)}
+                  />
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Setup guide */}
+          {!activeData.connected && (
+            <div className="mb-5 p-4 bg-blue-50 rounded-xl border border-blue-100 text-sm text-blue-700">
+              <p className="font-semibold mb-1">📋 Setup Guide</p>
+              <p>{activeMeta.guide}</p>
+            </div>
+          )}
+
+          {/* Credential fields */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+            {activeMeta.fields.map(field => (
+              <F
+                key={field.key}
+                label={field.label}
+                type={field.type || 'text'}
+                placeholder={
+                  field.type === 'password' && activeData[`has${field.key.charAt(0).toUpperCase() + field.key.slice(1)}`]
+                    ? '(unchanged — enter new value to update)'
+                    : field.placeholder
+                }
+                value={activeForm[field.key] || ''}
+                onChange={e => setField(activePlatform, field.key, e.target.value)}
+                hint={field.hint}
+              />
+            ))}
+          </div>
+
+          {/* Last test result */}
+          {activeData.lastTestMessage && (
+            <div className={`mb-4 p-3 rounded-xl text-sm ${activeData.lastTestStatus === 'ok' ? 'bg-green-50 text-green-700 border border-green-100' : 'bg-red-50 text-red-700 border border-red-100'}`}>
+              {activeData.lastTestStatus === 'ok' ? '✓ ' : '✗ '}{activeData.lastTestMessage}
+              {activeData.lastTested && (
+                <span className="ml-2 text-xs opacity-60">— tested {new Date(activeData.lastTested).toLocaleString()}</span>
+              )}
+            </div>
+          )}
+
+          {/* Action row */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <button
+              onClick={() => handleConnect(activePlatform)}
+              disabled={saving[activePlatform]}
+              className="btn-primary flex items-center gap-2 text-sm"
+            >
+              {saving[activePlatform] ? <><Spinner /> Saving…</> : (activeData.connected ? '↑ Update Credentials' : '🔗 Connect Account')}
+            </button>
+
+            {activeData.connected && (
+              <>
+                <button
+                  onClick={() => handleTest(activePlatform)}
+                  disabled={testing[activePlatform]}
+                  className="px-4 py-2 text-sm font-medium bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl transition-colors flex items-center gap-2"
+                >
+                  {testing[activePlatform] ? <><Spinner /> Testing…</> : '⚡ Test Connection'}
+                </button>
+                <button
+                  onClick={() => handleDisconnect(activePlatform)}
+                  disabled={saving[activePlatform]}
+                  className="px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+                >
+                  Disconnect
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Post Templates ── */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6">
+        <h2 className="text-sm font-semibold text-gray-800 mb-1">Post Templates</h2>
+        <p className="text-xs text-gray-400 mb-4">
+          Default templates used when auto-posting. Use <code className="bg-gray-100 px-1 rounded">{'{{productName}}'}</code>, <code className="bg-gray-100 px-1 rounded">{'{{price}}'}</code>, <code className="bg-gray-100 px-1 rounded">{'{{url}}'}</code> as variables.
+        </p>
+
+        {/* Platform sub-tabs */}
+        <div className="flex gap-1.5 flex-wrap mb-4">
+          {PLATFORMS.map(p => (
+            <button
+              key={p.id}
+              onClick={() => setActive(p.id)}
+              className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${activePlatform === p.id ? 'text-white shadow-sm' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+              style={{ background: activePlatform === p.id ? p.color : undefined }}
+            >
+              {p.label.split(' ')[0]}
+            </button>
+          ))}
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="form-label">Post Template for {activeMeta.label}</label>
+            <textarea
+              rows={4}
+              value={activeTpl.template}
+              onChange={e => updateTemplate(activePlatform, 'template', e.target.value)}
+              placeholder={`🛍️ Check out {{productName}}!\n\nNow only LKR {{price}} — limited stock!\n\nShop now 👉 {{url}}`}
+              className="form-input resize-none"
+            />
+          </div>
+          <div>
+            <label className="form-label">Default Hashtags (comma-separated)</label>
+            <input
+              type="text"
+              value={(activeTpl.hashtags || []).join(', ')}
+              onChange={e => updateTemplate(
+                activePlatform,
+                'hashtags',
+                e.target.value.split(',').map(h => h.trim()).filter(Boolean)
+              )}
+              placeholder="#shopzen, #sale, #newproduct, #srilanka"
+              className="form-input"
+            />
+            {activeTpl.hashtags?.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {activeTpl.hashtags.map((tag, i) => (
+                  <span key={i} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">#{tag.replace(/^#/, '')}</span>
+                ))}
+              </div>
+            )}
+          </div>
+          <Toggle
+            label="Enable template for this platform"
+            desc="Disable to skip auto-posting for this platform while keeping the template"
+            value={!!activeTpl.enabled}
+            onChange={() => updateTemplate(activePlatform, 'enabled', !activeTpl.enabled)}
+          />
+        </div>
+
+        {/* Template save bar */}
+        <div className="mt-6 pt-5 border-t border-gray-100 flex items-center justify-between">
+          <p className="text-xs text-gray-400">Templates apply to all future auto-posts</p>
+          <button onClick={saveTemplates} disabled={templateSaving} className="btn-primary flex items-center gap-2 text-sm">
+            {templateSaving ? <><Spinner /> Saving…</> : '✓ Save Templates'}
+          </button>
+        </div>
+      </div>
+
+      {/* ── Connection status overview ── */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+        <h2 className="text-sm font-semibold text-gray-800 mb-4">Connection Overview</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {PLATFORMS.map(p => {
+            const pd = settings?.[p.id] || {};
+            return (
+              <div
+                key={p.id}
+                onClick={() => setActive(p.id)}
+                className="flex items-center gap-3 p-3 rounded-xl border border-gray-100 hover:border-gray-200 hover:bg-gray-50 cursor-pointer transition-all"
+              >
+                <div className="w-9 h-9 rounded-lg flex items-center justify-center text-white flex-shrink-0" style={{ background: p.color }}>
+                  {p.icon}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-gray-800 truncate">{p.label}</p>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                      pd.connected && pd.lastTestStatus === 'ok'    ? 'bg-green-400' :
+                      pd.connected && pd.lastTestStatus === 'error' ? 'bg-red-400' :
+                      pd.connected                                  ? 'bg-yellow-400' :
+                                                                      'bg-gray-200'
+                    }`} />
+                    <span className="text-xs text-gray-400 truncate">
+                      {pd.connected
+                        ? pd.accountName || (pd.lastTestStatus === 'ok' ? 'Verified' : 'Connected')
+                        : 'Not connected'}
+                    </span>
+                  </div>
+                </div>
+                {pd.connected && pd.enabled && (
+                  <span className="text-xs text-green-600 bg-green-50 px-1.5 py-0.5 rounded-full flex-shrink-0">On</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+    </div>
+  );
+}
