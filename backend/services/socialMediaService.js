@@ -7,6 +7,13 @@
 
 const crypto = require('crypto');
 const SocialMedia = require('../models/SocialMedia');
+const {
+  exchangeForLongLived,
+  getLongLivedPageToken,
+  inspectToken,
+  shouldRefresh,
+  isExpired,
+} = require('./facebookTokenRefresh');
 
 // ─── Encryption helpers ───────────────────────────────────────────────────────
 const ALGO      = 'aes-256-gcm';
@@ -129,14 +136,75 @@ async function updatePlatform(platform, data) {
 
 // ─── CONNECT a platform (mark connected, store credentials) ──────────────────
 async function connectPlatform(platform, credentials) {
-  const doc = await getOrCreate();
+  const doc      = await getOrCreate();
   const existing = doc[platform]?.toObject ? doc[platform].toObject() : (doc[platform] || {});
+
+  let finalCreds = { ...credentials };
+  let tokenExpiresAt       = existing.tokenExpiresAt       || null;
+  let tokenLastRefreshedAt = existing.tokenLastRefreshedAt || null;
+  let reconnectNeeded      = false;
+
+  // ── Facebook / Instagram: auto-upgrade token to long-lived page token ──────
+  if ((platform === 'facebook' || platform === 'instagram') && finalCreds.accessToken) {
+    const appId     = finalCreds.appId     || existing.appId     || '';
+    const appSecret = finalCreds.appSecret || existing.appSecret || '';
+    const pageId    = finalCreds.accountId || existing.accountId || '';
+
+    if (appId && appSecret) {
+      try {
+        // Step 1: Exchange for a long-lived user token (handles short-lived tokens)
+        const { accessToken: longLivedUserToken } =
+          await exchangeForLongLived(finalCreds.accessToken, appId, appSecret)
+            .catch(() => ({ accessToken: finalCreds.accessToken })); // if already long-lived, keep as-is
+
+        // Step 2: Get page token (if pageId available)
+        if (pageId) {
+          try {
+            const { accessToken: pageToken, expiresAt } =
+              await getLongLivedPageToken(longLivedUserToken, pageId);
+            finalCreds.accessToken = pageToken;
+            tokenExpiresAt         = expiresAt;
+            tokenLastRefreshedAt   = new Date();
+            console.log(`[SocialMedia] ${platform}: got long-lived page token, expires ${expiresAt}`);
+          } catch (pageErr) {
+            // Page token fetch failed — store user token instead, inspect expiry
+            finalCreds.accessToken = longLivedUserToken;
+            const inspection = await inspectToken(longLivedUserToken, appId, appSecret);
+            tokenExpiresAt   = inspection.expiresAt;
+            tokenLastRefreshedAt = new Date();
+            console.warn(`[SocialMedia] ${platform}: page token fetch failed, stored user token. ${pageErr.message}`);
+          }
+        } else {
+          // No pageId yet — store user token, inspect its expiry
+          finalCreds.accessToken = longLivedUserToken;
+          const inspection = await inspectToken(longLivedUserToken, appId, appSecret);
+          tokenExpiresAt   = inspection.expiresAt;
+          tokenLastRefreshedAt = new Date();
+        }
+      } catch (err) {
+        // Token exchange failed entirely — store as-is, flag for reconnect check
+        console.error(`[SocialMedia] ${platform} token upgrade failed:`, err.message);
+      }
+    } else {
+      // No App credentials — try to inspect the token to at least record expiry
+      const mergedAppId     = finalCreds.appId     || existing.appId     || '';
+      const mergedAppSecret = finalCreds.appSecret || existing.appSecret || '';
+      if (mergedAppId && mergedAppSecret) {
+        const inspection = await inspectToken(finalCreds.accessToken, mergedAppId, mergedAppSecret);
+        tokenExpiresAt = inspection.expiresAt;
+      }
+    }
+  }
 
   const updated = encryptPlatformFields({
     ...existing,
-    ...credentials,
-    connected: true,
-    connectedAt: new Date(),
+    ...finalCreds,
+    connected:            true,
+    connectedAt:          new Date(),
+    tokenExpiresAt,
+    tokenLastRefreshedAt,
+    tokenRefreshError:    '',
+    reconnectNeeded,
   });
 
   doc[platform] = updated;
@@ -330,7 +398,8 @@ module.exports = {
   updateAutomation,
   updateTemplates,
   togglePlatform,
-  // expose for internal use by other services (e.g. post scheduler)
+  // expose for internal use by other services
   getOrCreate,
   decryptPlatformFields,
+  encryptPlatformFields,
 };

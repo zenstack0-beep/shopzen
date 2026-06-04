@@ -103,6 +103,11 @@ async function startServer() {
   try {
     await mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 8000 });
     console.log('✅ MongoDB Connected');
+
+    // Start proactive Facebook/Instagram token refresh scheduler
+    const { startTokenRefreshScheduler } = require('./services/tokenRefreshScheduler');
+    startTokenRefreshScheduler();
+
     const PORT = process.env.PORT || 5001;
     app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
   } catch (err) {

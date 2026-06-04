@@ -10,8 +10,10 @@
 
 const PublishLog      = require('../models/PublishLog');
 const AutomationRule  = require('../models/AutomationRule');
-const { getOrCreate, decryptPlatformFields } = require('./socialMediaService');
+const { getOrCreate, decryptPlatformFields, encryptPlatformFields } = require('./socialMediaService');
 const { compose }     = require('./postComposer');
+const { shouldRefresh, isExpired, refreshPageToken } = require('./facebookTokenRefresh');
+const SocialMedia     = require('../models/SocialMedia');
 
 const PUBLISHERS = {
   facebook:  require('./publishers/facebook'),
@@ -82,7 +84,7 @@ async function publishNow(opts = {}) {
     return writeLog({ ...base, postText: '', imageUrl: '', durationMs: 0, status: 'failed', errorMessage: `Unknown platform: ${platform}`, errorCode: 'UNKNOWN_PLATFORM' });
   }
 
-  // ── 2. Load & decrypt credentials ─────────────────────────────────────────
+  // ── 2. Load & decrypt credentials (with auto token refresh) ──────────────
   let creds;
   try {
     const doc  = await getOrCreate();
@@ -90,6 +92,50 @@ async function publishNow(opts = {}) {
     creds      = decryptPlatformFields(raw);
     if (!creds.connected) throw new Error(`Platform "${platform}" is not connected`);
     if (!creds.enabled)   throw new Error(`Platform "${platform}" is disabled`);
+
+    // ── Proactive token refresh for Facebook / Instagram ──────────────────
+    if (platform === 'facebook' || platform === 'instagram') {
+      const expiresAt = raw.tokenExpiresAt;
+
+      if (raw.reconnectNeeded) {
+        throw new Error(`${platform} requires reconnection — token expired and could not be refreshed automatically. Please reconnect in Social Media settings.`);
+      }
+
+      if (isExpired(expiresAt) || shouldRefresh(expiresAt)) {
+        try {
+          console.log(`[Publisher] ${platform} token expiring/expired — auto-refreshing before publish…`);
+          const { accessToken: newToken, expiresAt: newExpiry } = await refreshPageToken(creds);
+
+          // Persist the refreshed token immediately
+          const encrypted = encryptPlatformFields({ accessToken: newToken });
+          await SocialMedia.updateOne({}, {
+            $set: {
+              [`${platform}.accessToken`]:          encrypted.accessToken,
+              [`${platform}.tokenExpiresAt`]:       newExpiry,
+              [`${platform}.tokenLastRefreshedAt`]: new Date(),
+              [`${platform}.tokenRefreshError`]:    '',
+              [`${platform}.reconnectNeeded`]:      false,
+              updatedAt: new Date(),
+            },
+          });
+
+          // Use fresh token for this publish
+          creds.accessToken = newToken;
+          console.log(`[Publisher] ${platform} token refreshed successfully. New expiry: ${newExpiry}`);
+
+        } catch (refreshErr) {
+          // Refresh failed — mark reconnectNeeded and abort publish
+          await SocialMedia.updateOne({}, {
+            $set: {
+              [`${platform}.tokenRefreshError`]: refreshErr.message,
+              [`${platform}.reconnectNeeded`]:   true,
+              updatedAt: new Date(),
+            },
+          });
+          throw new Error(`${platform} token refresh failed: ${refreshErr.message}. Please reconnect in Social Media settings.`);
+        }
+      }
+    }
   } catch (err) {
     return writeLog({ ...base, postText: '', imageUrl: '', durationMs: Date.now() - t0, status: 'failed', errorMessage: err.message, errorCode: 'CREDENTIALS_ERROR' });
   }

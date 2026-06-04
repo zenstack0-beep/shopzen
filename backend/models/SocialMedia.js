@@ -19,6 +19,12 @@ const accountSchema = new mongoose.Schema({
   lastTestStatus: { type: String, enum: ['ok', 'error', ''], default: '' },
   lastTestMessage:{ type: String, default: '' },
   connectedAt:    { type: Date, default: null },
+
+  // ── Token lifecycle fields ────────────────────────────────────────────────
+  tokenExpiresAt:       { type: Date, default: null },   // when accessToken expires (null = unknown/permanent)
+  tokenLastRefreshedAt: { type: Date, default: null },   // last successful auto-refresh timestamp
+  tokenRefreshError:    { type: String, default: '' },   // last refresh error message (cleared on success)
+  reconnectNeeded:      { type: Boolean, default: false }, // true when token is expired and auto-refresh failed
 }, { _id: false });
 
 // ─── Default post template sub-schema ────────────────────────────────────────
