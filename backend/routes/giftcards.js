@@ -45,11 +45,16 @@ try {
     });
     const slipStorage = new CloudinaryStorage({
       cloudinary,
-      params: {
+      params: (req, file) => ({
         folder: 'shopzen/gift-card-slips',
         allowed_formats: ['jpg', 'jpeg', 'png', 'pdf', 'webp'],
-        public_id: (req) => `gc-slip-${req.params.id}-${Date.now()}`,
-      },
+        public_id: `gc-slip-${req.params.id}-${Date.now()}`,
+        // PDFs must use resource_type 'raw' so Cloudinary serves them via
+        // /raw/upload/ (publicly accessible). 'auto' causes PDFs to land
+        // under /image/upload/ which returns 401 for raw files.
+        resource_type: file.mimetype === 'application/pdf' ? 'raw' : 'image',
+        type: 'upload', // ensures public (not authenticated) delivery
+      }),
     });
     uploadSlip = multer({ storage: slipStorage, limits: { fileSize: 8 * 1024 * 1024 } });
     console.log('🌥️  Gift-card slip storage: Cloudinary');

@@ -62,12 +62,19 @@ if (USE_CLOUDINARY) {
   const { CloudinaryStorage } = require('multer-storage-cloudinary');
   const slipStorage = new CloudinaryStorage({
     cloudinary,
-    params: (req) => ({
-      folder: 'shopzen/payment-slips',
-      allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf'],
-      public_id: `slip-${req.params.id}-${Date.now()}`,
-      resource_type: 'auto',
-    }),
+    params: (req, file) => {
+      const isPdf = file.mimetype === 'application/pdf';
+      return {
+        folder: 'shopzen/payment-slips',
+        allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf'],
+        public_id: `slip-${req.params.id}-${Date.now()}`,
+        // PDFs must use resource_type 'raw' so Cloudinary serves them
+        // via /raw/upload/ (publicly accessible). Using 'auto' causes PDFs
+        // to land under /image/upload/ which returns 401 for raw files.
+        resource_type: isPdf ? 'raw' : 'image',
+        type: 'upload', // ensures public (not authenticated) delivery
+      };
+    },
   });
   uploadSlip = multer({
     storage: slipStorage,
@@ -664,6 +671,9 @@ router.post('/:id/payment-slip', uploadSlipMiddleware, async (req, res) => {
 
     let slipUrl, slipRelPath;
     if (USE_CLOUDINARY) {
+      // multer-storage-cloudinary sets req.file.path to the full Cloudinary URL.
+      // For raw (PDF) uploads Cloudinary returns the correct /raw/upload/ URL,
+      // so we use it directly — no adjustment needed.
       slipUrl = req.file.path;
       slipRelPath = slipUrl;
     } else {

@@ -413,6 +413,7 @@ export default function AdminOrderDetail() {
                       const apiBase = process.env.REACT_APP_API_URL || `${window.location.protocol}//${window.location.hostname}:5001`;
                       const slipUrl = order.paymentSlip.startsWith('http') ? order.paymentSlip : `${apiBase}${order.paymentSlip}`;
                       const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(order.paymentSlip);
+                      const isPdf = /\.pdf$/i.test(order.paymentSlip);
                       return isImage ? (
                         <a href={slipUrl} target="_blank" rel="noopener noreferrer">
                           <img
@@ -424,6 +425,29 @@ export default function AdminOrderDetail() {
                           <p style={{display:'none'}} className="text-xs text-red-400 mt-1">⚠ Image could not load. <a href={slipUrl} className="underline text-blue-500" target="_blank" rel="noopener noreferrer">Open directly →</a></p>
                           <p className="text-xs text-center text-blue-500 mt-1">Click to open full size ↗</p>
                         </a>
+                      ) : isPdf ? (
+                        <div className="rounded-xl border border-gray-200 overflow-hidden">
+                          <iframe
+                            src={`https://docs.google.com/viewer?url=${encodeURIComponent(slipUrl)}&embedded=true`}
+                            title="Payment Slip PDF"
+                            className="w-full"
+                            style={{ height: '500px', border: 'none' }}
+                          />
+                          <div className="p-2 bg-gray-50 border-t border-gray-200 flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <svg className="w-4 h-4 text-red-500" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>
+                              <span className="text-xs text-gray-500">Payment Slip PDF</span>
+                            </div>
+                            <a
+                              href={slipUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs text-blue-600 underline hover:text-blue-800"
+                            >
+                              Open in new tab ↗
+                            </a>
+                          </div>
+                        </div>
                       ) : (
                         <a
                           href={slipUrl}
@@ -432,7 +456,7 @@ export default function AdminOrderDetail() {
                           className="flex items-center gap-2 p-3 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors"
                         >
                           <svg className="w-5 h-5 text-red-500" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>
-                          <span className="text-sm text-blue-600 underline">View Payment Slip PDF ↗</span>
+                          <span className="text-sm text-blue-600 underline">View Payment Slip ↗</span>
                         </a>
                       );
                     })()}
