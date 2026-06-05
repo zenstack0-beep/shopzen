@@ -16,7 +16,9 @@ const QUICK_AMOUNTS = [500, 1000, 2000, 5000, 10000];
 function SlipModal({ card, onClose, onApprove, onReject }) {
   const [rejecting, setRejecting]       = useState(false);
   const [approving, setApproving]       = useState(false);
-  const [approved,  setApproved]        = useState(false);
+  // FIX: seed from card.isActive — re-opening an already-approved card
+  // shows the "Approved" stamp immediately instead of the Approve button.
+  const [approved,  setApproved]        = useState(!!card.isActive);
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [rejectionNote, setRejectionNote]  = useState('');
   const [adminNote, setAdminNote]          = useState('');
@@ -150,7 +152,9 @@ function SlipModal({ card, onClose, onApprove, onReject }) {
                   <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg>
                   APPROVED
                 </div>
-                <p className="text-xs text-green-700 font-semibold mt-1">Gift card is now active — closing…</p>
+                <p className="text-xs text-green-700 font-semibold mt-1">
+                  {approving ? 'Gift card is now active — closing…' : 'This gift card has already been approved.'}
+                </p>
               </div>
             ) : (
             <div className="flex gap-3">
