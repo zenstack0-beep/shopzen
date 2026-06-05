@@ -88,7 +88,10 @@ async function publishNow(opts = {}) {
   let creds;
   try {
     const doc  = await getOrCreate();
-    const raw  = doc[platform]?.toObject?.() ?? doc[platform] ?? {};
+    // Force full plain-object conversion including Mixed (extraConfig) fields
+    const raw  = JSON.parse(JSON.stringify(
+      doc[platform]?.toObject?.({ virtuals: false }) ?? doc[platform] ?? {}
+    ));
     creds      = decryptPlatformFields(raw);
     if (!creds.connected) throw new Error(`Platform "${platform}" is not connected`);
     if (!creds.enabled)   throw new Error(`Platform "${platform}" is disabled`);

@@ -645,7 +645,18 @@ router.post('/payment-success', async (req, res) => {
 });
 
 // ── Upload payment slip ───────────────────────────────────────────────────────
-router.post('/:id/payment-slip', uploadSlip.single('slip'), async (req, res) => {
+// Multer error wrapper — returns JSON instead of crashing on bad uploads
+const uploadSlipMiddleware = (req, res, next) => {
+  uploadSlip.single('slip')(req, res, (err) => {
+    if (err) {
+      console.error('[ORDER SLIP MULTER ERROR]', err.message);
+      return res.status(400).json({ message: `File upload error: ${err.message}` });
+    }
+    next();
+  });
+};
+
+router.post('/:id/payment-slip', uploadSlipMiddleware, async (req, res) => {
   try {
     const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).json({ message: 'Order not found' });

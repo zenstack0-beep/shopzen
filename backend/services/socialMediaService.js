@@ -58,12 +58,15 @@ const SENSITIVE_FIELDS = ['accessToken', 'accessSecret', 'appSecret'];
 // ─── Sanitize a platform doc for the frontend (strip all credentials) ─────────
 function sanitizePlatform(platform = {}) {
   const { accessToken, accessSecret, appId, appSecret, extraConfig, ...safe } = platform;
+  // extraConfig contains non-secret config (broadcastList, templateName, etc.) — safe to expose
+  // accessToken / appSecret / accessSecret are encrypted at rest — never send to frontend
   return {
     ...safe,
+    extraConfig: extraConfig || {},   // expose so UI can pre-fill broadcast list / template name
     // expose only whether a secret exists, never the value
-    hasAccessToken: !!accessToken,
-    hasAppSecret:   !!appSecret,
-    hasAccessSecret:!!accessSecret,
+    hasAccessToken:  !!accessToken,
+    hasAppSecret:    !!appSecret,
+    hasAccessSecret: !!accessSecret,
   };
 }
 
@@ -137,7 +140,9 @@ async function updatePlatform(platform, data) {
 // ─── CONNECT a platform (mark connected, store credentials) ──────────────────
 async function connectPlatform(platform, credentials) {
   const doc      = await getOrCreate();
-  const existing = doc[platform]?.toObject ? doc[platform].toObject() : (doc[platform] || {});
+  const existing = JSON.parse(JSON.stringify(
+    doc[platform]?.toObject?.({ virtuals: false }) ?? doc[platform] ?? {}
+  ));
 
   let finalCreds = { ...credentials };
   let tokenExpiresAt       = existing.tokenExpiresAt       || null;
@@ -196,9 +201,17 @@ async function connectPlatform(platform, credentials) {
     }
   }
 
+  // Deep-merge extraConfig so individual keys (broadcastList, templateName, etc.)
+  // are preserved even if the admin only updates one of them at a time
+  const mergedExtraConfig = {
+    ...(existing.extraConfig || {}),
+    ...(finalCreds.extraConfig || {}),
+  };
+
   const updated = encryptPlatformFields({
     ...existing,
     ...finalCreds,
+    extraConfig:          mergedExtraConfig,
     connected:            true,
     connectedAt:          new Date(),
     tokenExpiresAt,
@@ -244,11 +257,54 @@ async function testConnection(platform) {
   if (!PLATFORMS.includes(platform)) throw new Error('Unknown platform');
 
   const doc = await getOrCreate();
-  const raw  = doc[platform]?.toObject ? doc[platform].toObject() : (doc[platform] || {});
-  const data = decryptPlatformFields(raw);
+  const raw  = JSON.parse(JSON.stringify(
+    doc[platform]?.toObject?.({ virtuals: false }) ?? doc[platform] ?? {}
+  ));
+  let data   = decryptPlatformFields(raw);
 
   if (!data.connected) {
     return { ok: false, message: 'Account is not connected' };
+  }
+
+  // ── Auto-refresh expired/expiring token before testing (FB / Instagram) ──
+  if (platform === 'facebook' || platform === 'instagram') {
+    const expiresAt = raw.tokenExpiresAt;
+    if ((isExpired(expiresAt) || shouldRefresh(expiresAt)) && data.appId && data.appSecret) {
+      try {
+        console.log(`[SocialMedia] testConnection: refreshing ${platform} token before test…`);
+        const { refreshPageToken } = require('./facebookTokenRefresh');
+        const { accessToken: newToken, expiresAt: newExpiry } = await refreshPageToken(data);
+        const encrypted = encryptPlatformFields({ accessToken: newToken });
+        doc[platform].accessToken          = encrypted.accessToken;
+        doc[platform].tokenExpiresAt       = newExpiry;
+        doc[platform].tokenLastRefreshedAt = new Date();
+        doc[platform].tokenRefreshError    = '';
+        doc[platform].reconnectNeeded      = false;
+        await doc.save();
+        // Use fresh token for the test
+        data = { ...data, accessToken: newToken };
+        console.log(`[SocialMedia] ${platform} token refreshed before test. New expiry: ${newExpiry}`);
+      } catch (refreshErr) {
+        // Refresh failed — mark reconnect needed, return clear error
+        doc[platform].tokenRefreshError = refreshErr.message;
+        doc[platform].reconnectNeeded   = true;
+        doc[platform].lastTested        = new Date();
+        doc[platform].lastTestStatus    = 'error';
+        doc[platform].lastTestMessage   = `Token expired. Auto-refresh failed: ${refreshErr.message}. Please reconnect your account.`;
+        doc.updatedAt = new Date();
+        await doc.save();
+        return { ok: false, message: doc[platform].lastTestMessage };
+      }
+    } else if (isExpired(expiresAt) && (!data.appId || !data.appSecret)) {
+      // Expired but no App credentials to refresh — must reconnect
+      doc[platform].reconnectNeeded   = true;
+      doc[platform].lastTested        = new Date();
+      doc[platform].lastTestStatus    = 'error';
+      doc[platform].lastTestMessage   = 'Token expired. Add your App ID and App Secret to enable auto-refresh, or reconnect your account.';
+      doc.updatedAt = new Date();
+      await doc.save();
+      return { ok: false, message: doc[platform].lastTestMessage };
+    }
   }
 
   let result = { ok: false, message: 'Unknown error' };
@@ -333,15 +389,34 @@ async function testTikTok(data) {
 }
 
 async function testWhatsApp(data) {
-  if (!data.accessToken) return { ok: false, message: 'No access token configured' };
-  if (!data.accountId)   return { ok: false, message: 'No Phone Number ID configured' };
+  if (!data.accessToken) return { ok: false, message: 'No System User Access Token configured' };
+  if (!data.accountId)   return { ok: false, message: 'No Phone Number ID configured. Use the numeric ID from Meta → WhatsApp → API Setup, not the phone number.' };
+
+  const extra = data.extraConfig || {};
+  const rawList = (extra.broadcastList || '').toString().trim();
+  const recipients = rawList.split(',').map(n => n.trim()).filter(Boolean);
+  if (!recipients.length) {
+    return { ok: false, message: 'No Broadcast List configured. Add at least one recipient phone number in E.164 format (e.g. +94771234567).' };
+  }
+
   try {
+    // Verify the Phone Number ID is valid and token has permission
     const res = await fetch(
-      `https://graph.facebook.com/v19.0/${data.accountId}?access_token=${data.accessToken}&fields=id,display_phone_number,verified_name`
+      `https://graph.facebook.com/v23.0/${data.accountId}?access_token=${encodeURIComponent(data.accessToken)}&fields=id,display_phone_number,verified_name,quality_rating`
     );
     const json = await res.json();
-    if (json.error) return { ok: false, message: json.error.message };
-    return { ok: true, message: `Connected: ${json.verified_name} (${json.display_phone_number})` };
+    if (json.error) {
+      // Give actionable error messages for common error codes
+      if (json.error.code === 190)  return { ok: false, message: `Token invalid or expired: ${json.error.message}` };
+      if (json.error.code === 100)  return { ok: false, message: `Phone Number ID not found. Double-check the ID in Meta → WhatsApp → API Setup.` };
+      if (json.error.code === 200)  return { ok: false, message: `Permission denied. Make sure your System User token has 'whatsapp_business_messaging' permission.` };
+      return { ok: false, message: json.error.message };
+    }
+    const quality = json.quality_rating ? ` · Quality: ${json.quality_rating}` : '';
+    return {
+      ok: true,
+      message: `✅ Connected: ${json.verified_name} (${json.display_phone_number})${quality} · ${recipients.length} recipient(s) configured`,
+    };
   } catch (err) {
     return { ok: false, message: `Network error: ${err.message}` };
   }

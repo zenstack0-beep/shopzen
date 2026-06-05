@@ -77,13 +77,21 @@ const PLATFORMS = [
       </svg>
     ),
     fields: [
-      { key: 'accountId',   label: 'Phone Number ID',      placeholder: '123456789012345', hint: 'From Meta Business Suite → WhatsApp → Getting Started' },
-      { key: 'accountName', label: 'Business Display Name', placeholder: 'My Store' },
-      { key: 'appId',       label: 'WhatsApp Business Account ID', placeholder: 'WABA ID' },
-      { key: 'appSecret',   label: 'App Secret',           placeholder: '••••••••', type: 'password' },
-      { key: 'accessToken', label: 'System User Access Token', placeholder: 'EAAxxxxxxx...', type: 'password', hint: 'Permanent system user token from Meta Business Manager' },
+      { key: 'accountId',   label: 'Phone Number ID',      placeholder: '123456789012345',
+        hint: 'The numeric Phone Number ID from Meta → WhatsApp → API Setup. NOT the phone number itself.' },
+      { key: 'accountName', label: 'Business Display Name', placeholder: 'ShopZen Store' },
+      { key: 'appId',       label: 'WhatsApp Business Account ID (WABA ID)', placeholder: '215589313241560883',
+        hint: 'WhatsApp Business Account ID — shown in Meta → WhatsApp → API Setup' },
+      { key: 'accessToken', label: 'System User Access Token', placeholder: 'EAAxxxxxxx...', type: 'password',
+        hint: 'Permanent System User token with whatsapp_business_messaging permission (never expires)' },
+      { key: 'extraConfig.broadcastList', label: 'Broadcast List (recipients)', placeholder: '+94771234567,+94779876543',
+        hint: 'Comma-separated WhatsApp numbers in E.164 format (+country code). These are who receives your posts.' },
+      { key: 'extraConfig.templateName', label: 'Message Template Name', placeholder: 'hello_world',
+        hint: 'Name of your approved WhatsApp message template. Use hello_world for testing.' },
+      { key: 'extraConfig.languageCode', label: 'Template Language Code', placeholder: 'en_US',
+        hint: 'Language code for your template (e.g. en_US, si_LK). Must match template language in Meta.' },
     ],
-    guide: 'Set up via Meta Business Manager → WhatsApp → Getting Started. Create a System User token with whatsapp_business_messaging permission.',
+    guide: 'Create a Meta App → add WhatsApp use case → go to API Setup → copy Phone Number ID and WABA ID → create a System User in Business Settings with whatsapp_business_messaging + whatsapp_business_management permissions → generate a permanent token → add recipient numbers to the Broadcast List.',
   },
   {
     id: 'telegram',
@@ -157,6 +165,109 @@ const Spinner = () => (
   </svg>
 );
 
+// ─── Token Health Banner ─────────────────────────────────────────────────────
+function TokenHealthBanner({ platform, status, onRefresh, refreshing }) {
+  if (!status || !status.connected) return null;
+
+  const expiresAt     = status.tokenExpiresAt ? new Date(status.tokenExpiresAt) : null;
+  const msLeft        = expiresAt ? expiresAt.getTime() - Date.now() : null;
+  const daysLeft      = msLeft !== null ? Math.ceil(msLeft / 86400000) : null;
+  const isExpired     = daysLeft !== null && daysLeft <= 0;
+  const isCritical    = daysLeft !== null && daysLeft <= 3 && daysLeft > 0;
+  const isWarning     = daysLeft !== null && daysLeft <= 10 && daysLeft > 3;
+  const needsReconnect = status.reconnectNeeded;
+
+  if (!needsReconnect && !isExpired && !isCritical && !isWarning) return null;
+
+  if (needsReconnect || isExpired) {
+    return (
+      <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl">
+        <div className="flex items-start gap-3">
+          <span className="text-xl">🔴</span>
+          <div className="flex-1">
+            <p className="font-semibold text-red-800 text-sm">
+              {platform === 'facebook' ? 'Facebook' : 'Instagram'} Token Expired — Reconnect Required
+            </p>
+            <p className="text-red-700 text-xs mt-1">
+              {status.tokenRefreshError
+                ? `Auto-refresh failed: ${status.tokenRefreshError}`
+                : 'The access token has expired and could not be refreshed automatically.'}
+            </p>
+            <p className="text-red-600 text-xs mt-1">
+              Re-enter your Page Access Token below and click <strong>Connect Account</strong> to restore publishing.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isCritical) {
+    return (
+      <div className="mb-4 p-4 bg-orange-50 border border-orange-200 rounded-xl">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <span className="text-xl">🟠</span>
+            <div>
+              <p className="font-semibold text-orange-800 text-sm">Token Expiring Very Soon</p>
+              <p className="text-orange-700 text-xs mt-1">
+                Your {platform} access token expires in <strong>{daysLeft} day{daysLeft !== 1 ? 's' : ''}</strong>.
+                Auto-refresh will run before the next publish.
+              </p>
+              {status.tokenLastRefreshedAt && (
+                <p className="text-orange-500 text-xs mt-0.5">
+                  Last refreshed: {new Date(status.tokenLastRefreshedAt).toLocaleDateString()}
+                </p>
+              )}
+            </div>
+          </div>
+          <button
+            onClick={() => onRefresh(platform)}
+            disabled={refreshing}
+            className="flex-shrink-0 px-3 py-1.5 text-xs font-semibold bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 transition-colors"
+          >
+            {refreshing ? '⏳' : '🔄 Refresh Now'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // isWarning
+  return (
+    <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <span className="text-xl">🟡</span>
+          <div>
+            <p className="font-semibold text-amber-800 text-sm">Token Expiring Soon</p>
+            <p className="text-amber-700 text-xs mt-1">
+              Your {platform} access token expires in <strong>{daysLeft} days</strong> ({expiresAt?.toLocaleDateString()}).
+              ShopZen will auto-refresh this token before it expires.
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={() => onRefresh(platform)}
+          disabled={refreshing}
+          className="flex-shrink-0 px-3 py-1.5 text-xs font-semibold bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+        >
+          {refreshing ? '⏳' : '🔄 Refresh Now'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Token Expiry Badge (shown in connection status line) ─────────────────────
+function TokenExpiryBadge({ status }) {
+  if (!status || !status.tokenExpiresAt) return null;
+  const daysLeft = Math.ceil((new Date(status.tokenExpiresAt) - Date.now()) / 86400000);
+  if (daysLeft <= 0) return <span className="text-xs font-medium text-red-600 bg-red-50 px-2 py-0.5 rounded-full">Token expired</span>;
+  if (daysLeft <= 10) return <span className="text-xs font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">Expires in {daysLeft}d</span>;
+  return <span className="text-xs text-gray-400">Token valid · {daysLeft}d left</span>;
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function SocialMediaSettings() {
   const [loading, setLoading]           = useState(true);
@@ -169,6 +280,10 @@ export default function SocialMediaSettings() {
   const [automationSaving, setAutoSav]  = useState(false);
   const [templateSaving, setTplSav]     = useState(false);
   const [templates, setTemplates]       = useState([]);
+
+  // ── Token health state (Facebook / Instagram only) ────────────────────────
+  const [tokenStatus, setTokenStatus]   = useState({});   // { facebook: { tokenExpiresAt, reconnectNeeded, … } }
+  const [refreshing, setRefreshing]     = useState({});   // { facebook: true }
 
   // ── Load settings ───────────────────────────────────────────────────────────
   const load = useCallback(async () => {
@@ -194,6 +309,11 @@ export default function SocialMediaSettings() {
           appSecret:    '',
           accessToken:  '',
           accessSecret: '',
+          // WhatsApp extraConfig fields — safe to pre-fill (not secrets)
+          // extraConfig is now returned by the backend after sanitizePlatform fix
+          'extraConfig.broadcastList': data[pid]?.extraConfig?.broadcastList || '',
+          'extraConfig.templateName':  data[pid]?.extraConfig?.templateName  || 'hello_world',
+          'extraConfig.languageCode':  data[pid]?.extraConfig?.languageCode  || 'en_US',
         };
       });
       setFormData(forms);
@@ -206,15 +326,82 @@ export default function SocialMediaSettings() {
 
   useEffect(() => { load(); }, [load]);
 
+  // ── Load token status for Facebook / Instagram ──────────────────────────
+  const loadTokenStatus = useCallback(async () => {
+    const results = {};
+    await Promise.allSettled(
+      ['facebook', 'instagram'].map(async (pid) => {
+        try {
+          const { data } = await API.get(`/social-media/platform/${pid}/token-status`);
+          results[pid] = data;
+        } catch { /* silently ignore */ }
+      })
+    );
+    setTokenStatus(results);
+  }, []);
+
+  useEffect(() => { loadTokenStatus(); }, [loadTokenStatus]);
+
+  // ── Manual token refresh ────────────────────────────────────────────────
+  const handleRefreshToken = async (pid) => {
+    setRefreshing(r => ({ ...r, [pid]: true }));
+    try {
+      await API.post(`/social-media/platform/${pid}/refresh-token`);
+      toast.success(`✅ ${pid} token refreshed successfully`);
+      await load();
+      await loadTokenStatus();
+    } catch (err) {
+      toast.error(err.response?.data?.message || `Failed to refresh ${pid} token`);
+    } finally {
+      setRefreshing(r => ({ ...r, [pid]: false }));
+    }
+  };
+
   // ── Connect / Save credentials ───────────────────────────────────────────────
   const handleConnect = async (pid) => {
     setSaving(s => ({ ...s, [pid]: true }));
     try {
       // Only send fields that have values (don't overwrite secrets with empty strings)
+      // Also convert extraConfig.* dot-notation keys into a nested extraConfig object
       const payload = {};
+      const extraConfig = {};
       Object.entries(formData[pid] || {}).forEach(([k, v]) => {
-        if (v !== '') payload[k] = v;
+        if (v === '') return; // skip empty — don't overwrite saved secrets
+        if (k.startsWith('extraConfig.')) {
+          extraConfig[k.replace('extraConfig.', '')] = v;
+        } else {
+          payload[k] = v;
+        }
       });
+
+      // ── WhatsApp-specific validation before saving ──────────────────────
+      if (pid === 'whatsapp') {
+        const tplName = (extraConfig.templateName || '').trim();
+        if (tplName && tplName !== 'hello_world' && !/^[a-z0-9_]+$/.test(tplName)) {
+          toast.error('Template name can only contain lowercase letters, numbers and underscores (e.g. hello_world, my_product_post).');
+          setSaving(s => ({ ...s, [pid]: false }));
+          return;
+        }
+        const langCode = (extraConfig.languageCode || '').trim();
+        if (langCode && !/^[a-z]{2}(_[A-Z]{2})?$/.test(langCode)) {
+          toast.error('Language code must be in format en_US or en.');
+          setSaving(s => ({ ...s, [pid]: false }));
+          return;
+        }
+        // Validate broadcast list numbers
+        const bList = (extraConfig.broadcastList || '').trim();
+        if (bList) {
+          const nums = bList.split(',').map(n => n.trim()).filter(Boolean);
+          const invalid = nums.filter(n => !/^\+\d{7,15}$/.test(n));
+          if (invalid.length) {
+            toast.error(`Invalid phone numbers: ${invalid.join(', ')} — use E.164 format starting with + (e.g. +94771234567)`);
+            setSaving(s => ({ ...s, [pid]: false }));
+            return;
+          }
+        }
+      }
+
+      if (Object.keys(extraConfig).length) payload.extraConfig = extraConfig;
       await API.post(`/social-media/platform/${pid}/connect`, payload);
       toast.success('Credentials saved — run Test Connection to verify');
       load();
@@ -306,6 +493,8 @@ export default function SocialMediaSettings() {
   };
 
   // ── Form field helper ─────────────────────────────────────────────────────────
+  // Keys like 'extraConfig.broadcastList' are stored flat in formData and
+  // converted to nested objects in handleConnect before sending to the API.
   const setField = (pid, key, val) => {
     setFormData(f => ({ ...f, [pid]: { ...f[pid], [key]: val } }));
   };
@@ -422,11 +611,14 @@ export default function SocialMediaSettings() {
               <div>
                 <p className="font-semibold text-gray-900">{activeMeta.label}</p>
                 {activeData.connected ? (
-                  <div className="flex items-center gap-2 mt-0.5">
+                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                     <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
                     <span className="text-xs text-green-600 font-medium">Connected</span>
                     {activeData.accountName && (
                       <span className="text-xs text-gray-400">— {activeData.accountName}</span>
+                    )}
+                    {(activePlatform === 'facebook' || activePlatform === 'instagram') && tokenStatus[activePlatform] && (
+                      <TokenExpiryBadge status={tokenStatus[activePlatform]} />
                     )}
                   </div>
                 ) : (
@@ -459,6 +651,16 @@ export default function SocialMediaSettings() {
               <p className="font-semibold mb-1">📋 Setup Guide</p>
               <p>{activeMeta.guide}</p>
             </div>
+          )}
+
+          {/* Token health banner — Facebook / Instagram only */}
+          {(activePlatform === 'facebook' || activePlatform === 'instagram') && activeData.connected && (
+            <TokenHealthBanner
+              platform={activePlatform}
+              status={tokenStatus[activePlatform]}
+              onRefresh={handleRefreshToken}
+              refreshing={!!refreshing[activePlatform]}
+            />
           )}
 
           {/* Credential fields */}

@@ -255,6 +255,79 @@ function CancelButton({ order, windowMinutes, onCancelled }) {
   );
 }
 
+
+// ── GiftCardSlipUpload component ──────────────────────────────────────────────
+function GiftCardSlipUpload({ cardId, cardCode, onUploaded }) {
+  const [slipFile, setSlipFile]     = useState(null);
+  const [slipPreview, setSlipPreview] = useState(null);
+  const [uploading, setUploading]   = useState(false);
+  const [done, setDone]             = useState(false);
+
+  const handleChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setSlipFile(file);
+    const reader = new FileReader();
+    reader.onload = (ev) => setSlipPreview(ev.target.result);
+    reader.readAsDataURL(file);
+  };
+
+  const handleUpload = async () => {
+    if (!slipFile) return;
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('slip', slipFile);
+      await API.post(`/gift-cards/${cardId}/payment-slip`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      toast.success('✅ Payment slip uploaded! We\'ll verify it shortly.');
+      setDone(true);
+      onUploaded();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Upload failed. Try again.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  if (done) {
+    return (
+      <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-3 py-2 text-xs text-green-700 font-medium">
+        ✅ Slip uploaded! Our team will review and activate your gift card.
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {slipPreview ? (
+        <div className="relative rounded-xl overflow-hidden border-2 border-amber-300 mb-3 max-h-40">
+          <img src={slipPreview} alt="Payment slip" className="w-full object-contain max-h-40"/>
+          <button onClick={() => { setSlipFile(null); setSlipPreview(null); }}
+            className="absolute top-2 right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold hover:bg-red-600">✕</button>
+        </div>
+      ) : (
+        <label className="flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-amber-300 p-3 cursor-pointer hover:bg-amber-50 transition-colors mb-3 bg-white text-sm text-amber-700 font-medium">
+          <svg className="w-5 h-5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+          📎 Attach payment slip (image or PDF)
+          <input type="file" accept="image/*,application/pdf" onChange={handleChange} className="hidden"/>
+        </label>
+      )}
+      {slipFile && (
+        <button onClick={handleUpload} disabled={uploading}
+          className="w-full py-2.5 rounded-xl text-white font-bold text-sm transition-opacity disabled:opacity-60 flex items-center justify-center gap-2"
+          style={{ background: 'var(--theme-gradient)' }}>
+          {uploading
+            ? <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Uploading…</>
+            : '📤 Upload Slip'
+          }
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function MyOrders() {
   const { user }       = useAuth();
@@ -270,6 +343,8 @@ export default function MyOrders() {
   const [slipUploaded, setSlipUploaded]                 = useState(false);
   // null = not loaded yet — prevents premature "expired" state on first render
   const [cancelWindowMinutes, setCancelWindowMinutes]   = useState(null);
+  const [giftCards, setGiftCards]                       = useState([]);
+  const [gcLoading, setGcLoading]                       = useState(true);
 
   const sym      = settings?.currencySymbol || 'Rs.';
   const primary  = 'var(--color-primary)';
@@ -299,6 +374,15 @@ export default function MyOrders() {
         setCancelWindowMinutes(isNaN(parsed) ? 60 : parsed);
       })
       .catch(() => setCancelWindowMinutes(60)); // fallback on API error
+  }, []);
+
+  // Fetch customer gift card purchases
+  useEffect(() => {
+    setGcLoading(true);
+    API.get('/gift-cards/my-cards')
+      .then(r => setGiftCards(r.data || []))
+      .catch(() => {})
+      .finally(() => setGcLoading(false));
   }, []);
 
   // Slip upload for bank transfer orders landing from checkout
@@ -557,6 +641,148 @@ export default function MyOrders() {
           })}
         </div>
       )}
+      {/* ── Gift Card Purchases — always shown ────────────────────────── */}
+      <div className="mt-8">
+        <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2" style={{ fontFamily: 'var(--font-display)' }}>
+          🎁 Gift Card Purchases
+        </h2>
+
+        {gcLoading ? (
+          <div className="text-center py-10 text-gray-400">
+            <div className="w-6 h-6 border-4 border-t-transparent rounded-full animate-spin mx-auto mb-2"
+              style={{ borderColor: primary, borderTopColor: 'transparent' }} />
+            Loading gift cards…
+          </div>
+        ) : giftCards.length === 0 ? (
+          <div className="rounded-2xl border border-gray-100 bg-white p-8 text-center">
+            <div className="text-4xl mb-3">🎁</div>
+            <p className="font-medium text-gray-500 mb-1">No gift card purchases yet</p>
+            <p className="text-sm text-gray-400 mb-4">When you purchase a gift card it will appear here.</p>
+            <Link to="/gift-cards" className="text-sm font-semibold hover:underline" style={{ color: primary }}>Browse Gift Cards →</Link>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {giftCards.map(card => {
+              const DESIGN_EMOJIS = { default: '🎁', birthday: '🎂', christmas: '🎄', anniversary: '💝', thankyou: '💙' };
+
+              const deadlineMs   = card.slipDeadlineAt ? new Date(card.slipDeadlineAt).getTime() - Date.now() : null;
+              const deadlinePassed  = deadlineMs !== null && deadlineMs <= 0;
+              const deadlineHours   = deadlineMs !== null && deadlineMs > 0 ? Math.floor(deadlineMs / 3600000) : null;
+              const deadlineMins    = deadlineMs !== null && deadlineMs > 0 ? Math.floor((deadlineMs % 3600000) / 60000) : null;
+
+              const statusLabel =
+                card.paymentExpired       ? '⏰ Expired — No Slip Uploaded' :
+                card.isActive             ? '✅ Active' :
+                card.paymentStatus==='paid'? '✅ Paid' :
+                card.paymentSlip          ? '⏳ Slip Uploaded — Awaiting Activation' :
+                                            '🏦 Awaiting Payment';
+
+              const statusColor =
+                card.paymentExpired ? 'bg-red-100 text-red-600' :
+                card.isActive       ? 'bg-green-100 text-green-700' :
+                card.paymentSlip    ? 'bg-blue-100 text-blue-700' :
+                                      'bg-amber-100 text-amber-700';
+
+              return (
+                <div key={card._id} className="rounded-2xl border p-5 transition-all"
+                  style={{
+                    background: 'var(--card-bg)',
+                    borderColor: card.paymentExpired ? '#fecaca' : card.isActive ? '#86efac' : '#fcd34d',
+                    borderWidth: '1.5px',
+                  }}>
+
+                  <div className="flex items-start justify-between gap-4 flex-wrap">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xl">{DESIGN_EMOJIS[card.design] || '🎁'}</span>
+                        <p className="font-mono text-sm font-bold tracking-widest" style={{ color: primary }}>{card.code}</p>
+                      </div>
+                      <p className="text-xs text-gray-400">
+                        Purchased {new Date(card.createdAt).toLocaleDateString('en-LK', { year: 'numeric', month: 'short', day: 'numeric' })}
+                      </p>
+                      {card.recipientEmail && card.recipientEmail !== card.purchaserEmail && (
+                        <p className="text-xs text-gray-500 mt-1">🎁 For: <strong>{card.recipientName || card.recipientEmail}</strong></p>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <p className="font-bold text-gray-900 text-lg">{sym} {card.initialValue?.toLocaleString()}</p>
+                      {card.isActive && card.balance < card.initialValue && (
+                        <p className="text-xs text-gray-400">Balance: {sym} {card.balance?.toLocaleString()}</p>
+                      )}
+                      <span className={`inline-flex items-center text-xs font-semibold px-2 py-0.5 rounded-full mt-1 ${statusColor}`}>
+                        {statusLabel}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Deadline countdown */}
+                  {!card.paymentSlip && !card.isActive && !card.paymentExpired && card.slipDeadlineAt && (
+                    <div className={`mt-3 flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold border ${
+                      deadlinePassed || (deadlineHours !== null && deadlineHours < 2)
+                        ? 'bg-red-50 text-red-600 border-red-200'
+                        : 'bg-amber-50 text-amber-700 border-amber-200'
+                    }`}>
+                      <span>⏱</span>
+                      {deadlinePassed
+                        ? 'Upload deadline has passed — your order may be cancelled.'
+                        : deadlineHours !== null
+                          ? `Slip upload deadline: ${deadlineHours}h ${deadlineMins}m remaining`
+                          : `Deadline: ${new Date(card.slipDeadlineAt).toLocaleString('en-LK')}`}
+                    </div>
+                  )}
+
+                  {/* Slip upload */}
+                  {!card.paymentSlip && !card.isActive && !card.paymentExpired && (
+                    <div className="mt-4 pt-3 border-t border-gray-100">
+                      <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-3">
+                        ⚠️ Please transfer <strong>{sym} {card.initialValue?.toLocaleString()}</strong> to the store bank account using <strong>{card.code}</strong> as the reference, then upload your slip below.
+                      </p>
+                      <GiftCardSlipUpload cardId={card._id} cardCode={card.code} onUploaded={() => {
+                        setGiftCards(prev => prev.map(c => c._id === card._id ? { ...c, paymentSlip: 'uploaded' } : c));
+                      }} />
+                    </div>
+                  )}
+
+                  {/* Slip uploaded, awaiting review */}
+                  {card.paymentSlip && !card.isActive && !card.paymentExpired && (
+                    <div className="mt-3 pt-3 border-t border-gray-100">
+                      <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 text-xs text-blue-700 font-medium">
+                        ✅ Payment slip uploaded — our team is reviewing your payment. You'll get an email once activated.
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Expired */}
+                  {card.paymentExpired && (
+                    <div className="mt-3 pt-3 border-t border-gray-100">
+                      <div className="bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-xs text-red-700">
+                        ⏰ This order was cancelled because no payment slip was uploaded in time.
+                        If you made a bank transfer, contact support with your transfer reference.
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Usage history */}
+                  {card.isActive && card.usageHistory?.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-gray-100">
+                      <p className="text-xs font-semibold text-gray-500 mb-2">Usage History</p>
+                      <div className="space-y-1">
+                        {card.usageHistory.map((u, i) => (
+                          <div key={i} className="flex justify-between text-xs text-gray-500">
+                            <span>Used on {new Date(u.date).toLocaleDateString('en-LK', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                            <span className="font-semibold text-red-500">−{sym} {u.amount?.toLocaleString()}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
     </div>
   );
 }

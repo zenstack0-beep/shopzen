@@ -146,6 +146,146 @@ const NavLink3D = ({ to, label, isActive, emoji }) => (
   </Link>
 );
 
+/* ── Search with live suggestions ─────────────────────────────── */
+const SearchOverlay = ({ onClose, categories }) => {
+  const [query, setQuery] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
+  const [loadingSugg, setLoadingSugg] = useState(false);
+  const inputRef = useRef(null);
+  const debounceRef = useRef(null);
+  const navigate = useNavigate();
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  // Live suggestions
+  useEffect(() => {
+    clearTimeout(debounceRef.current);
+    if (!query.trim() || query.length < 2) { setSuggestions([]); return; }
+    debounceRef.current = setTimeout(async () => {
+      setLoadingSugg(true);
+      try {
+        const { data } = await API.get(`/products?search=${encodeURIComponent(query)}&limit=6&fields=name,slug,thumbnail,salePrice,price,category`);
+        setSuggestions(data.products || data || []);
+      } catch { setSuggestions([]); }
+      finally { setLoadingSugg(false); }
+    }, 280);
+    return () => clearTimeout(debounceRef.current);
+  }, [query]);
+
+  const handleSearch = (e) => {
+    e.preventDefault();
+    if (!query.trim()) return;
+    navigate(`/shop?search=${encodeURIComponent(query.trim())}`);
+    onClose();
+  };
+
+  const goToProduct = (slug) => {
+    navigate(`/product/${slug}`);
+    onClose();
+  };
+
+  const goToCategory = (slug) => {
+    navigate(`/shop/${slug}`);
+    onClose();
+  };
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/60 z-[55] flex items-start justify-center pt-14 sm:pt-20 px-4"
+      onClick={onClose}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        className="w-full max-w-xl bg-white rounded-2xl overflow-hidden shadow-2xl scale-in"
+        style={{ maxHeight: 'calc(100vh - 120px)', display: 'flex', flexDirection: 'column' }}
+      >
+        {/* Input row */}
+        <form onSubmit={handleSearch}>
+          <div className="flex items-center gap-3 p-4 border-b border-gray-100">
+            {loadingSugg ? (
+              <svg className="w-5 h-5 text-gray-400 flex-shrink-0 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+              </svg>
+            ) : (
+              <svg className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+              </svg>
+            )}
+            <input
+              ref={inputRef}
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder="Search products…"
+              className="flex-1 text-gray-800 text-base outline-none font-medium"
+              style={{ fontSize: '16px' }}
+            />
+            {query && (
+              <button type="button" onClick={() => { setQuery(''); setSuggestions([]); inputRef.current?.focus(); }} className="text-gray-300 hover:text-gray-500 text-lg transition-colors">✕</button>
+            )}
+            <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600 text-sm font-medium px-2 border-l border-gray-100 ml-1 pl-3 transition-colors">Close</button>
+          </div>
+        </form>
+
+        {/* Product suggestions */}
+        {suggestions.length > 0 && (
+          <div className="overflow-y-auto">
+            <p className="px-4 pt-3 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">Products</p>
+            {suggestions.map(p => (
+              <button
+                key={p._id || p.slug}
+                onClick={() => goToProduct(p.slug)}
+                className="flex items-center gap-3 w-full px-4 py-2.5 hover:bg-gray-50 transition-colors text-left"
+              >
+                <img
+                  src={p.thumbnail || p.images?.[0] || 'https://via.placeholder.com/40'}
+                  alt={p.name}
+                  className="w-10 h-10 object-cover rounded-lg flex-shrink-0 bg-gray-100"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-800 truncate">{p.name}</p>
+                  <p className="text-xs text-gray-400 truncate">{p.category?.name || ''}</p>
+                </div>
+                <p className="text-sm font-bold flex-shrink-0" style={{ color: 'var(--color-primary)' }}>
+                  {p.salePrice ? `Rs. ${p.salePrice.toLocaleString()}` : p.price ? `Rs. ${p.price.toLocaleString()}` : ''}
+                </p>
+              </button>
+            ))}
+            <button
+              onClick={() => { navigate(`/shop?search=${encodeURIComponent(query)}`); onClose(); }}
+              className="flex items-center justify-center gap-2 w-full px-4 py-3 border-t border-gray-100 text-sm font-semibold hover:bg-gray-50 transition-colors"
+              style={{ color: 'var(--color-primary)' }}
+            >
+              See all results for "{query}" →
+            </button>
+          </div>
+        )}
+
+        {/* Empty state while typing */}
+        {query.length >= 2 && suggestions.length === 0 && !loadingSugg && (
+          <div className="px-4 py-6 text-center text-sm text-gray-400">No products found for "{query}"</div>
+        )}
+
+        {/* Category quick-links (shown when no query) */}
+        {!query && (
+          <div className="border-t border-gray-100 px-4 py-3 bg-gray-50 flex gap-2 flex-wrap">
+            {categories.slice(0, 5).map(cat => (
+              <button
+                key={cat._id}
+                type="button"
+                onClick={() => goToCategory(cat.slug)}
+                className="text-xs bg-white border border-gray-200 text-gray-600 px-3 py-1.5 rounded-full hover:border-gray-300 transition-colors"
+              >
+                {cat.name}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 /* ── Header ────────────────────────────────────────────────────── */
 const Header = ({ settings, campaign }) => {
   const { user, logout } = useAuth();
@@ -153,7 +293,6 @@ const Header = ({ settings, campaign }) => {
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
   const [userMenu, setUserMenu] = useState(false);
   const [categories, setCategories] = useState([]);
   const [navHovered, setNavHovered] = useState(false);
@@ -172,11 +311,6 @@ const Header = ({ settings, campaign }) => {
   }, []);
 
   useEffect(() => { setMenuOpen(false); setUserMenu(false); setSearchOpen(false); }, [location]);
-
-  const handleSearch = (e) => {
-    e.preventDefault();
-    if (searchQuery.trim()) { navigate(`/shop?search=${encodeURIComponent(searchQuery)}`); setSearchOpen(false); setSearchQuery(''); }
-  };
 
   const announcement = (() => {
     if (campaign?.announcement && campaign?.announcementEnabled !== false) return campaign.announcement;
@@ -462,23 +596,9 @@ const Header = ({ settings, campaign }) => {
         )}
       </div>
 
-      {/* Search overlay */}
+      {/* Search overlay — live suggestions on every page */}
       {searchOpen && (
-        <div className="fixed inset-0 bg-black/60 z-[55] flex items-start justify-center pt-14 sm:pt-20 px-4" onClick={() => setSearchOpen(false)}>
-          <form onSubmit={handleSearch} onClick={e => e.stopPropagation()} className="w-full max-w-xl bg-white rounded-2xl overflow-hidden shadow-2xl scale-in">
-            <div className="flex items-center gap-3 p-4">
-              <svg className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-              <input autoFocus value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search products…" className="flex-1 text-gray-800 text-base outline-none font-medium" style={{fontSize:'16px'}}/>
-              <button type="button" onClick={() => setSearchOpen(false)} className="text-gray-400 hover:text-gray-600 text-lg">✕</button>
-            </div>
-            <div className="border-t border-gray-100 px-4 py-3 bg-gray-50 flex gap-2 flex-wrap">
-              {categories.slice(0,5).map(cat => (
-                <button key={cat._id} type="button" onClick={() => { navigate(`/shop/${cat.slug}`); setSearchOpen(false); }}
-                  className="text-xs bg-white border border-gray-200 text-gray-600 px-3 py-1.5 rounded-full hover:border-gray-300 transition-colors">{cat.name}</button>
-              ))}
-            </div>
-          </form>
-        </div>
+        <SearchOverlay onClose={() => setSearchOpen(false)} categories={categories} />
       )}
     </header>
   );

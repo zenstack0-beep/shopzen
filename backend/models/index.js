@@ -160,8 +160,15 @@ const giftCardSchema = new mongoose.Schema({
     balanceAfter: Number,
     date: { type: Date, default: Date.now }
   }],
-  // Admin notes
+  // Payment slip upload
+  paymentSlip: String,                    // URL or relative path to uploaded slip
+  paymentSlipUploadedAt: Date,            // when the slip was uploaded
+  slipDeadlineAt: Date,                   // deadline by which slip must be uploaded (set on purchase)
+  paymentExpired: { type: Boolean, default: false }, // true when deadline passed without slip
+  // Admin review
   adminNote: String,
+  rejectionNote: String,                  // reason sent to purchaser on reject
+  rejectedAt: Date,
   createdAt: { type: Date, default: Date.now }
 });
 const GiftCard = mongoose.model('GiftCard', giftCardSchema);

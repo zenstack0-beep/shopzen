@@ -24,10 +24,25 @@ const verifySmtp = async () => {
 
 // ── From address helper ───────────────────────────────────────────────────────
 const getFromAddress = async (theme) => {
-  // Resend requires a verified domain — use onboarding@resend.dev for testing
-  // Once shopzen.lk is verified in Resend dashboard, change to noreply@shopzen.lk
-  if (process.env.EMAIL_FROM) return process.env.EMAIL_FROM;
-  return `${theme?.storeName || 'ShopZen'} <onboarding@resend.dev>`;
+  // Resend requires a VERIFIED domain to send from custom addresses.
+  // Gmail/Yahoo/Hotmail addresses are NEVER allowed as senders in Resend.
+  // REACT_APP_RESEND_DOMAIN or EMAIL_FROM should only be set once your domain
+  // (e.g. shopzen.lk) is verified in the Resend dashboard.
+  //
+  // Until then, always use onboarding@resend.dev — Resend's pre-verified
+  // test sender that works with any Resend API key.
+  const storeName = theme?.storeName || 'ShopZen';
+
+  // Only use a custom from address if it is NOT a free email provider
+  if (process.env.EMAIL_FROM) {
+    const addr = process.env.EMAIL_FROM;
+    const freeProviders = ['@gmail.', '@yahoo.', '@hotmail.', '@outlook.', '@live.', '@icloud.'];
+    const isFreeMail = freeProviders.some(p => addr.toLowerCase().includes(p));
+    if (!isFreeMail) return addr; // custom/business domain — use it
+  }
+
+  // Fallback: Resend's safe test sender (always works, no domain verification needed)
+  return `${storeName} <onboarding@resend.dev>`;
 };
 
 // ── sendMail ──────────────────────────────────────────────────────────────────
@@ -36,12 +51,28 @@ const sendMail = async ({ to, subject, html }) => {
     const resend = getResendClient();
     const theme = await getTheme().catch(() => ({ storeName: 'ShopZen', primary: '#b5451b' }));
     const from = await getFromAddress(theme);
+
+    // Dev-mode hint: remind developers which sender is being used
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[MAIL] Sending via Resend | from:${from} → to:${to}`);
+    }
+
     const { data, error } = await resend.emails.send({ from, to, subject, html });
-    if (error) throw new Error(error.message || JSON.stringify(error));
-    console.log(`[MAIL SENT] To:${to} | ${subject} | id:${data.id}`);
+
+    if (error) {
+      // Resend returns structured errors — surface them clearly
+      const msg = error.message || (typeof error === 'object' ? JSON.stringify(error) : String(error));
+      throw new Error(msg);
+    }
+
+    console.log(`[MAIL SENT] To:${to} | ${subject} | id:${data?.id}`);
     return data;
   } catch (e) {
     console.error('[MAIL ERROR]', e.message);
+    // In production, log full error for Railway/Render log viewers
+    if (process.env.NODE_ENV === 'production') {
+      console.error('[MAIL ERROR DETAIL]', JSON.stringify(e, Object.getOwnPropertyNames(e)));
+    }
     const wrapped = new Error(`Failed to send email to ${to}: ${e.message}`);
     wrapped.originalError = e;
     throw wrapped;

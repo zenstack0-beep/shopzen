@@ -11,6 +11,25 @@ const { refreshPlatformNow } = require('../services/tokenRefreshScheduler');
 const { getOrCreate, decryptPlatformFields } = require('../services/socialMediaService');
 const { inspectToken } = require('../services/facebookTokenRefresh');
 
+// ─── TEMP DEBUG — no auth, remove after fixing ───────────────────────────────
+router.get('/debug-whatsapp', async (req, res) => {
+  const doc = await require('../models/SocialMedia').findOne();
+  res.json(doc?.whatsapp?.extraConfig || {});
+});
+
+router.get('/fix-whatsapp', async (req, res) => {
+  const SocialMedia = require('../models/SocialMedia');
+  await SocialMedia.updateOne({}, {
+    $set: {
+      'whatsapp.extraConfig.templateName': 'hello_world',
+      'whatsapp.extraConfig.languageCode': 'en_US',
+    }
+  });
+  const doc = await SocialMedia.findOne();
+  res.json(doc?.whatsapp?.extraConfig || {});
+});
+// ─── END TEMP ─────────────────────────────────────────────────────────────────
+
 // ─── All routes require admin auth ───────────────────────────────────────────
 router.use(adminAuth);
 

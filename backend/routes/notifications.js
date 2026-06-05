@@ -12,6 +12,7 @@ const PANEL_TYPES = [
   'payment_confirmed',
   'cancel_request',
   'return_request',
+  'gift_card',   // gift card purchases, slip uploads, activations, rejections
 ];
 
 // ── Helper: get which types are enabled in Settings ───────────────────────────
