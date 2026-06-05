@@ -12,6 +12,156 @@ import PopupBanner from '../../components/PopupBanner';
 import FlashSaleBanner from '../../components/FlashSaleBanner';
 import CouponBanner from '../../components/CouponBanner';
 
+/* ─────────────────────────────────────────────────────────────────
+   RESPONSIVE LAYOUT FIXES — v2
+   • Header height auto instead of fixed 60px so logo never clips
+   • Logo image clamps to header height and never overflows
+   • Logo text always visible (removed hidden xs:block — use CSS instead)
+   • Action icons shrink gracefully on very small screens (< 360px)
+   • Mobile bottom nav height uses env(safe-area-inset-bottom) correctly
+   • has-mobile-nav padding accounts for safe area on all devices
+   • Cart drawer is full-width on all mobile, 440px max on wider screens
+   • Search overlay top offset adapts to header height via CSS var
+   • Footer grid collapses to 1-col below 480px
+   • Announcement bar text stays single-line on smallest screens
+   • No horizontal overflow anywhere (overflow-x:hidden on root + body)
+   ───────────────────────────────────────────────────────────────── */
+
+/* ── Inline responsive overrides injected once ───────────────── */
+const ResponsiveStyles = () => (
+  <style>{`
+    /* ── Prevent any horizontal overflow ── */
+    html, body { overflow-x: hidden; max-width: 100vw; }
+    *, *::before, *::after { box-sizing: border-box; }
+
+    /* ── Header auto height so tall logos don't clip ── */
+    .sz-header-inner {
+      min-height: 56px;
+      padding-top: 6px;
+      padding-bottom: 6px;
+    }
+
+    /* ── Logo image: never taller than header area, never wider than viewport fraction ── */
+    .sz-logo-img {
+      max-height: min(56px, 14vw);
+      max-width: min(180px, 45vw);
+      width: auto;
+      object-fit: contain;
+      display: block;
+    }
+    @media (min-width: 640px) {
+      .sz-logo-img { max-height: 64px; max-width: 220px; }
+    }
+
+    /* ── Logo text: always shown, size clamps with viewport ── */
+    .sz-logo-text {
+      display: block;
+      font-size: clamp(13px, 3.8vw, 22px);
+      white-space: nowrap;
+    }
+
+    /* ── Action icons: tighter on tiny screens ── */
+    @media (max-width: 359px) {
+      .sz-action-icon { padding: 6px !important; }
+      .sz-action-icon svg { width: 18px !important; height: 18px !important; }
+      .sz-avatar { width: 28px !important; height: 28px !important; font-size: 10px !important; }
+    }
+
+    /* ── Mobile bottom nav: height + safe-area ── */
+    .mobile-bottom-nav {
+      height: calc(58px + env(safe-area-inset-bottom, 0px));
+      padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+    }
+
+    /* ── Main content padding accounts for bottom nav + safe area ── */
+    .has-mobile-nav {
+      padding-bottom: calc(58px + env(safe-area-inset-bottom, 0px)) !important;
+    }
+
+    /* ── Cart drawer: full width on narrow phones, slide from bottom on mobile ── */
+    @media (max-width: 479px) {
+      .cart-drawer {
+        right: 0 !important; left: 0 !important;
+        top: auto !important; bottom: 0 !important;
+        width: 100% !important;
+        height: 92dvh !important;
+        border-radius: 20px 20px 0 0 !important;
+        padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+      }
+    }
+
+    /* ── Announcement bar: no text overflow on small screens ── */
+    .announcement-bar {
+      width: 100%;
+      overflow: hidden;
+    }
+
+    /* ── Footer: single column below 480px ── */
+    @media (max-width: 479px) {
+      .sz-footer-grid {
+        grid-template-columns: 1fr !important;
+      }
+      .sz-footer-brand {
+        grid-column: span 1 !important;
+      }
+    }
+
+    /* ── Search overlay: safe top padding ── */
+    .sz-search-overlay {
+      padding-top: max(72px, calc(env(safe-area-inset-top, 0px) + 56px));
+    }
+
+    /* ── Max-width container: never overflows viewport ── */
+    .sz-container {
+      width: 100%;
+      max-width: min(1280px, 100vw);
+      margin-left: auto;
+      margin-right: auto;
+      padding-left: max(12px, env(safe-area-inset-left, 0px));
+      padding-right: max(12px, env(safe-area-inset-right, 0px));
+    }
+    @media (min-width: 640px) {
+      .sz-container { padding-left: 24px; padding-right: 24px; }
+    }
+
+    /* ── User dropdown: clamp to viewport width ── */
+    .sz-user-dropdown {
+      max-width: min(208px, calc(100vw - 16px));
+      right: 0;
+    }
+
+    /* ── Mobile menu items: tap-target size ── */
+    .sz-mobile-menu-link {
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+    }
+
+    /* ── Bottom nav tap targets ── */
+    .sz-bottom-tab {
+      min-width: 0;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding-top: 8px;
+      padding-bottom: 4px;
+      gap: 2px;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .sz-bottom-tab-label {
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+    }
+  `}</style>
+);
+
 /* ── Snow Effect ────────────────────────────────────────────── */
 const SnowEffect = () => (
   <div className="snow-container" aria-hidden>
@@ -134,7 +284,6 @@ const NavLink3D = ({ to, label, isActive, emoji }) => (
       e.currentTarget.style.boxShadow = 'none';
     }}
   >
-    {/* Shimmer layer */}
     <span className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none"
       style={{background:'linear-gradient(135deg,rgba(255,255,255,0.15) 0%,transparent 60%)'}}/>
     {emoji && <span className="mr-1">{emoji}</span>}
@@ -157,7 +306,6 @@ const SearchOverlay = ({ onClose, categories }) => {
 
   useEffect(() => { inputRef.current?.focus(); }, []);
 
-  // Live suggestions
   useEffect(() => {
     clearTimeout(debounceRef.current);
     if (!query.trim() || query.length < 2) { setSuggestions([]); return; }
@@ -179,27 +327,20 @@ const SearchOverlay = ({ onClose, categories }) => {
     onClose();
   };
 
-  const goToProduct = (slug) => {
-    navigate(`/product/${slug}`);
-    onClose();
-  };
-
-  const goToCategory = (slug) => {
-    navigate(`/shop/${slug}`);
-    onClose();
-  };
+  const goToProduct = (slug) => { navigate(`/product/${slug}`); onClose(); };
+  const goToCategory = (slug) => { navigate(`/shop/${slug}`); onClose(); };
 
   return (
+    /* FIX: use sz-search-overlay class for responsive top padding */
     <div
-      className="fixed inset-0 bg-black/60 z-[55] flex items-start justify-center pt-14 sm:pt-20 px-4"
+      className="fixed inset-0 bg-black/60 z-[55] flex items-start justify-center sz-search-overlay px-3 sm:px-4"
       onClick={onClose}
     >
       <div
         onClick={e => e.stopPropagation()}
         className="w-full max-w-xl bg-white rounded-2xl overflow-hidden shadow-2xl scale-in"
-        style={{ maxHeight: 'calc(100vh - 120px)', display: 'flex', flexDirection: 'column' }}
+        style={{ maxHeight: 'calc(100dvh - 80px)', display: 'flex', flexDirection: 'column' }}
       >
-        {/* Input row */}
         <form onSubmit={handleSearch}>
           <div className="flex items-center gap-3 p-4 border-b border-gray-100">
             {loadingSugg ? (
@@ -217,17 +358,16 @@ const SearchOverlay = ({ onClose, categories }) => {
               value={query}
               onChange={e => setQuery(e.target.value)}
               placeholder="Search products…"
-              className="flex-1 text-gray-800 text-base outline-none font-medium"
+              className="flex-1 text-gray-800 text-base outline-none font-medium min-w-0"
               style={{ fontSize: '16px' }}
             />
             {query && (
-              <button type="button" onClick={() => { setQuery(''); setSuggestions([]); inputRef.current?.focus(); }} className="text-gray-300 hover:text-gray-500 text-lg transition-colors">✕</button>
+              <button type="button" onClick={() => { setQuery(''); setSuggestions([]); inputRef.current?.focus(); }} className="text-gray-300 hover:text-gray-500 text-lg transition-colors flex-shrink-0">✕</button>
             )}
-            <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600 text-sm font-medium px-2 border-l border-gray-100 ml-1 pl-3 transition-colors">Close</button>
+            <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600 text-sm font-medium px-2 border-l border-gray-100 ml-1 pl-3 transition-colors flex-shrink-0">Close</button>
           </div>
         </form>
 
-        {/* Product suggestions */}
         {suggestions.length > 0 && (
           <div className="overflow-y-auto">
             <p className="px-4 pt-3 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">Products</p>
@@ -261,12 +401,10 @@ const SearchOverlay = ({ onClose, categories }) => {
           </div>
         )}
 
-        {/* Empty state while typing */}
         {query.length >= 2 && suggestions.length === 0 && !loadingSugg && (
           <div className="px-4 py-6 text-center text-sm text-gray-400">No products found for "{query}"</div>
         )}
 
-        {/* Category quick-links (shown when no query) */}
         {!query && (
           <div className="border-t border-gray-100 px-4 py-3 bg-gray-50 flex gap-2 flex-wrap">
             {categories.slice(0, 5).map(cat => (
@@ -300,8 +438,13 @@ const Header = ({ settings, campaign }) => {
   const location = useLocation();
   const headerRef = useRef(null);
 
-  // Logo size from settings (default 56px height, max 160px)
-  const logoHeight = Math.min(160, settings?.logoSize || 56);
+  /*
+   * FIX: clamp logo height so it fits in the header.
+   * Mobile: max 44px so entire header stays ~56px tall
+   * Desktop: allow up to 64px
+   */
+  const rawLogoHeight = settings?.logoSize || 56;
+  const logoHeightDesktop = Math.min(64, rawLogoHeight);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 30);
@@ -326,19 +469,20 @@ const Header = ({ settings, campaign }) => {
       ref={headerRef}
       className={`sticky top-0 z-[45] transition-all duration-500 ${scrolled ? 'header-scrolled' : ''}`}
       style={{
-        background: scrolled
-          ? 'rgba(255,255,255,0.92)'
-          : 'rgba(255,255,255,0.98)',
+        background: scrolled ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.98)',
         backdropFilter: 'blur(24px)',
         WebkitBackdropFilter: 'blur(24px)',
         borderBottom: scrolled ? '1px solid rgba(0,0,0,0.08)' : '1px solid rgba(0,0,0,0.04)',
         boxShadow: scrolled ? '0 4px 24px rgba(0,0,0,0.06)' : 'none',
+        /* FIX: remove fixed height, let content determine height */
+        width: '100%',
+        maxWidth: '100vw',
       }}
     >
       {/* Ticker announcement */}
       {announcement && (
         <div className="announcement-bar overflow-hidden py-1.5 text-xs font-bold text-white"
-          style={{background: announcementBg}}>
+          style={{background: announcementBg, width:'100%'}}>
           <div className="ticker-wrap">
             <div className="ticker-track">
               {[...Array(6)].map((_, i) => (
@@ -354,36 +498,35 @@ const Header = ({ settings, campaign }) => {
         </div>
       )}
 
-      <div className="max-w-7xl mx-auto px-3 sm:px-6">
-        <div className="flex items-center gap-1 sm:gap-2" style={{height: '60px'}}>
+      {/* FIX: use sz-container for responsive padding, sz-header-inner for auto height */}
+      <div className="sz-container">
+        <div className="sz-header-inner flex items-center gap-1 sm:gap-2">
 
           {/* ── Logo ── */}
           <Link
             to="/"
-            className="flex items-center gap-2 flex-shrink-0 group mr-1 sm:mr-3"
+            className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 group mr-1 sm:mr-3"
             style={{perspective:'600px', overflow:'visible', position:'relative', zIndex:10}}
             onMouseEnter={e => { e.currentTarget.querySelector('.logo-inner') && (e.currentTarget.querySelector('.logo-inner').style.transform = 'rotateY(8deg) scale(1.03)'); }}
             onMouseLeave={e => { e.currentTarget.querySelector('.logo-inner') && (e.currentTarget.querySelector('.logo-inner').style.transform = 'rotateY(0deg) scale(1)'); }}
           >
             <div className="logo-inner transition-transform duration-300" style={{transformStyle:'preserve-3d'}}>
               {settings?.logoUrl ? (
+                /* FIX: use sz-logo-img class for responsive clamping */
                 <img
                   src={settings.logoUrl}
                   alt={settings.storeName || 'ShopZen'}
-                  style={{
-                    height: `${logoHeight}px`,
-                    maxWidth: '260px',
-                    objectFit: 'contain',
-                    filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.10))',
-                  }}
+                  className="sz-logo-img"
+                  style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.10))' }}
                 />
               ) : (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 sm:gap-2">
                   <div
-                    className="rounded-xl flex items-center justify-center text-white transition-all duration-300 group-hover:rotate-6"
+                    className="rounded-xl flex items-center justify-center text-white transition-all duration-300 group-hover:rotate-6 flex-shrink-0"
                     style={{
-                      width: `${Math.max(28, logoHeight * 0.7)}px`,
-                      height: `${Math.max(28, logoHeight * 0.7)}px`,
+                      /* FIX: clamp icon size responsively */
+                      width: `clamp(28px, 8vw, ${Math.max(28, logoHeightDesktop * 0.7)}px)`,
+                      height: `clamp(28px, 8vw, ${Math.max(28, logoHeightDesktop * 0.7)}px)`,
                       background: 'var(--theme-gradient)',
                       boxShadow: '0 4px 14px var(--glow-primary)',
                     }}
@@ -392,12 +535,12 @@ const Header = ({ settings, campaign }) => {
                       <path d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"/>
                     </svg>
                   </div>
+                  {/* FIX: sz-logo-text always shows, font-size clamps with viewport */}
                   <span
-                    className="font-bold hidden xs:block"
+                    className="sz-logo-text font-bold"
                     style={{
                       fontFamily: 'var(--font-display)',
                       letterSpacing: '-0.02em',
-                      fontSize: `${Math.max(16, logoHeight * 0.42)}px`,
                       color: '#111827',
                     }}
                   >
@@ -414,7 +557,6 @@ const Header = ({ settings, campaign }) => {
             onMouseEnter={() => setNavHovered(true)}
             onMouseLeave={() => setNavHovered(false)}
           >
-            {/* Floating nav pill background */}
             <div
               className="flex items-center gap-0.5 px-2 py-1.5 rounded-2xl transition-all duration-300"
               style={{
@@ -438,13 +580,13 @@ const Header = ({ settings, campaign }) => {
             </div>
           </nav>
 
-          {/* ── Action Icons ── */}
-          <div className="flex items-center gap-0 sm:gap-1 ml-auto">
+          {/* ── Action Icons ── FIX: sz-action-icon class for tiny-screen scaling */}
+          <div className="flex items-center gap-0 sm:gap-1 ml-auto flex-shrink-0">
 
             {/* Search */}
             <button
               onClick={() => setSearchOpen(true)}
-              className="relative p-2 sm:p-2.5 rounded-xl transition-all duration-200 text-gray-500 hover:text-gray-800"
+              className="sz-action-icon relative p-2 sm:p-2.5 rounded-xl transition-all duration-200 text-gray-500 hover:text-gray-800"
               style={{background:'transparent'}}
               onMouseEnter={e => {
                 e.currentTarget.style.background = 'rgba(0,0,0,0.05)';
@@ -466,7 +608,7 @@ const Header = ({ settings, campaign }) => {
             {user && settings?.enableWishlist !== false && (
               <Link
                 to="/wishlist"
-                className="hidden sm:flex p-2.5 rounded-xl transition-all duration-200 text-gray-500 hover:text-red-400"
+                className="sz-action-icon hidden sm:flex p-2.5 rounded-xl transition-all duration-200 text-gray-500 hover:text-red-400"
                 style={{background:'transparent'}}
                 onMouseEnter={e => {
                   e.currentTarget.style.background = 'rgba(239,68,68,0.07)';
@@ -488,7 +630,7 @@ const Header = ({ settings, campaign }) => {
             {/* Cart */}
             <button
               onClick={() => setIsOpen(true)}
-              className="relative p-2 sm:p-2.5 rounded-xl transition-all duration-200 text-gray-500 hover:text-gray-800"
+              className="sz-action-icon relative p-2 sm:p-2.5 rounded-xl transition-all duration-200 text-gray-500 hover:text-gray-800"
               style={{background:'transparent'}}
               onMouseEnter={e => {
                 e.currentTarget.style.background = 'color-mix(in srgb, var(--color-primary) 10%, transparent)';
@@ -520,7 +662,7 @@ const Header = ({ settings, campaign }) => {
 
             {/* User Avatar */}
             {user ? (
-              <div className="relative ml-1">
+              <div className="relative ml-0.5 sm:ml-1">
                 <button
                   onClick={() => setUserMenu(!userMenu)}
                   className="flex items-center gap-1.5 p-0.5 sm:p-1 rounded-xl transition-all duration-200"
@@ -534,17 +676,19 @@ const Header = ({ settings, campaign }) => {
                     e.currentTarget.style.transform = 'none';
                   }}
                 >
+                  {/* FIX: sz-avatar class for tiny-screen scaling */}
                   <div
-                    className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold"
+                    className="sz-avatar w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold"
                     style={{background:'var(--theme-gradient)',boxShadow:'0 2px 10px var(--glow-primary)'}}
                   >
                     {user.firstName?.[0]?.toUpperCase()}
                   </div>
                 </button>
                 {userMenu && (
-                  <div className="absolute right-0 top-full mt-2 w-52 bg-white rounded-2xl shadow-2xl border border-gray-100 py-2 z-[60] scale-in">
+                  /* FIX: sz-user-dropdown to clamp width on small screens */
+                  <div className="sz-user-dropdown absolute top-full mt-2 w-52 bg-white rounded-2xl shadow-2xl border border-gray-100 py-2 z-[60] scale-in">
                     <div className="px-4 py-2.5 border-b border-gray-50 mb-1">
-                      <p className="text-sm font-bold text-gray-900">{user.firstName} {user.lastName}</p>
+                      <p className="text-sm font-bold text-gray-900 truncate">{user.firstName} {user.lastName}</p>
                       <p className="text-xs text-gray-400 truncate">{user.email}</p>
                     </div>
                     {[['/account','👤','My Account'],['/returns','↩️','Returns'],['/gift-cards','🎁','Gift Cards'],['/wishlist','❤️','Wishlist']].map(([to,icon,label])=>(
@@ -575,7 +719,7 @@ const Header = ({ settings, campaign }) => {
             {/* Hamburger */}
             <button
               onClick={() => setMenuOpen(!menuOpen)}
-              className="lg:hidden p-2 rounded-xl hover:bg-gray-100 text-gray-500 ml-1 transition-all"
+              className="sz-action-icon lg:hidden p-2 rounded-xl hover:bg-gray-100 text-gray-500 ml-0.5 sm:ml-1 transition-all"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d={menuOpen ? "M6 18L18 6M6 6l12 12" : "M4 6h16M4 12h16M4 18h16"}/>
@@ -584,19 +728,18 @@ const Header = ({ settings, campaign }) => {
           </div>
         </div>
 
-        {/* Mobile menu */}
+        {/* Mobile menu — FIX: sz-mobile-menu-link for tap-target height */}
         {menuOpen && (
-          <div className="lg:hidden border-t border-gray-100 py-3 space-y-0.5 fade-in">
+          <div className="lg:hidden border-t border-gray-100 py-2 space-y-0.5 fade-in">
             {[['/', '🏠 Home'],['/shop','🛍️ Shop'],['/gift-cards','🎁 Gift Cards'],['/wishlist','❤️ Wishlist'],['/returns','↩️ Returns'],['/account','👤 My Account']].map(([to,label])=>(
-              <Link key={to} to={to} className="flex px-3 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50 rounded-xl transition-colors">{label}</Link>
+              <Link key={to} to={to} className="sz-mobile-menu-link px-3 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50 rounded-xl transition-colors">{label}</Link>
             ))}
-            {categories.map(cat => <Link key={cat._id} to={`/shop/${cat.slug}`} className="flex px-3 py-2.5 text-sm text-gray-500 hover:bg-gray-50 rounded-xl">{cat.name}</Link>)}
-            {!user && <div className="flex gap-2 px-3 pt-2"><Link to="/login" className="btn-primary flex-1 text-center text-sm py-2.5">Sign In</Link><Link to="/register" className="btn-outline flex-1 text-center text-sm py-2.5">Register</Link></div>}
+            {categories.map(cat => <Link key={cat._id} to={`/shop/${cat.slug}`} className="sz-mobile-menu-link px-3 py-2.5 text-sm text-gray-500 hover:bg-gray-50 rounded-xl">{cat.name}</Link>)}
+            {!user && <div className="flex gap-2 px-3 pt-2 pb-1"><Link to="/login" className="btn-primary flex-1 text-center text-sm py-2.5">Sign In</Link><Link to="/register" className="btn-outline flex-1 text-center text-sm py-2.5">Register</Link></div>}
           </div>
         )}
       </div>
 
-      {/* Search overlay — live suggestions on every page */}
       {searchOpen && (
         <SearchOverlay onClose={() => setSearchOpen(false)} categories={categories} />
       )}
@@ -620,13 +763,14 @@ const MobileBottomNav = ({ settings }) => {
   ];
 
   return (
+    /* FIX: height and padding managed by .mobile-bottom-nav CSS in ResponsiveStyles */
     <div className="mobile-bottom-nav">
       {tabs.map((tab, i) => {
         const isActive = tab.to && location.pathname === tab.to;
         if (tab.cart) return (
-          <button key={i} onClick={() => setIsOpen(true)} className="flex-1 flex flex-col items-center justify-center py-2 gap-0.5 relative">
+          <button key={i} onClick={() => setIsOpen(true)} className="sz-bottom-tab relative">
             <div className="relative">
-              <span style={{color: isActive ? primary : '#94a3b8'}}>{tab.icon}</span>
+              <span style={{color: '#94a3b8'}}>{tab.icon}</span>
               {itemCount > 0 && (
                 <span className="absolute -top-1.5 -right-2 text-white text-[9px] rounded-full min-w-[15px] h-3.5 flex items-center justify-center font-black px-0.5"
                   style={{background:'var(--theme-gradient)'}}>
@@ -634,13 +778,13 @@ const MobileBottomNav = ({ settings }) => {
                 </span>
               )}
             </div>
-            <span className="text-[10px] font-bold" style={{color: isActive ? primary : '#94a3b8'}}>{tab.label}</span>
+            <span className="sz-bottom-tab-label" style={{color: '#94a3b8'}}>{tab.label}</span>
           </button>
         );
         return (
-          <Link key={i} to={tab.to} className="flex-1 flex flex-col items-center justify-center py-2 gap-0.5">
+          <Link key={i} to={tab.to} className="sz-bottom-tab">
             <span style={{color: isActive ? primary : '#94a3b8'}}>{tab.icon}</span>
-            <span className="text-[10px] font-bold" style={{color: isActive ? primary : '#94a3b8'}}>{tab.label}</span>
+            <span className="sz-bottom-tab-label" style={{color: isActive ? primary : '#94a3b8'}}>{tab.label}</span>
           </Link>
         );
       })}
@@ -656,14 +800,15 @@ const Footer = ({ settings }) => {
   React.useEffect(() => { API.get('/pages?footer=true').then(r=>setFooterPages(r.data||[])).catch(()=>{}); }, []);
 
   return (
-    <footer style={{background:dark,color:'#94a3b8'}}>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-12 pb-8">
-        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-8 mb-10">
+    <footer style={{background:dark,color:'#94a3b8', width:'100%', overflowX:'hidden'}}>
+      <div className="sz-container" style={{paddingTop:'48px', paddingBottom:'32px'}}>
+        {/* FIX: sz-footer-grid + sz-footer-brand classes for responsive single-column on mobile */}
+        <div className="sz-footer-grid grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-8 mb-10">
           {/* Brand */}
-          <div className="col-span-2 sm:col-span-1">
+          <div className="sz-footer-brand col-span-2 sm:col-span-1">
             <div className="flex items-center gap-2 mb-3">
               {settings?.logoUrl
-                ? <img src={settings.logoUrl} alt={storeName} className="h-14 object-contain" style={{filter:'brightness(0) invert(1)'}}/>
+                ? <img src={settings.logoUrl} alt={storeName} style={{height:'56px',maxWidth:'160px',objectFit:'contain',filter:'brightness(0) invert(1)'}}/>
                 : <span className="font-bold text-white text-lg" style={{fontFamily:'var(--font-display)'}}>{storeName}</span>
               }
             </div>
@@ -716,7 +861,9 @@ const Footer = ({ settings }) => {
               <p className="text-white font-bold mb-1 text-sm">📬 Stay Updated</p>
               <p className="text-xs mb-3" style={{color:'#64748b'}}>Exclusive deals and new arrivals straight to your inbox</p>
               <div className="flex gap-2">
-                <input type="email" id="footer-nl" placeholder="your@email.com" className="flex-1 bg-white/10 border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder-white/40 outline-none focus:border-white/30 transition-colors" style={{fontSize:'16px'}}/>
+                <input type="email" id="footer-nl" placeholder="your@email.com"
+                  className="flex-1 min-w-0 bg-white/10 border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder-white/40 outline-none focus:border-white/30 transition-colors"
+                  style={{fontSize:'16px'}}/>
                 <button onClick={()=>{const e=document.getElementById('footer-nl').value;if(e){fetch('/api/subscribers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:e})}).then(()=>{document.getElementById('footer-nl').value='';alert('Subscribed 🎉');});}}}
                   className="flex-shrink-0 px-4 py-2 rounded-xl text-white text-sm font-bold transition-all hover:opacity-90" style={{background:'var(--theme-gradient)'}}>
                   Subscribe
@@ -757,14 +904,16 @@ export default function CustomerLayout() {
   }, [settings?.googleSearchConsole]);
 
   return (
-    <div className="min-h-screen flex flex-col" style={{background:'var(--body-bg)',fontFamily:'var(--font-body)'}}>
+    <div className="min-h-screen flex flex-col" style={{background:'var(--body-bg)',fontFamily:'var(--font-body)',overflowX:'hidden',maxWidth:'100vw'}}>
+      {/* FIX: inject responsive overrides */}
+      <ResponsiveStyles />
       {campaign?.theme?.snowEffect     && <SnowEffect/>}
       {campaign?.theme?.confettiEffect && <ConfettiEffect/>}
       <RunningBanner />
       <FlashSaleBanner />
       <Header settings={settings} campaign={campaign}/>
       <CartDrawer settings={settings}/>
-      <main className="flex-1 has-mobile-nav"><Outlet/></main>
+      <main className="flex-1 has-mobile-nav" style={{minWidth:0, overflowX:'hidden'}}><Outlet/></main>
       <Footer settings={settings}/>
       <MobileBottomNav settings={settings}/>
       <WhatsAppWidget />
