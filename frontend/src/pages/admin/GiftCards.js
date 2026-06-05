@@ -16,6 +16,7 @@ const QUICK_AMOUNTS = [500, 1000, 2000, 5000, 10000];
 function SlipModal({ card, onClose, onApprove, onReject }) {
   const [rejecting, setRejecting]       = useState(false);
   const [approving, setApproving]       = useState(false);
+  const [approved,  setApproved]        = useState(false);
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [rejectionNote, setRejectionNote]  = useState('');
   const [adminNote, setAdminNote]          = useState('');
@@ -31,8 +32,8 @@ function SlipModal({ card, onClose, onApprove, onReject }) {
     try {
       await API.put(`/gift-cards/admin/${card._id}/approve`, { adminNote });
       toast.success('✅ Gift card approved & activated!');
-      onApprove();
-      onClose();
+      setApproved(true);
+      setTimeout(() => { onApprove(); onClose(); }, 1400);
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to approve');
     } finally { setApproving(false); }
@@ -133,6 +134,25 @@ function SlipModal({ card, onClose, onApprove, onReject }) {
         {/* Action buttons */}
         <div className="p-5 border-t border-gray-100 space-y-2">
           {!showRejectForm ? (
+            approved ? (
+              /* ── Approved stamp shown after clicking approve ── */
+              <div className="flex flex-col items-center justify-center py-3 gap-2">
+                <div style={{
+                  display:'inline-flex',alignItems:'center',gap:'10px',
+                  background:'linear-gradient(135deg,#16a34a,#22c55e)',
+                  color:'white',padding:'14px 28px',borderRadius:'14px',
+                  fontWeight:900,fontSize:'18px',letterSpacing:'0.06em',
+                  boxShadow:'0 6px 24px rgba(22,163,74,0.40)',
+                  border:'3px solid #15803d',
+                  transform:'rotate(-1.5deg)',
+                  userSelect:'none',
+                }}>
+                  <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg>
+                  APPROVED
+                </div>
+                <p className="text-xs text-green-700 font-semibold mt-1">Gift card is now active — closing…</p>
+              </div>
+            ) : (
             <div className="flex gap-3">
               <button onClick={handleApprove} disabled={approving || !slipUrl}
                 className="flex-1 py-2.5 rounded-xl bg-green-500 hover:bg-green-600 text-white text-sm font-bold transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
@@ -145,6 +165,7 @@ function SlipModal({ card, onClose, onApprove, onReject }) {
                 ❌ Reject Slip
               </button>
             </div>
+            )
           ) : (
             <div className="flex gap-3">
               <button onClick={() => setShowRejectForm(false)}
@@ -596,7 +617,13 @@ export default function AdminGiftCards() {
                         </span>
                       </td>
                       <td>
-                        {hasSlip ? (
+                        {card.isActive && hasSlip ? (
+                          <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full"
+                            style={{background:'linear-gradient(135deg,#16a34a,#22c55e)',color:'white',boxShadow:'0 2px 8px rgba(22,163,74,0.30)'}}>
+                            <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg>
+                            Approved
+                          </span>
+                        ) : hasSlip ? (
                           <span className="inline-flex items-center gap-1 text-xs font-semibold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
                             📎 Uploaded
                           </span>

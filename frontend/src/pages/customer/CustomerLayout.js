@@ -354,13 +354,13 @@ const Header = ({ settings, campaign }) => {
         </div>
       )}
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6">
-        <div className="flex items-center gap-2" style={{height: '64px'}}>
+      <div className="max-w-7xl mx-auto px-3 sm:px-6">
+        <div className="flex items-center gap-1 sm:gap-2" style={{height: '60px'}}>
 
           {/* ── Logo ── */}
           <Link
             to="/"
-            className="flex items-center gap-2 flex-shrink-0 group mr-3"
+            className="flex items-center gap-2 flex-shrink-0 group mr-1 sm:mr-3"
             style={{perspective:'600px', overflow:'visible', position:'relative', zIndex:10}}
             onMouseEnter={e => { e.currentTarget.querySelector('.logo-inner') && (e.currentTarget.querySelector('.logo-inner').style.transform = 'rotateY(8deg) scale(1.03)'); }}
             onMouseLeave={e => { e.currentTarget.querySelector('.logo-inner') && (e.currentTarget.querySelector('.logo-inner').style.transform = 'rotateY(0deg) scale(1)'); }}
@@ -439,12 +439,12 @@ const Header = ({ settings, campaign }) => {
           </nav>
 
           {/* ── Action Icons ── */}
-          <div className="flex items-center gap-1 ml-auto">
+          <div className="flex items-center gap-0 sm:gap-1 ml-auto">
 
             {/* Search */}
             <button
               onClick={() => setSearchOpen(true)}
-              className="relative p-2.5 rounded-xl transition-all duration-200 text-gray-500 hover:text-gray-800"
+              className="relative p-2 sm:p-2.5 rounded-xl transition-all duration-200 text-gray-500 hover:text-gray-800"
               style={{background:'transparent'}}
               onMouseEnter={e => {
                 e.currentTarget.style.background = 'rgba(0,0,0,0.05)';
@@ -488,7 +488,7 @@ const Header = ({ settings, campaign }) => {
             {/* Cart */}
             <button
               onClick={() => setIsOpen(true)}
-              className="relative p-2.5 rounded-xl transition-all duration-200 text-gray-500 hover:text-gray-800"
+              className="relative p-2 sm:p-2.5 rounded-xl transition-all duration-200 text-gray-500 hover:text-gray-800"
               style={{background:'transparent'}}
               onMouseEnter={e => {
                 e.currentTarget.style.background = 'color-mix(in srgb, var(--color-primary) 10%, transparent)';
@@ -523,7 +523,7 @@ const Header = ({ settings, campaign }) => {
               <div className="relative ml-1">
                 <button
                   onClick={() => setUserMenu(!userMenu)}
-                  className="flex items-center gap-1.5 p-1 rounded-xl transition-all duration-200"
+                  className="flex items-center gap-1.5 p-0.5 sm:p-1 rounded-xl transition-all duration-200"
                   style={{background:'transparent'}}
                   onMouseEnter={e => {
                     e.currentTarget.style.background = 'rgba(0,0,0,0.04)';
@@ -658,7 +658,7 @@ const Footer = ({ settings }) => {
   return (
     <footer style={{background:dark,color:'#94a3b8'}}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-12 pb-8">
-        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-8 mb-10">
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-8 mb-10">
           {/* Brand */}
           <div className="col-span-2 sm:col-span-1">
             <div className="flex items-center gap-2 mb-3">

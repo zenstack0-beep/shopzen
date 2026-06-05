@@ -94,8 +94,8 @@ export default function Shop() {
     <div style={{background:'var(--body-bg)',minHeight:'100vh'}}>
       {/* Header */}
       <div className="border-b" style={{background:'var(--card-bg)'}}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
             <div>
               <div className="flex items-center gap-2 text-xs text-gray-400 mb-1 flex-wrap">
                 <Link to="/" style={{color:'var(--color-primary)'}}>Home</Link>
@@ -125,8 +125,8 @@ export default function Shop() {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
-        <div className="flex gap-6">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6">
+        <div className="flex gap-4 sm:gap-6">
           {/* Sidebar filter (desktop) */}
           <aside className={`flex-shrink-0 w-52 hidden lg:block`}>
             <div className="sticky top-24 space-y-5">
@@ -250,14 +250,14 @@ export default function Shop() {
                             {product.stock===0 && <span className="badge badge-hot">Sold Out</span>}
                           </div>
                         </Link>
-                        <div className="p-3.5">
-                          <p className="text-[11px] font-bold uppercase tracking-widest text-gray-400 mb-0.5">{product.category?.name}</p>
-                          <Link to={`/product/${product.slug}`}><h3 className="font-bold text-sm leading-snug text-gray-900 line-clamp-2 hover:opacity-60 transition-opacity mb-1.5">{product.name}</h3></Link>
-                          {product.ratings?.count > 0 && <div className="flex items-center gap-1 mb-1.5"><Stars rating={product.ratings.average}/><span className="text-[11px] text-gray-400">({product.ratings.count})</span></div>}
-                          <div className="flex items-center justify-between gap-2">
-                            <div>
-                              <span className="font-black text-base text-gray-900" style={{fontFamily:'var(--font-display)'}}>{sym} {price?.toLocaleString()}</span>
-                              {isOnSale && <span className="text-xs text-gray-400 line-through ml-1 hidden sm:inline">{sym} {product.price?.toLocaleString()}</span>}
+                        <div className="p-2.5 sm:p-3.5">
+                          <p className="text-[10px] sm:text-[11px] font-bold uppercase tracking-widest text-gray-400 mb-0.5">{product.category?.name}</p>
+                          <Link to={`/product/${product.slug}`}><h3 className="font-bold text-xs sm:text-sm leading-snug text-gray-900 line-clamp-2 hover:opacity-60 transition-opacity mb-1 sm:mb-1.5">{product.name}</h3></Link>
+                          {product.ratings?.count > 0 && <div className="flex items-center gap-1 mb-1 sm:mb-1.5"><Stars rating={product.ratings.average}/><span className="text-[10px] sm:text-[11px] text-gray-400">({product.ratings.count})</span></div>}
+                          <div className="flex items-center justify-between gap-1.5">
+                            <div className="min-w-0">
+                              <span className="font-black text-sm sm:text-base text-gray-900 leading-tight" style={{fontFamily:'var(--font-display)'}}>{sym} {price?.toLocaleString()}</span>
+                              {isOnSale && <span className="text-xs text-gray-400 line-through ml-1 block sm:inline">{sym} {product.price?.toLocaleString()}</span>}
                             </div>
                             {hasVars ? (
                               <Link to={`/product/${product.slug}`} className="flex-shrink-0 text-xs px-3 py-1.5 rounded-xl font-bold text-white" style={{background:'var(--theme-gradient)'}}>Select</Link>
