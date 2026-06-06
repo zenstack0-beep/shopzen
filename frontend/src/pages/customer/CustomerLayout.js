@@ -34,23 +34,24 @@ const ResponsiveStyles = () => (
     html, body { overflow-x: hidden; max-width: 100vw; }
     *, *::before, *::after { box-sizing: border-box; }
 
-    /* ── Header auto height so tall logos don't clip ── */
+    /* ── Header inner: FIXED height always, logo scales inside it ── */
     .sz-header-inner {
-      min-height: 56px;
-      padding-top: 6px;
-      padding-bottom: 6px;
+      height: 72px;
+      min-height: 72px;
+      max-height: 72px;
+      padding-top: 0;
+      padding-bottom: 0;
+      overflow: visible;
     }
 
-    /* ── Logo image: never taller than header area, never wider than viewport fraction ── */
+    /* ── Logo image: scales via --logo-size, no max-height cap ── */
     .sz-logo-img {
-      max-height: min(56px, 14vw);
-      max-width: min(180px, 45vw);
+      height: var(--logo-size, 48px);
+      max-width: min(280px, 55vw);
       width: auto;
       object-fit: contain;
       display: block;
-    }
-    @media (min-width: 640px) {
-      .sz-logo-img { max-height: 64px; max-width: 220px; }
+      flex-shrink: 0;
     }
 
     /* ── Logo text: always shown, size clamps with viewport ── */
@@ -444,7 +445,7 @@ const Header = ({ settings, campaign }) => {
    * Desktop: allow up to 64px
    */
   const rawLogoHeight = settings?.logoSize || 56;
-  const logoHeightDesktop = Math.min(64, rawLogoHeight);
+  const logoHeightDesktop = rawLogoHeight; // use the admin-configured size directly
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 30);
@@ -498,7 +499,6 @@ const Header = ({ settings, campaign }) => {
         </div>
       )}
 
-      {/* FIX: use sz-container for responsive padding, sz-header-inner for auto height */}
       <div className="sz-container">
         <div className="sz-header-inner flex items-center gap-1 sm:gap-2">
 
@@ -512,12 +512,15 @@ const Header = ({ settings, campaign }) => {
           >
             <div className="logo-inner transition-transform duration-300" style={{transformStyle:'preserve-3d'}}>
               {settings?.logoUrl ? (
-                /* FIX: use sz-logo-img class for responsive clamping */
+                /* Logo height driven by admin logoSize setting via CSS variable */
                 <img
                   src={settings.logoUrl}
                   alt={settings.storeName || 'ShopZen'}
                   className="sz-logo-img"
-                  style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.10))' }}
+                  style={{
+                    '--logo-size': `${rawLogoHeight}px`,
+                    filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.10))',
+                  }}
                 />
               ) : (
                 <div className="flex items-center gap-1.5 sm:gap-2">
