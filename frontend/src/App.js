@@ -46,6 +46,7 @@ import LayoutEditor from './pages/admin/LayoutEditor';
 import AdminLayout from './pages/admin/AdminLayout';
 import SocialMediaSettings from './pages/admin/SocialMedia';
 import AutomationRules from './pages/admin/AutomationRules';
+import AdminDeals from './pages/admin/Deals';
 
 // Scrolls to top on every route change — fires before browser restores position
 function ScrollToTop() {
@@ -135,6 +136,7 @@ export default function App() {
                     <Route path="theme-builder" element={<ThemeBuilder/>}/>
                     <Route path="social-media" element={<SocialMediaSettings/>}/>
                     <Route path="automation"   element={<AutomationRules/>}/>
+                    <Route path="deals"        element={<AdminDeals/>}/>
                   </Route>
                 </Routes>
               </BrowserRouter>

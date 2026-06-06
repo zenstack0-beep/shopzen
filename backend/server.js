@@ -76,6 +76,7 @@ app.use('/api/seo',           require('./routes/seo'));
 app.use('/api/whatsapp',      require('./routes/whatsapp'));
 app.use('/api/social-media',  require('./routes/socialMedia'));
 app.use('/api/automation',    require('./routes/automation'));
+app.use('/api/deals',         require('./routes/deals'));
 
 // ── Serve built frontend ───────────────────────────────────────────────────────
 const { seoRenderMiddleware } = require('./routes/seo');

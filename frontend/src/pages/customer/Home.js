@@ -12,6 +12,7 @@ import {
   use3DTilt, useScrollReveal, MagneticButton
 } from '../../components/Cinematic';
 import toast from 'react-hot-toast';
+import DealsSection from '../../components/DealsSection';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -715,8 +716,18 @@ export default function Home() {
   };
 
   // Build ordered section list
-  const DEFAULT_ORDER = ['hero','categories','featured','promo','bestsellers','seasonal','new_arrivals','newsletter','recently'];
-  const orderedIds = sectionOrder ? sectionOrder.filter(s=>s.enabled).map(s=>s.id) : DEFAULT_ORDER;
+  const DEFAULT_ORDER = ['hero','categories','featured','deals','promo','bestsellers','seasonal','new_arrivals','newsletter','recently'];
+  // If admin has a saved layout that doesn't include 'deals', append it after 'featured'
+  const orderedIds = (() => {
+    if (!sectionOrder) return DEFAULT_ORDER;
+    const ids = sectionOrder.filter(s => s.enabled).map(s => s.id);
+    if (!ids.includes('deals')) {
+      const afterFeatured = ids.indexOf('featured');
+      if (afterFeatured >= 0) ids.splice(afterFeatured + 1, 0, 'deals');
+      else ids.unshift('deals');
+    }
+    return ids;
+  })();
 
   const SECTIONS = {
     hero: heroBanners.length>0 && (
@@ -736,6 +747,7 @@ export default function Home() {
         <AnimatedGrid products={featured} settings={settings}/>
       </section>
     ),
+    deals: <DealsSection key="deals" settings={settings} />,
     promo: promoBanners.length>0 && (
       <section key="promo" className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-6">
         {promoBanners.length===1 && <PromoBanner banner={promoBanners[0]} tall/>}
