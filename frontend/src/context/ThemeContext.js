@@ -186,9 +186,8 @@ export const ThemeProvider = ({ children }) => {
       setDarkModeState(data.darkMode || false);
       applyTheme(data);
       writeCache(data);
-      // Mark that React has the real theme — hide splash on first load
+      // Mark that React has applied the real theme from the API
       window.__szApiFetched = true;
-      if (window.__szTryHide) window.__szTryHide();
       if (data.seo_config && typeof data.seo_config === 'object') {
         window.__SHOPZEN_SEO__ = {
           siteName: data.storeName || data.seo_config.siteName,

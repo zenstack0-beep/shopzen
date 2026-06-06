@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import API from '../utils/api';
 
 /**
@@ -6,6 +7,7 @@ import API from '../utils/api';
  * Respects frequency settings: always, once_per_session, once_per_day
  */
 export default function PopupBanner() {
+  const navigate = useNavigate();
   const [banner, setBanner] = useState(null);
   const [show, setShow] = useState(false);
 
@@ -104,8 +106,8 @@ export default function PopupBanner() {
             </p>
           )}
           {banner.link && (
-            <a
-              href={banner.link}
+            <button
+              onClick={() => { close(); navigate(banner.link); }}
               style={{
                 display: 'inline-block',
                 background: banner.buttonBgColor || '#3b82f6',
@@ -113,16 +115,16 @@ export default function PopupBanner() {
                 padding: '12px 28px',
                 borderRadius: '12px',
                 fontWeight: 700,
-                textDecoration: 'none',
+                border: 'none',
+                cursor: 'pointer',
                 fontSize: '14px',
                 transition: 'opacity 0.2s',
               }}
-              onMouseEnter={e => e.target.style.opacity = '0.9'}
-              onMouseLeave={e => e.target.style.opacity = '1'}
-              onClick={close}
+              onMouseEnter={e => e.currentTarget.style.opacity = '0.9'}
+              onMouseLeave={e => e.currentTarget.style.opacity = '1'}
             >
               {banner.buttonText || 'Shop Now'}
-            </a>
+            </button>
           )}
           <button
             onClick={close}

@@ -662,7 +662,8 @@ export default function Home() {
   const [categories,  setCategories]  = useState([]);
   const [heroBanners, setHeroBanners] = useState([]);
   const [promoBanners,setPromoBanners]= useState([]);
-  const [loading,     setLoading]     = useState(true);
+  // Show loading screen on every visit until all DB data has loaded.
+  const [loading, setLoading] = useState(true);
   const [sectionOrder, setSectionOrder] = useState(null);
   // settingsReady: true once we have settings from cache or API.
   // Prevents newsletter / payment sections from flashing on first render.
@@ -798,32 +799,155 @@ export default function Home() {
     brands: null,
   };
 
+  // Premium welcome loading screen — shown every visit until all DB data is ready.
   if (loading) {
+    const storeName    = settings?.storeName    || 'ShopZen';
+    const storeTagline = settings?.storeTagline || 'Premium products, delivered fast';
+    const logoUrl      = settings?.logoUrl;
+
     return (
       <div
-        className="fixed inset-0 z-50 flex flex-col items-center justify-center"
-        style={{ background: 'var(--body-bg, #ffffff)' }}
+        className="fixed inset-0 z-50 flex flex-col items-center justify-center overflow-hidden"
+        style={{ background: 'var(--color-dark, #0f172a)' }}
       >
-        {/* Logo / store name */}
-        <div className="mb-8 text-center">
-          {settings?.logoUrl ? (
-            <img src={settings.logoUrl} alt="logo" className="h-14 mx-auto mb-3 object-contain"/>
-          ) : (
-            <h1 className="font-display text-3xl font-black" style={{ color: 'var(--color-primary)' }}>
-              {settings?.storeName || 'ShopZen'}
-            </h1>
-          )}
+        <style>{`
+          @keyframes sz-fade-up {
+            from { opacity: 0; transform: translateY(20px); }
+            to   { opacity: 1; transform: translateY(0); }
+          }
+          @keyframes sz-shimmer {
+            0%   { background-position: -200% center; }
+            100% { background-position: 200% center; }
+          }
+          @keyframes sz-pulse-ring {
+            0%, 100% { transform: scale(1);   opacity: 0.15; }
+            50%       { transform: scale(1.18); opacity: 0.28; }
+          }
+          @keyframes sz-spin {
+            to { transform: rotate(360deg); }
+          }
+          @keyframes sz-orb-1 {
+            0%,100% { transform: translate(0,0) scale(1); }
+            33%     { transform: translate(40px,-30px) scale(1.1); }
+            66%     { transform: translate(-25px,20px) scale(0.9); }
+          }
+          @keyframes sz-orb-2 {
+            0%,100% { transform: translate(0,0) scale(1); }
+            33%     { transform: translate(-35px,25px) scale(0.88); }
+            66%     { transform: translate(30px,-20px) scale(1.08); }
+          }
+          .sz-orb-1 { animation: sz-orb-1 14s ease-in-out infinite; }
+          .sz-orb-2 { animation: sz-orb-2 18s ease-in-out infinite; }
+        `}</style>
+
+        {/* Background orbs */}
+        <div style={{ position:'absolute', inset:0, overflow:'hidden', pointerEvents:'none' }}>
+          <div className="sz-orb-1" style={{
+            position:'absolute', top:'-80px', left:'-80px',
+            width:'340px', height:'340px', borderRadius:'50%',
+            background:'var(--color-primary)', opacity:0.18, filter:'blur(80px)',
+          }}/>
+          <div className="sz-orb-2" style={{
+            position:'absolute', bottom:'-60px', right:'-60px',
+            width:'280px', height:'280px', borderRadius:'50%',
+            background:'var(--color-accent)', opacity:0.14, filter:'blur(70px)',
+          }}/>
         </div>
-        {/* Animated spinner ring */}
-        <div className="relative w-14 h-14">
-          <svg className="w-14 h-14 animate-spin" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="28" cy="28" r="24" stroke="var(--color-primary)" strokeOpacity="0.15" strokeWidth="4"/>
-            <path d="M52 28 A24 24 0 0 1 28 52" stroke="var(--color-primary)" strokeWidth="4" strokeLinecap="round"/>
-          </svg>
+
+        {/* Subtle grid overlay */}
+        <div style={{
+          position:'absolute', inset:0, pointerEvents:'none',
+          backgroundImage:'linear-gradient(rgba(255,255,255,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.03) 1px,transparent 1px)',
+          backgroundSize:'48px 48px',
+        }}/>
+
+        {/* Content */}
+        <div style={{ position:'relative', zIndex:2, textAlign:'center', display:'flex', flexDirection:'column', alignItems:'center', gap:'0' }}>
+
+          {/* Logo or icon */}
+          <div style={{ animation:'sz-fade-up 0.7s cubic-bezier(.34,1.56,.64,1) 0.1s both', marginBottom:'24px' }}>
+            {logoUrl ? (
+              <img
+                src={logoUrl}
+                alt={storeName}
+                style={{ height:'64px', maxWidth:'200px', objectFit:'contain', filter:'brightness(0) invert(1)' }}
+              />
+            ) : (
+              <div style={{
+                width:'68px', height:'68px', borderRadius:'20px',
+                background:'var(--theme-gradient)', display:'flex', alignItems:'center', justifyContent:'center',
+                boxShadow:'0 20px 50px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.1)',
+                position:'relative', overflow:'hidden',
+              }}>
+                <div style={{
+                  position:'absolute', inset:0,
+                  background:'linear-gradient(135deg,rgba(255,255,255,0.2) 0%,transparent 60%)',
+                  borderRadius:'inherit',
+                }}/>
+                <svg viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.6"
+                  strokeLinecap="round" strokeLinejoin="round"
+                  style={{ width:'32px', height:'32px', position:'relative', zIndex:1 }}>
+                  <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/>
+                  <line x1="3" y1="6" x2="21" y2="6"/>
+                  <path d="M16 10a4 4 0 01-8 0"/>
+                </svg>
+              </div>
+            )}
+          </div>
+
+          {/* Welcome line */}
+          <p style={{
+            fontFamily:'var(--font-body)',
+            fontSize:'11px', fontWeight:600, letterSpacing:'0.3em', textTransform:'uppercase',
+            color:'rgba(255,255,255,0.4)',
+            animation:'sz-fade-up 0.6s ease 0.25s both',
+            marginBottom:'10px',
+          }}>
+            Welcome to
+          </p>
+
+          {/* Store name — shimmer gradient */}
+          <h1 style={{
+            fontFamily:'var(--font-display)',
+            fontSize:'clamp(32px,6vw,52px)', fontWeight:800, letterSpacing:'-0.03em', lineHeight:1,
+            background:'linear-gradient(90deg, #ffffff 0%, var(--color-accent) 40%, var(--color-primary-light) 60%, #ffffff 100%)',
+            backgroundSize:'200% auto',
+            WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text',
+            animation:'sz-shimmer 3s linear infinite, sz-fade-up 0.7s ease 0.35s both',
+            margin:0,
+          }}>
+            {storeName}
+          </h1>
+
+          {/* Tagline */}
+          <p style={{
+            fontFamily:'var(--font-body)',
+            fontSize:'14px', fontWeight:400,
+            color:'rgba(255,255,255,0.45)',
+            marginTop:'12px', marginBottom:'40px',
+            animation:'sz-fade-up 0.7s ease 0.5s both',
+            maxWidth:'280px', lineHeight:1.5,
+          }}>
+            {storeTagline}
+          </p>
+
+          {/* Spinner with pulse ring */}
+          <div style={{ position:'relative', width:'48px', height:'48px', animation:'sz-fade-up 0.6s ease 0.6s both' }}>
+            {/* Pulse ring */}
+            <div style={{
+              position:'absolute', inset:'-8px', borderRadius:'50%',
+              border:'1px solid var(--color-primary)',
+              animation:'sz-pulse-ring 2s ease-in-out infinite',
+            }}/>
+            {/* Spinner */}
+            <svg style={{ width:'48px', height:'48px', animation:'sz-spin 0.9s linear infinite' }}
+              viewBox="0 0 48 48" fill="none">
+              <circle cx="24" cy="24" r="20" stroke="rgba(255,255,255,0.08)" strokeWidth="3.5"/>
+              <path d="M44 24 A20 20 0 0 1 24 44" stroke="var(--color-primary-light)" strokeWidth="3.5" strokeLinecap="round"/>
+            </svg>
+          </div>
+
         </div>
-        <p className="mt-5 text-sm font-medium" style={{ color: 'var(--color-primary)', opacity: 0.7 }}>
-          Loading store…
-        </p>
       </div>
     );
   }

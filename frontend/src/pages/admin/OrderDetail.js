@@ -414,50 +414,58 @@ export default function AdminOrderDetail() {
                       const slipUrl = order.paymentSlip.startsWith('http') ? order.paymentSlip : `${apiBase}${order.paymentSlip}`;
                       const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(order.paymentSlip);
                       const isPdf = /\.pdf$/i.test(order.paymentSlip);
-                      return isImage ? (
-                        <a href={slipUrl} target="_blank" rel="noopener noreferrer">
-                          <img
-                            src={slipUrl}
-                            alt="Payment slip"
-                            className="w-full rounded-xl border border-gray-200 object-contain max-h-64 cursor-pointer hover:opacity-90 transition-opacity"
-                            onError={e => { e.target.style.display='none'; e.target.nextSibling.style.display='block'; }}
-                          />
-                          <p style={{display:'none'}} className="text-xs text-red-400 mt-1">⚠ Image could not load. <a href={slipUrl} className="underline text-blue-500" target="_blank" rel="noopener noreferrer">Open directly →</a></p>
-                          <p className="text-xs text-center text-blue-500 mt-1">Click to open full size ↗</p>
-                        </a>
-                      ) : isPdf ? (
-                        <div className="rounded-xl border border-gray-200 overflow-hidden">
-                          <iframe
-                            src={`https://docs.google.com/viewer?url=${encodeURIComponent(slipUrl)}&embedded=true`}
-                            title="Payment Slip PDF"
-                            className="w-full"
-                            style={{ height: '500px', border: 'none' }}
-                          />
-                          <div className="p-2 bg-gray-50 border-t border-gray-200 flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <svg className="w-4 h-4 text-red-500" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>
-                              <span className="text-xs text-gray-500">Payment Slip PDF</span>
-                            </div>
-                            <a
-                              href={slipUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-xs text-blue-600 underline hover:text-blue-800"
-                            >
-                              Open in new tab ↗
+                      return (
+                        <div>
+                          {/* Toolbar: Open + Download */}
+                          <div className="flex items-center justify-end gap-2 mb-2">
+                            <a href={slipUrl} target="_blank" rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium">
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                              Open
+                            </a>
+                            <a href={slipUrl} download
+                              className="inline-flex items-center gap-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium px-2.5 py-1 rounded-lg transition-colors">
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                              Download
                             </a>
                           </div>
+                          {/* Preview */}
+                          {isImage ? (
+                            <div className="border border-gray-200 rounded-xl overflow-hidden">
+                              <img
+                                src={slipUrl}
+                                alt="Payment slip"
+                                className="w-full object-contain max-h-64"
+                                onError={e => {
+                                  e.target.style.display = 'none';
+                                  e.target.nextSibling.style.display = 'flex';
+                                }}
+                              />
+                              <div style={{ display: 'none' }}
+                                className="p-5 flex-col items-center justify-center text-center gap-2">
+                                <p className="text-xs text-gray-400">Image could not load — use Open or Download above</p>
+                              </div>
+                            </div>
+                          ) : isPdf ? (
+                            <div className="border border-gray-200 rounded-xl overflow-hidden bg-gray-50">
+                              <iframe
+                                src={`https://docs.google.com/viewer?url=${encodeURIComponent(slipUrl)}&embedded=true`}
+                                title="Payment Slip PDF"
+                                className="w-full"
+                                style={{ height: '500px', border: 'none' }}
+                              />
+                              <div className="px-3 py-2 bg-white border-t border-gray-100 flex items-center gap-2">
+                                <svg className="w-4 h-4 text-red-500 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>
+                                <span className="text-xs text-gray-400">If PDF doesn't load above, use Open or Download buttons</span>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-3 p-3 rounded-xl border border-gray-200 bg-gray-50">
+                              <svg className="w-8 h-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                              <span className="text-sm text-gray-600">Use Open or Download buttons to view this file</span>
+                            </div>
+                          )}
                         </div>
-                      ) : (
-                        <a
-                          href={slipUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-2 p-3 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors"
-                        >
-                          <svg className="w-5 h-5 text-red-500" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>
-                          <span className="text-sm text-blue-600 underline">View Payment Slip ↗</span>
-                        </a>
                       );
                     })()}
                     {order.paymentStatus !== 'paid' && (

@@ -39,165 +39,51 @@
     <link rel="dns-prefetch" href="https://www.googletagmanager.com"/>
     <link rel="dns-prefetch" href="https://connect.facebook.net"/>
 
-    <!-- Premium animated splash — colours matched to admin theme -->
-    <style>
-      *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 
-      #szl-splash{
-        position:fixed;inset:0;z-index:99999;
-        display:flex;flex-direction:column;align-items:center;justify-content:center;
-        overflow:hidden;
-        background:var(--szl-bg,#0a0a0a);
-        transition:opacity 0.6s cubic-bezier(.4,0,.2,1),visibility 0.6s ease;
-      }
-      #szl-splash.szl-hide{opacity:0;visibility:hidden;pointer-events:none;}
-
-      /* Floating orbs */
-      .szl-bg{position:absolute;inset:0;overflow:hidden;}
-      .szl-orb{position:absolute;border-radius:50%;filter:blur(70px);opacity:0.25;animation:szl-float linear infinite;}
-      .szl-orb-1{width:320px;height:320px;background:var(--szl-p,#374151);top:-100px;left:-100px;animation-duration:18s;}
-      .szl-orb-2{width:260px;height:260px;background:var(--szl-a,#6b7280);bottom:-80px;right:-80px;animation-duration:22s;animation-delay:-8s;}
-      .szl-orb-3{width:180px;height:180px;background:var(--szl-p,#4b5563);top:45%;left:65%;animation-duration:15s;animation-delay:-4s;opacity:0.15;}
-      .szl-orb-4{width:130px;height:130px;background:var(--szl-a,#9ca3af);top:15%;left:15%;animation-duration:20s;animation-delay:-12s;opacity:0.18;}
-      @keyframes szl-float{
-        0%{transform:translate(0,0) scale(1);}
-        25%{transform:translate(30px,-25px) scale(1.08);}
-        50%{transform:translate(-20px,30px) scale(0.92);}
-        75%{transform:translate(20px,12px) scale(1.04);}
-        100%{transform:translate(0,0) scale(1);}
-      }
-
-      /* Stars */
-      .szl-stars{position:absolute;inset:0;pointer-events:none;}
-      .szl-star{position:absolute;background:#fff;border-radius:50%;opacity:0;animation:szl-twinkle ease-in-out infinite;}
-      @keyframes szl-twinkle{0%,100%{opacity:0;transform:scale(0.4);}50%{opacity:0.6;transform:scale(1.3);}}
-
-      /* Content */
-      .szl-content{
-        position:relative;z-index:2;
-        display:flex;flex-direction:column;align-items:center;gap:0;
-        animation:szl-rise 0.9s cubic-bezier(.34,1.56,.64,1) both;
-      }
-      @keyframes szl-rise{
-        from{opacity:0;transform:translateY(32px) scale(0.9);}
-        to{opacity:1;transform:translateY(0) scale(1);}
-      }
-
-      /* Admin logo (shown if set) */
-      #szl-logo-img{
-        height:64px;max-width:220px;object-fit:contain;
-        margin-bottom:22px;
-        filter:brightness(0) invert(1);
-        opacity:0;animation:szl-fade-up 0.7s ease 0.1s both;
-      }
-
-      /* Default icon (shown if no logo) */
-      .szl-icon-wrap{
-        width:76px;height:76px;border-radius:24px;margin-bottom:22px;
-        background:var(--szl-g,linear-gradient(135deg,#1f2937,#374151,#6b7280));
-        display:flex;align-items:center;justify-content:center;
-        box-shadow:0 20px 60px var(--szl-glow,rgba(55,65,81,0.55)),0 0 0 1px rgba(255,255,255,0.12);
-        animation:szl-glow-pulse 2.5s ease-in-out infinite,szl-fade-up 0.7s ease 0.1s both;
-        position:relative;overflow:hidden;opacity:0;
-      }
-      .szl-icon-wrap::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(255,255,255,0.25),transparent);border-radius:inherit;}
-      .szl-icon-wrap::after{
-        content:'';position:absolute;inset:-50%;
-        background:linear-gradient(90deg,transparent,rgba(255,255,255,0.15),transparent);
-        animation:szl-sheen 3s ease-in-out infinite;
-      }
-      @keyframes szl-sheen{0%,100%{transform:translateX(-100%) rotate(45deg);}50%{transform:translateX(100%) rotate(45deg);}}
-      .szl-icon-wrap svg{width:36px;height:36px;fill:none;stroke:#fff;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;position:relative;z-index:1;}
-      @keyframes szl-glow-pulse{
-        0%,100%{box-shadow:0 20px 60px var(--szl-glow,rgba(55,65,81,0.55)),0 0 0 1px rgba(255,255,255,0.12);}
-        50%{box-shadow:0 24px 80px var(--szl-glow,rgba(55,65,81,0.85)),0 0 0 2px rgba(255,255,255,0.18);}
-      }
-
-      /* Store name */
-      #szl-wordmark{
-        font-family:var(--szl-font,Georgia,serif);
-        font-size:44px;font-weight:700;letter-spacing:-1.5px;
-        user-select:none;line-height:1;
-        background:linear-gradient(90deg,#ffffff 0%,var(--szl-a,#d1d5db) 40%,var(--szl-p,#9ca3af) 60%,#ffffff 90%);
-        background-size:250% auto;
-        -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
-        animation:szl-shimmer 3.5s linear infinite,szl-fade-up 0.7s ease 0.2s both;
-        opacity:0;
-      }
-      @keyframes szl-shimmer{0%{background-position:0% center;}100%{background-position:250% center;}}
-
-      /* Tagline */
-      #szl-tagline{
-        font-family:var(--szl-font,Georgia,serif);
-        font-size:11px;font-weight:400;letter-spacing:0.25em;text-transform:uppercase;
-        color:rgba(255,255,255,0.45);user-select:none;
-        margin-top:8px;margin-bottom:34px;
-        opacity:0;animation:szl-fade-up 0.8s ease 0.35s both;
-      }
-
-      /* Progress bar */
-      .szl-progress-wrap{
-        width:200px;height:2px;background:rgba(255,255,255,0.1);
-        border-radius:99px;overflow:hidden;
-        opacity:0;animation:szl-fade-up 0.6s ease 0.5s both;
-      }
-      .szl-progress-bar{
-        height:100%;border-radius:99px;width:0%;
-        background:var(--szl-g,linear-gradient(90deg,#374151,#6b7280,#9ca3af));
-        animation:szl-progress 3s cubic-bezier(.4,0,.2,1) 0.6s forwards;
-        box-shadow:0 0 12px var(--szl-glow,rgba(107,114,128,0.5));
-      }
-      @keyframes szl-progress{0%{width:0%;}25%{width:40%;}55%{width:70%;}80%{width:86%;}100%{width:95%;}}
-
-      @keyframes szl-fade-up{
-        from{opacity:0;transform:translateY(10px);}
-        to{opacity:1;transform:translateY(0);}
-      }
-    </style>
 
     <script>
     (function(){
-      /* ── Theme + font tables (mirror ThemeContext.js exactly) ── */
       var T={
-        default:   {p:'#b5451b',pd:'#8b3214',pl:'#e8643c',a:'#f0a500',d:'#0f172a',s:'#1e293b',g:'linear-gradient(135deg,#b5451b 0%,#e8643c 50%,#f0a500 100%)',hg:'linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#b5451b 100%)',cb:'#ffffff',bb:'#fafaf8',dcb:'#1e1e1e',dbb:'#0f0f0f'},
-        coral:     {p:'#f97316',pd:'#ea580c',pl:'#fb923c',a:'#fcd34d',d:'#1c0a00',s:'#431407',g:'linear-gradient(135deg,#ea580c 0%,#f97316 50%,#fcd34d 100%)',hg:'linear-gradient(135deg,#1c0a00 0%,#431407 50%,#ea580c 100%)',cb:'#ffffff',bb:'#fff7ed',dcb:'#1a1000',dbb:'#0d0800'},
-        amber:     {p:'#b45309',pd:'#92400e',pl:'#f59e0b',a:'#fbbf24',d:'#1c0a00',s:'#451a03',g:'linear-gradient(135deg,#b45309 0%,#f59e0b 50%,#fbbf24 100%)',hg:'linear-gradient(135deg,#1c0a00 0%,#451a03 50%,#b45309 100%)',cb:'#ffffff',bb:'#fffbeb',dcb:'#1a1200',dbb:'#0d0900'},
-        rose:      {p:'#be185d',pd:'#9d174d',pl:'#f43f5e',a:'#fb7185',d:'#1f0a14',s:'#3b0a20',g:'linear-gradient(135deg,#be185d 0%,#f43f5e 50%,#fb7185 100%)',hg:'linear-gradient(135deg,#1f0a14 0%,#3b0a20 50%,#be185d 100%)',cb:'#ffffff',bb:'#fff1f2',dcb:'#1a000a',dbb:'#0d0005'},
-        lava:      {p:'#dc2626',pd:'#b91c1c',pl:'#ef4444',a:'#f97316',d:'#1c0000',s:'#450a0a',g:'linear-gradient(135deg,#b91c1c 0%,#dc2626 50%,#f97316 100%)',hg:'linear-gradient(135deg,#1c0000 0%,#450a0a 50%,#b91c1c 100%)',cb:'#ffffff',bb:'#fff5f5',dcb:'#1a0000',dbb:'#0d0000'},
-        ocean:     {p:'#0369a1',pd:'#024f7a',pl:'#0ea5e9',a:'#06b6d4',d:'#0c1a2e',s:'#0f2744',g:'linear-gradient(135deg,#0369a1 0%,#0ea5e9 50%,#06b6d4 100%)',hg:'linear-gradient(135deg,#0c1a2e 0%,#0f2744 50%,#0369a1 100%)',cb:'#ffffff',bb:'#f0f9ff',dcb:'#001220',dbb:'#000c18'},
-        sky:       {p:'#0284c7',pd:'#0369a1',pl:'#38bdf8',a:'#7dd3fc',d:'#0c2340',s:'#0f3460',g:'linear-gradient(135deg,#0369a1 0%,#0284c7 50%,#38bdf8 100%)',hg:'linear-gradient(135deg,#0c2340 0%,#0f3460 50%,#0369a1 100%)',cb:'#ffffff',bb:'#f0f9ff',dcb:'#001830',dbb:'#000d1a'},
-        slate:     {p:'#334155',pd:'#1e293b',pl:'#475569',a:'#38bdf8',d:'#0f172a',s:'#1e293b',g:'linear-gradient(135deg,#1e293b 0%,#334155 50%,#38bdf8 100%)',hg:'linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#334155 100%)',cb:'#ffffff',bb:'#f8fafc',dcb:'#111827',dbb:'#0a0f1a'},
-        arctic:    {p:'#0891b2',pd:'#0e7490',pl:'#22d3ee',a:'#a5f3fc',d:'#082f49',s:'#0c4a6e',g:'linear-gradient(135deg,#0e7490 0%,#0891b2 50%,#22d3ee 100%)',hg:'linear-gradient(135deg,#082f49 0%,#0c4a6e 50%,#0e7490 100%)',cb:'#ffffff',bb:'#ecfeff',dcb:'#001520',dbb:'#000a12'},
-        forest:    {p:'#15803d',pd:'#0f5f2e',pl:'#22c55e',a:'#84cc16',d:'#052e16',s:'#0a3d20',g:'linear-gradient(135deg,#15803d 0%,#22c55e 50%,#84cc16 100%)',hg:'linear-gradient(135deg,#052e16 0%,#0a3d20 50%,#15803d 100%)',cb:'#ffffff',bb:'#f0fdf4',dcb:'#001a0a',dbb:'#000d05'},
-        emerald:   {p:'#059669',pd:'#047857',pl:'#34d399',a:'#6ee7b7',d:'#022c22',s:'#064e3b',g:'linear-gradient(135deg,#047857 0%,#059669 50%,#34d399 100%)',hg:'linear-gradient(135deg,#022c22 0%,#064e3b 50%,#047857 100%)',cb:'#ffffff',bb:'#ecfdf5',dcb:'#00150e',dbb:'#000d08'},
-        sage:      {p:'#4d7c0f',pd:'#3f6212',pl:'#84cc16',a:'#bef264',d:'#1a2e05',s:'#365314',g:'linear-gradient(135deg,#3f6212 0%,#4d7c0f 50%,#84cc16 100%)',hg:'linear-gradient(135deg,#1a2e05 0%,#365314 50%,#3f6212 100%)',cb:'#ffffff',bb:'#f7fee7',dcb:'#0d1600',dbb:'#080d00'},
-        royal:     {p:'#7c3aed',pd:'#5b21b6',pl:'#a78bfa',a:'#f59e0b',d:'#1e1b4b',s:'#2e1065',g:'linear-gradient(135deg,#7c3aed 0%,#a78bfa 50%,#f59e0b 100%)',hg:'linear-gradient(135deg,#1e1b4b 0%,#2e1065 50%,#7c3aed 100%)',cb:'#ffffff',bb:'#faf5ff',dcb:'#0f0020',dbb:'#080010'},
-        sakura:    {p:'#db2777',pd:'#be185d',pl:'#f472b6',a:'#a78bfa',d:'#1a0a14',s:'#2d1020',g:'linear-gradient(135deg,#be185d 0%,#db2777 50%,#a78bfa 100%)',hg:'linear-gradient(135deg,#1a0a14 0%,#2d1020 50%,#db2777 100%)',cb:'#ffffff',bb:'#fdf2f8',dcb:'#150010',dbb:'#0d000a'},
-        plum:      {p:'#6d28d9',pd:'#4c1d95',pl:'#8b5cf6',a:'#ec4899',d:'#1e0a3c',s:'#2d1b69',g:'linear-gradient(135deg,#4c1d95 0%,#6d28d9 50%,#ec4899 100%)',hg:'linear-gradient(135deg,#1e0a3c 0%,#2d1b69 50%,#4c1d95 100%)',cb:'#ffffff',bb:'#f5f3ff',dcb:'#10002e',dbb:'#08001a'},
-        midnight:  {p:'#6366f1',pd:'#4338ca',pl:'#818cf8',a:'#38bdf8',d:'#0a0a0f',s:'#111120',g:'linear-gradient(135deg,#4338ca 0%,#6366f1 50%,#38bdf8 100%)',hg:'linear-gradient(135deg,#0a0a0f 0%,#111120 50%,#4338ca 100%)',cb:'#1a1a2e',bb:'#0d0d1a',dcb:'#0d0d1a',dbb:'#050508'},
-        neon:      {p:'#a855f7',pd:'#7c3aed',pl:'#c084fc',a:'#22d3ee',d:'#050010',s:'#0d001a',g:'linear-gradient(135deg,#7c3aed 0%,#a855f7 50%,#22d3ee 100%)',hg:'linear-gradient(135deg,#050010 0%,#0d001a 50%,#7c3aed 100%)',cb:'#0d001a',bb:'#080010',dcb:'#0a0015',dbb:'#05000d'},
-        matrix:    {p:'#16a34a',pd:'#15803d',pl:'#4ade80',a:'#a3e635',d:'#000d00',s:'#001a00',g:'linear-gradient(135deg,#15803d 0%,#16a34a 50%,#4ade80 100%)',hg:'linear-gradient(135deg,#000d00 0%,#001a00 50%,#15803d 100%)',cb:'#001200',bb:'#000a00',dcb:'#001000',dbb:'#000800'},
-        obsidian:  {p:'#475569',pd:'#1e293b',pl:'#64748b',a:'#f59e0b',d:'#020617',s:'#0f172a',g:'linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#475569 100%)',hg:'linear-gradient(135deg,#020617 0%,#0f172a 50%,#1e293b 100%)',cb:'#1e293b',bb:'#0f172a',dcb:'#111827',dbb:'#030712'},
-        snow:      {p:'#18181b',pd:'#09090b',pl:'#3f3f46',a:'#f59e0b',d:'#09090b',s:'#18181b',g:'linear-gradient(135deg,#18181b 0%,#3f3f46 50%,#71717a 100%)',hg:'linear-gradient(135deg,#09090b 0%,#18181b 50%,#27272a 100%)',cb:'#ffffff',bb:'#fafafa',dcb:'#1c1c1e',dbb:'#000000'},
-        lavender:  {p:'#7c3aed',pd:'#6d28d9',pl:'#8b5cf6',a:'#c084fc',d:'#1e1b4b',s:'#312e81',g:'linear-gradient(135deg,#6d28d9 0%,#7c3aed 50%,#c084fc 100%)',hg:'linear-gradient(135deg,#1e1b4b 0%,#312e81 50%,#6d28d9 100%)',cb:'#ffffff',bb:'#f5f3ff',dcb:'#0f0020',dbb:'#080010'},
+        default:{p:'#b5451b',pd:'#8b3214',pl:'#e8643c',a:'#f0a500',d:'#0f172a',s:'#1e293b',g:'linear-gradient(135deg,#b5451b 0%,#e8643c 50%,#f0a500 100%)',hg:'linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#b5451b 100%)',cb:'#ffffff',bb:'#fafaf8',dcb:'#1e1e1e',dbb:'#0f0f0f'},
+        coral:{p:'#f97316',pd:'#ea580c',pl:'#fb923c',a:'#fcd34d',d:'#1c0a00',s:'#431407',g:'linear-gradient(135deg,#ea580c 0%,#f97316 50%,#fcd34d 100%)',hg:'linear-gradient(135deg,#1c0a00 0%,#431407 50%,#ea580c 100%)',cb:'#ffffff',bb:'#fff7ed',dcb:'#1a1000',dbb:'#0d0800'},
+        amber:{p:'#b45309',pd:'#92400e',pl:'#f59e0b',a:'#fbbf24',d:'#1c0a00',s:'#451a03',g:'linear-gradient(135deg,#b45309 0%,#f59e0b 50%,#fbbf24 100%)',hg:'linear-gradient(135deg,#1c0a00 0%,#451a03 50%,#b45309 100%)',cb:'#ffffff',bb:'#fffbeb',dcb:'#1a1200',dbb:'#0d0900'},
+        rose:{p:'#be185d',pd:'#9d174d',pl:'#f43f5e',a:'#fb7185',d:'#1f0a14',s:'#3b0a20',g:'linear-gradient(135deg,#be185d 0%,#f43f5e 50%,#fb7185 100%)',hg:'linear-gradient(135deg,#1f0a14 0%,#3b0a20 50%,#be185d 100%)',cb:'#ffffff',bb:'#fff1f2',dcb:'#1a000a',dbb:'#0d0005'},
+        lava:{p:'#dc2626',pd:'#b91c1c',pl:'#ef4444',a:'#f97316',d:'#1c0000',s:'#450a0a',g:'linear-gradient(135deg,#b91c1c 0%,#dc2626 50%,#f97316 100%)',hg:'linear-gradient(135deg,#1c0000 0%,#450a0a 50%,#b91c1c 100%)',cb:'#ffffff',bb:'#fff5f5',dcb:'#1a0000',dbb:'#0d0000'},
+        ocean:{p:'#0369a1',pd:'#024f7a',pl:'#0ea5e9',a:'#06b6d4',d:'#0c1a2e',s:'#0f2744',g:'linear-gradient(135deg,#0369a1 0%,#0ea5e9 50%,#06b6d4 100%)',hg:'linear-gradient(135deg,#0c1a2e 0%,#0f2744 50%,#0369a1 100%)',cb:'#ffffff',bb:'#f0f9ff',dcb:'#001220',dbb:'#000c18'},
+        sky:{p:'#0284c7',pd:'#0369a1',pl:'#38bdf8',a:'#7dd3fc',d:'#0c2340',s:'#0f3460',g:'linear-gradient(135deg,#0369a1 0%,#0284c7 50%,#38bdf8 100%)',hg:'linear-gradient(135deg,#0c2340 0%,#0f3460 50%,#0369a1 100%)',cb:'#ffffff',bb:'#f0f9ff',dcb:'#001830',dbb:'#000d1a'},
+        slate:{p:'#334155',pd:'#1e293b',pl:'#475569',a:'#38bdf8',d:'#0f172a',s:'#1e293b',g:'linear-gradient(135deg,#1e293b 0%,#334155 50%,#38bdf8 100%)',hg:'linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#334155 100%)',cb:'#ffffff',bb:'#f8fafc',dcb:'#111827',dbb:'#0a0f1a'},
+        arctic:{p:'#0891b2',pd:'#0e7490',pl:'#22d3ee',a:'#a5f3fc',d:'#082f49',s:'#0c4a6e',g:'linear-gradient(135deg,#0e7490 0%,#0891b2 50%,#22d3ee 100%)',hg:'linear-gradient(135deg,#082f49 0%,#0c4a6e 50%,#0e7490 100%)',cb:'#ffffff',bb:'#ecfeff',dcb:'#001520',dbb:'#000a12'},
+        forest:{p:'#15803d',pd:'#0f5f2e',pl:'#22c55e',a:'#84cc16',d:'#052e16',s:'#0a3d20',g:'linear-gradient(135deg,#15803d 0%,#22c55e 50%,#84cc16 100%)',hg:'linear-gradient(135deg,#052e16 0%,#0a3d20 50%,#15803d 100%)',cb:'#ffffff',bb:'#f0fdf4',dcb:'#001a0a',dbb:'#000d05'},
+        emerald:{p:'#059669',pd:'#047857',pl:'#34d399',a:'#6ee7b7',d:'#022c22',s:'#064e3b',g:'linear-gradient(135deg,#047857 0%,#059669 50%,#34d399 100%)',hg:'linear-gradient(135deg,#022c22 0%,#064e3b 50%,#047857 100%)',cb:'#ffffff',bb:'#ecfdf5',dcb:'#00150e',dbb:'#000d08'},
+        sage:{p:'#4d7c0f',pd:'#3f6212',pl:'#84cc16',a:'#bef264',d:'#1a2e05',s:'#365314',g:'linear-gradient(135deg,#3f6212 0%,#4d7c0f 50%,#84cc16 100%)',hg:'linear-gradient(135deg,#1a2e05 0%,#365314 50%,#3f6212 100%)',cb:'#ffffff',bb:'#f7fee7',dcb:'#0d1600',dbb:'#080d00'},
+        royal:{p:'#7c3aed',pd:'#5b21b6',pl:'#a78bfa',a:'#f59e0b',d:'#1e1b4b',s:'#2e1065',g:'linear-gradient(135deg,#7c3aed 0%,#a78bfa 50%,#f59e0b 100%)',hg:'linear-gradient(135deg,#1e1b4b 0%,#2e1065 50%,#7c3aed 100%)',cb:'#ffffff',bb:'#faf5ff',dcb:'#0f0020',dbb:'#080010'},
+        sakura:{p:'#db2777',pd:'#be185d',pl:'#f472b6',a:'#a78bfa',d:'#1a0a14',s:'#2d1020',g:'linear-gradient(135deg,#be185d 0%,#db2777 50%,#a78bfa 100%)',hg:'linear-gradient(135deg,#1a0a14 0%,#2d1020 50%,#db2777 100%)',cb:'#ffffff',bb:'#fdf2f8',dcb:'#150010',dbb:'#0d000a'},
+        plum:{p:'#6d28d9',pd:'#4c1d95',pl:'#8b5cf6',a:'#ec4899',d:'#1e0a3c',s:'#2d1b69',g:'linear-gradient(135deg,#4c1d95 0%,#6d28d9 50%,#ec4899 100%)',hg:'linear-gradient(135deg,#1e0a3c 0%,#2d1b69 50%,#4c1d95 100%)',cb:'#ffffff',bb:'#f5f3ff',dcb:'#10002e',dbb:'#08001a'},
+        midnight:{p:'#6366f1',pd:'#4338ca',pl:'#818cf8',a:'#38bdf8',d:'#0a0a0f',s:'#111120',g:'linear-gradient(135deg,#4338ca 0%,#6366f1 50%,#38bdf8 100%)',hg:'linear-gradient(135deg,#0a0a0f 0%,#111120 50%,#4338ca 100%)',cb:'#1a1a2e',bb:'#0d0d1a',dcb:'#0d0d1a',dbb:'#050508'},
+        neon:{p:'#a855f7',pd:'#7c3aed',pl:'#c084fc',a:'#22d3ee',d:'#050010',s:'#0d001a',g:'linear-gradient(135deg,#7c3aed 0%,#a855f7 50%,#22d3ee 100%)',hg:'linear-gradient(135deg,#050010 0%,#0d001a 50%,#7c3aed 100%)',cb:'#0d001a',bb:'#080010',dcb:'#0a0015',dbb:'#05000d'},
+        matrix:{p:'#16a34a',pd:'#15803d',pl:'#4ade80',a:'#a3e635',d:'#000d00',s:'#001a00',g:'linear-gradient(135deg,#15803d 0%,#16a34a 50%,#4ade80 100%)',hg:'linear-gradient(135deg,#000d00 0%,#001a00 50%,#15803d 100%)',cb:'#001200',bb:'#000a00',dcb:'#001000',dbb:'#000800'},
+        obsidian:{p:'#475569',pd:'#1e293b',pl:'#64748b',a:'#f59e0b',d:'#020617',s:'#0f172a',g:'linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#475569 100%)',hg:'linear-gradient(135deg,#020617 0%,#0f172a 50%,#1e293b 100%)',cb:'#1e293b',bb:'#0f172a',dcb:'#111827',dbb:'#030712'},
+        snow:{p:'#18181b',pd:'#09090b',pl:'#3f3f46',a:'#f59e0b',d:'#09090b',s:'#18181b',g:'linear-gradient(135deg,#18181b 0%,#3f3f46 50%,#71717a 100%)',hg:'linear-gradient(135deg,#09090b 0%,#18181b 50%,#27272a 100%)',cb:'#ffffff',bb:'#fafafa',dcb:'#1c1c1e',dbb:'#000000'},
+        lavender:{p:'#7c3aed',pd:'#6d28d9',pl:'#8b5cf6',a:'#c084fc',d:'#1e1b4b',s:'#312e81',g:'linear-gradient(135deg,#6d28d9 0%,#7c3aed 50%,#c084fc 100%)',hg:'linear-gradient(135deg,#1e1b4b 0%,#312e81 50%,#6d28d9 100%)',cb:'#ffffff',bb:'#f5f3ff',dcb:'#0f0020',dbb:'#080010'},
         monochrome:{p:'#374151',pd:'#111827',pl:'#6b7280',a:'#9ca3af',d:'#030712',s:'#111827',g:'linear-gradient(135deg,#111827 0%,#374151 50%,#6b7280 100%)',hg:'linear-gradient(135deg,#030712 0%,#111827 50%,#1f2937 100%)',cb:'#ffffff',bb:'#f9fafb',dcb:'#1f2937',dbb:'#111827'}
       };
       var F={
-        default:  {fd:"'Playfair Display',serif",  fb:"'DM Sans',sans-serif",      u:'https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700;900&family=DM+Sans:wght@300;400;500;600;700&display=swap'},
-        modern:   {fd:"'Poppins',sans-serif",       fb:"'Inter',sans-serif",         u:'https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&family=Inter:wght@300;400;500;600&display=swap'},
-        elegant:  {fd:"'Cormorant Garamond',serif", fb:"'Raleway',sans-serif",       u:'https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=Raleway:wght@300;400;500;600;700&display=swap'},
-        bold:     {fd:"'Syne',sans-serif",          fb:"'Work Sans',sans-serif",     u:'https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Work+Sans:wght@300;400;500;600&display=swap'},
-        luxury:   {fd:"'Bodoni Moda',serif",        fb:"'Jost',sans-serif",          u:'https://fonts.googleapis.com/css2?family=Bodoni+Moda:wght@400;600;700&family=Jost:wght@300;400;500;600&display=swap'},
-        tech:     {fd:"'Space Grotesk',sans-serif", fb:"'IBM Plex Sans',sans-serif", u:'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap'},
-        minimal:  {fd:"'Outfit',sans-serif",        fb:"'Nunito',sans-serif",        u:'https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Nunito:wght@300;400;500;600&display=swap'},
-        classic:  {fd:"'Libre Baskerville',serif",  fb:"'Source Sans 3',sans-serif", u:'https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@400;700&family=Source+Sans+3:wght@300;400;500;600&display=swap'},
-        geometric:{fd:"'Josefin Sans',sans-serif",  fb:"'Lato',sans-serif",          u:'https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@300;400;600;700&family=Lato:wght@300;400;700&display=swap'},
-        humanist: {fd:"'Nunito Sans',sans-serif",   fb:"'Mulish',sans-serif",        u:'https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@300;400;600;700;800&family=Mulish:wght@300;400;500;600&display=swap'}
+        default:{fd:"'Playfair Display',serif",fb:"'DM Sans',sans-serif",u:'https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700;900&family=DM+Sans:wght@300;400;500;600;700&display=swap'},
+        modern:{fd:"'Poppins',sans-serif",fb:"'Inter',sans-serif",u:'https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&family=Inter:wght@300;400;500;600&display=swap'},
+        elegant:{fd:"'Cormorant Garamond',serif",fb:"'Raleway',sans-serif",u:'https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=Raleway:wght@300;400;500;600;700&display=swap'},
+        bold:{fd:"'Syne',sans-serif",fb:"'Work Sans',sans-serif",u:'https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Work+Sans:wght@300;400;500;600&display=swap'},
+        luxury:{fd:"'Bodoni Moda',serif",fb:"'Jost',sans-serif",u:'https://fonts.googleapis.com/css2?family=Bodoni+Moda:wght@400;600;700&family=Jost:wght@300;400;500;600&display=swap'},
+        tech:{fd:"'Space Grotesk',sans-serif",fb:"'IBM Plex Sans',sans-serif",u:'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap'},
+        minimal:{fd:"'Outfit',sans-serif",fb:"'Nunito',sans-serif",u:'https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Nunito:wght@300;400;500;600&display=swap'},
+        classic:{fd:"'Libre Baskerville',serif",fb:"'Source Sans 3',sans-serif",u:'https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@400;700&family=Source+Sans+3:wght@300;400;500;600&display=swap'},
+        geometric:{fd:"'Josefin Sans',sans-serif",fb:"'Lato',sans-serif",u:'https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@300;400;600;700&family=Lato:wght@300;400;700&display=swap'},
+        humanist:{fd:"'Nunito Sans',sans-serif",fb:"'Mulish',sans-serif",u:'https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@300;400;600;700;800&family=Mulish:wght@300;400;500;600&display=swap'}
       };
 
+      // Apply theme CSS variables so the page renders with correct colors from the first paint,
+      // preventing a flash of default/wrong styles before React loads.
       function applySettings(s){
-        var tk=(s&&s.theme)||'default';
-        var t=T[tk]||T.default;
+        var tk=(s&&s.theme)||'default', t=T[tk]||T.default;
         var isDark=!!(s&&s.darkMode);
         var pr=(s&&s.primaryColor)||t.p, pd=(s&&s.primaryDarkColor)||t.pd,
             pl=(s&&s.primaryLightColor)||t.pl, ac=(s&&s.secondaryColor)||t.a,
@@ -230,80 +116,14 @@
         }
         var mt=document.getElementById('meta-theme-color');
         if(mt)mt.content=pr;
-
-        /* ── Apply theme colours to splash ── */
-        var splash=document.getElementById('szl-splash');
-        if(splash){
-          splash.style.setProperty('--szl-p',pr);
-          splash.style.setProperty('--szl-a',ac);
-          splash.style.setProperty('--szl-g',t.g);
-          splash.style.setProperty('--szl-glow',pr+'88');
-          splash.style.setProperty('--szl-bg',t.d);
-          splash.style.background=t.d;
-
-          /* Update shimmer on wordmark */
-          var wm=document.getElementById('szl-wordmark');
-          if(wm){
-            if(s&&s.storeName) wm.textContent=s.storeName;
-            wm.style.backgroundImage='linear-gradient(90deg,#ffffff 0%,'+ac+' 40%,'+pr+' 60%,#ffffff 90%)';
-            wm.style.visibility='visible';
-            wm.style.fontFamily=f.fd;
-          }
-
-          /* Tagline from settings */
-          var tg=document.getElementById('szl-tagline');
-          if(tg){
-            if(s&&s.storeTagline) tg.textContent=s.storeTagline;
-            tg.style.visibility='visible';
-            tg.style.fontFamily=f.fd;
-          }
-
-          /* Show logo if set, otherwise colour the icon */
-          var li=document.getElementById('szl-logo-img');
-          var iw=document.getElementById('szl-icon-wrap');
-          if(li&&iw&&s&&s.logoUrl){
-            li.src=s.logoUrl;li.style.display='block';
-            iw.style.display='none';
-          } else if(iw){
-            iw.style.background=t.g;
-          }
-
-          /* Colour the progress bar */
-          var pb=splash.querySelector('.szl-progress-bar');
-          if(pb) pb.style.background=t.g;
-        }
       }
 
-      // ── Splash: show neutral UI immediately, then apply real theme from cache/API ──
-
-      // Show neutral splash content straight away (no hardcoded brand colors)
-      function showNeutralSplash(){
-        var splash=document.getElementById('szl-splash');
-        if(!splash)return;
-        // Neutral dark background
-        splash.style.background='#0a0a0a';
-        // Neutral orb & icon colors already set via CSS defaults (gray fallbacks)
-        // Show wordmark with neutral shimmer
-        var wm=document.getElementById('szl-wordmark');
-        if(wm){
-          wm.style.backgroundImage='linear-gradient(90deg,#ffffff 0%,#d1d5db 40%,#9ca3af 60%,#ffffff 90%)';
-          wm.style.visibility='visible';
-        }
-        var tg=document.getElementById('szl-tagline');
-        if(tg){tg.style.visibility='visible';}
-        var iw=document.getElementById('szl-icon-wrap');
-        if(iw){iw.style.background='linear-gradient(135deg,#1f2937,#374151,#6b7280)';}
-        var pb=splash.querySelector('.szl-progress-bar');
-        if(pb){pb.style.background='linear-gradient(90deg,#374151,#6b7280,#9ca3af)';}
-      }
-      showNeutralSplash();
-
-      // Apply from localStorage immediately (returning visitors get correct theme instantly)
+      // 1. Apply from localStorage cache immediately (returning visitors get correct theme on first paint)
       var cached=null;
       try{var raw=localStorage.getItem('shopzen_theme_v2');if(raw)cached=JSON.parse(raw);}catch(e){}
       if(cached) applySettings(cached);
 
-      // Pre-fetch theme from API (always — to get latest store name/theme)
+      // 2. Pre-fetch latest theme from API so ThemeContext gets it without an extra round-trip
       window.__szApiFetched=false;
       fetch('/api/settings')
         .then(function(r){return r.ok?r.json():null;})
@@ -315,23 +135,8 @@
           }
         })
         .catch(function(){
-          // API unreachable — if we have cached theme use it, otherwise neutral is already shown
           if(cached) applySettings(cached);
         });
-
-      // Splash hide — called by ThemeContext after loadAndApply succeeds
-      window.__szReactMounted=false;
-      window.__szTryHide=function(){
-        if(window.__szReactMounted){
-          var el=document.getElementById('szl-splash');
-          if(el)el.classList.add('szl-hide');
-        }
-      };
-      // Safety net: hide after 4s no matter what (covers API-down scenario)
-      setTimeout(function(){
-        var el=document.getElementById('szl-splash');
-        if(el)el.classList.add('szl-hide');
-      },4000);
     })();
     </script>
       <meta name="google-site-verification" content="JBwfXhDxBe4cSEra_DYfuPe1BtNCXxW0yMBPCo8VSwI"/>
@@ -345,59 +150,9 @@
       window.scrollTo(0,0);
     </script>
 
-    <!-- Animated splash screen -->
-    <div id="szl-splash">
-      <div class="szl-bg">
-        <div class="szl-orb szl-orb-1"></div>
-        <div class="szl-orb szl-orb-2"></div>
-        <div class="szl-orb szl-orb-3"></div>
-        <div class="szl-orb szl-orb-4"></div>
-      </div>
-      <div class="szl-stars" id="szl-stars"></div>
-      <div class="szl-content">
-        <img id="szl-logo-img" alt="logo" style="display:none"/>
-        <div class="szl-icon-wrap" id="szl-icon-wrap">
-          <svg viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
-        </div>
-        <div id="szl-wordmark" style="visibility:hidden">ShopZen</div>
-        <div id="szl-tagline" style="visibility:hidden">Premium Shopping Starts Here</div>
-        <div class="szl-progress-wrap">
-          <div class="szl-progress-bar"></div>
-        </div>
-      </div>
-    </div>
-
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
 
-    <script>
-      // Generate twinkling stars
-      (function(){
-        var s=document.getElementById('szl-stars');
-        if(!s)return;
-        for(var i=0;i<55;i++){
-          var d=document.createElement('div');
-          d.className='szl-star';
-          var sz=Math.random()*2+1;
-          d.style.cssText='width:'+sz+'px;height:'+sz+'px;top:'+Math.random()*100+'%;left:'+Math.random()*100+'%;animation-duration:'+(Math.random()*3+2)+'s;animation-delay:'+(Math.random()*5)+'s;';
-          s.appendChild(d);
-        }
-      })();
 
-      // Detect React mount
-      (function(){
-        var root=document.getElementById('root');
-        if(!root)return;
-        var obs=new MutationObserver(function(){
-          if(root.children.length>0){
-            obs.disconnect();
-            window.__szReactMounted=true;
-            // Wait for ThemeContext.loadAndApply to call __szTryHide
-            // so correct theme is applied before splash disappears
-          }
-        });
-        obs.observe(root,{childList:true});
-      })();
-    </script>
   </body>
 </html>
