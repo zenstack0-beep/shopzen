@@ -961,27 +961,7 @@ export default function Home() {
       {/* Render sections in admin-defined order */}
       {orderedIds.filter(id=>id!=='hero').map(id => SECTIONS[id] || null)}
 
-          {/* Payment badges always at bottom */}
-          {settingsReady && (settings?.bankTransferEnabled!==false||settings?.codEnabled!==false) && (
-            <section className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-6">
-              <div className="flex flex-wrap gap-3 items-center">
-                {settings?.bankTransferEnabled!==false && (
-                  <div className="flex items-center gap-2 rounded-2xl px-4 py-2.5 border hover:-translate-y-0.5 transition-transform"
-                    style={{ background:'var(--card-bg)', borderColor:'var(--card-border)' }}>
-                    <span>🏦</span>
-                    <div><p className="text-xs font-bold" style={{ color:'var(--color-dark)' }}>Bank Transfer</p>{settings?.bankName&&<p className="text-[11px] text-gray-400">{settings.bankName}</p>}</div>
-                  </div>
-                )}
-                {settings?.codEnabled!==false && (
-                  <div className="flex items-center gap-2 rounded-2xl px-4 py-2.5 border hover:-translate-y-0.5 transition-transform"
-                    style={{ background:'var(--card-bg)', borderColor:'var(--card-border)' }}>
-                    <span>💵</span>
-                    <p className="text-xs font-bold" style={{ color:'var(--color-dark)' }}>Cash on Delivery</p>
-                  </div>
-                )}
-              </div>
-            </section>
-          )}
+    
       <div className="h-6"/>
     </div>
   );
