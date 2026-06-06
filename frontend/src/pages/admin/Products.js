@@ -462,9 +462,14 @@ export default function AdminProducts() {
   };
 
   const deleteProduct = async (id) => {
-    if (!window.confirm('Delete this product?')) return;
-    await API.delete(`/products/${id}`);
-    fetchProducts(); toast.success('Deleted');
+    if (!window.confirm('Are you sure you want to permanently delete this product? This cannot be undone.')) return;
+    try {
+      await API.delete(`/products/${id}`);
+      toast.success('Product deleted');
+      fetchProducts();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to delete product');
+    }
   };
 
   /* ── Variant helpers — all use updateForm ── */

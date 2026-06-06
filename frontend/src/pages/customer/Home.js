@@ -733,20 +733,7 @@ export default function Home() {
     featured: featured.length>0 && (
       <section key="featured" className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
         <SectionHeading title={S('sectionFeaturedTitle','Featured Products')} subtitle={S('sectionFeaturedSubtitle','Hand-picked by our team')} link="/shop?featured=true"/>
-        {loading ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-            {[...Array(8)].map((_,i)=>(
-              <div key={i} className="skeleton-card" style={{borderRadius:20}}>
-                <div className="skeleton-premium" style={{aspectRatio:'1',borderRadius:'18px 18px 0 0'}}/>
-                <div className="p-4 space-y-2">
-                  <div className="skeleton-premium skeleton-title"/>
-                  <div className="skeleton-premium skeleton-price"/>
-                  <div className="skeleton-premium" style={{height:38,borderRadius:12,marginTop:4}}/>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : <AnimatedGrid products={featured} settings={settings}/>}
+        <AnimatedGrid products={featured} settings={settings}/>
       </section>
     ),
     promo: promoBanners.length>0 && (
@@ -799,18 +786,44 @@ export default function Home() {
     brands: null,
   };
 
+  if (loading) {
+    return (
+      <div
+        className="fixed inset-0 z-50 flex flex-col items-center justify-center"
+        style={{ background: 'var(--body-bg, #ffffff)' }}
+      >
+        {/* Logo / store name */}
+        <div className="mb-8 text-center">
+          {settings?.logoUrl ? (
+            <img src={settings.logoUrl} alt="logo" className="h-14 mx-auto mb-3 object-contain"/>
+          ) : (
+            <h1 className="font-display text-3xl font-black" style={{ color: 'var(--color-primary)' }}>
+              {settings?.storeName || 'ShopZen'}
+            </h1>
+          )}
+        </div>
+        {/* Animated spinner ring */}
+        <div className="relative w-14 h-14">
+          <svg className="w-14 h-14 animate-spin" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="28" cy="28" r="24" stroke="var(--color-primary)" strokeOpacity="0.15" strokeWidth="4"/>
+            <path d="M52 28 A24 24 0 0 1 28 52" stroke="var(--color-primary)" strokeWidth="4" strokeLinecap="round"/>
+          </svg>
+        </div>
+        <p className="mt-5 text-sm font-medium" style={{ color: 'var(--color-primary)', opacity: 0.7 }}>
+          Loading store…
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="mesh-bg" style={{ background:'var(--body-bg)' }}>
       {/* Always show trust bar after hero */}
       {isOn('hero') && SECTIONS.hero}
       <TrustBar settings={settings}/>
 
-      {/* Only render below-fold sections once hero/product data has loaded.
-          This prevents newsletter from appearing before hero, causing a jump. */}
-      {!loading && (
-        <>
-          {/* Render sections in admin-defined order */}
-          {orderedIds.filter(id=>id!=='hero').map(id => SECTIONS[id] || null)}
+      {/* Render sections in admin-defined order */}
+      {orderedIds.filter(id=>id!=='hero').map(id => SECTIONS[id] || null)}
 
           {/* Payment badges always at bottom */}
           {settingsReady && (settings?.bankTransferEnabled!==false||settings?.codEnabled!==false) && (
@@ -833,8 +846,6 @@ export default function Home() {
               </div>
             </section>
           )}
-        </>
-      )}
       <div className="h-6"/>
     </div>
   );

@@ -118,10 +118,11 @@ router.post('/:id/publish', adminAuth, async (req, res) => {
   }
 });
 
-// Admin — soft delete
+// Admin — hard delete
 router.delete('/:id', adminAuth, async (req, res) => {
   try {
-    await Product.findByIdAndUpdate(req.params.id, { isActive: false });
+    const deleted = await Product.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ message: 'Product not found' });
     res.json({ message: 'Product deleted' });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
