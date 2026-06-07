@@ -366,7 +366,7 @@ export default function ProductDetail() {
             {isOnSale && (
               <>
                 <span className="price-original">{sym} {product.price?.toLocaleString()}</span>
-                <span className="price-badge">{discount}%</span>
+                <span className="price-badge">-{discount}%</span>
               </>
             )}
           </div>
