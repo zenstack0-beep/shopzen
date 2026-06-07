@@ -662,8 +662,11 @@ export default function Home() {
   const [categories,  setCategories]  = useState([]);
   const [heroBanners, setHeroBanners] = useState([]);
   const [promoBanners,setPromoBanners]= useState([]);
-  // Show loading screen on every visit until all DB data has loaded.
-  const [loading, setLoading] = useState(true);
+  // dbReady: true once all 6 API calls resolve (or fail)
+  // settingsLoaded: true once ThemeContext has fetched real settings from API
+  const [dbReady, setDbReady] = useState(false);
+  // Loading is true until BOTH db data AND live settings are available
+  const loading = !dbReady || !settings;
   const [sectionOrder, setSectionOrder] = useState(null);
   // settingsReady: true once we have settings from cache or API.
   // Prevents newsletter / payment sections from flashing on first render.
@@ -693,7 +696,7 @@ export default function Home() {
       setCategories(cats.data||[]);
       setHeroBanners(hero.data||[]);
       setPromoBanners(promo.data||[]);
-    }).catch(()=>{}).finally(()=>setLoading(false));
+    }).catch(()=>{}).finally(()=>setDbReady(true));
   },[]);
 
   // Kill stale ScrollTriggers from previous page so GSAP recalculates from top
@@ -799,94 +802,132 @@ export default function Home() {
     brands: null,
   };
 
-  // Premium welcome loading screen — shown every visit until all DB data is ready.
+  // Loading screen: shown every visit until DB data + live settings are both ready.
+  // Uses HARDCODED neutral colors — never depends on CSS vars or theme settings
+  // so it looks identical and premium on every device, first visit or returning.
   if (loading) {
     const storeName    = settings?.storeName    || 'ShopZen';
-    const storeTagline = settings?.storeTagline || 'Premium products, delivered fast';
+    const storeTagline = settings?.storeTagline || 'Delivering the finest products';
     const logoUrl      = settings?.logoUrl;
 
+    // Phase 1 (no settings yet): clean white with neutral gray accents
+    // Phase 2 (settings loaded):  smoothly transitions to real DB theme colors
+    // All color properties use CSS transition so the shift is imperceptible
+    const hasTheme = !!settings;
+    const BG       = hasTheme ? (settings.darkMode ? (settings.darkBgColor || '#0f172a') : '#ffffff') : '#ffffff';
+    const PRIMARY  = hasTheme ? (settings.primaryColor || 'var(--color-primary)') : '#d1d5db';
+    const ACCENT   = hasTheme ? (settings.secondaryColor || settings.primaryLightColor || PRIMARY) : '#e5e7eb';
+    const TEXT_COL = hasTheme ? (settings.darkMode ? '#f8fafc' : '#111827') : '#111827';
+    const SUBTEXT  = hasTheme ? (settings.darkMode ? 'rgba(248,250,252,0.5)' : 'rgba(17,24,39,0.45)') : 'rgba(17,24,39,0.38)';
+    const TRACK    = hasTheme ? (settings.darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)') : 'rgba(0,0,0,0.07)';
+    const ICON_FG  = hasTheme && settings.darkMode ? '#fff' : '#fff';
+    const LOGO_FILTER = hasTheme
+      ? (settings.darkMode ? 'brightness(0) invert(1)' : 'none')
+      : 'none';
+
     return (
-      <div
-        className="fixed inset-0 z-50 flex flex-col items-center justify-center overflow-hidden"
-        style={{ background: 'var(--color-dark, #0f172a)' }}
-      >
+      <div style={{
+        position:'fixed', inset:0, zIndex:9999,
+        background: BG,
+        display:'flex', flexDirection:'column',
+        alignItems:'center', justifyContent:'center',
+        overflow:'hidden',
+        transition:'background 0.9s cubic-bezier(.4,0,.2,1)',
+      }}>
         <style>{`
-          @keyframes sz-fade-up {
-            from { opacity: 0; transform: translateY(20px); }
-            to   { opacity: 1; transform: translateY(0); }
+          @keyframes szl-fade-up {
+            from { opacity:0; transform:translateY(20px); }
+            to   { opacity:1; transform:translateY(0); }
           }
-          @keyframes sz-shimmer {
-            0%   { background-position: -200% center; }
-            100% { background-position: 200% center; }
+          @keyframes szl-shimmer {
+            0%   { background-position:-200% center; }
+            100% { background-position:200% center; }
           }
-          @keyframes sz-pulse-ring {
-            0%, 100% { transform: scale(1);   opacity: 0.15; }
-            50%       { transform: scale(1.18); opacity: 0.28; }
+          @keyframes szl-spin {
+            to { transform:rotate(360deg); }
           }
-          @keyframes sz-spin {
-            to { transform: rotate(360deg); }
+          @keyframes szl-pulse {
+            0%,100% { transform:scale(1);    opacity:0.18; }
+            50%      { transform:scale(1.14); opacity:0.32; }
           }
-          @keyframes sz-orb-1 {
-            0%,100% { transform: translate(0,0) scale(1); }
-            33%     { transform: translate(40px,-30px) scale(1.1); }
-            66%     { transform: translate(-25px,20px) scale(0.9); }
+          @keyframes szl-orb1 {
+            0%,100% { transform:translate(0,0)       scale(1); }
+            40%     { transform:translate(50px,-40px) scale(1.08); }
+            70%     { transform:translate(-30px,25px) scale(0.93); }
           }
-          @keyframes sz-orb-2 {
-            0%,100% { transform: translate(0,0) scale(1); }
-            33%     { transform: translate(-35px,25px) scale(0.88); }
-            66%     { transform: translate(30px,-20px) scale(1.08); }
+          @keyframes szl-orb2 {
+            0%,100% { transform:translate(0,0)        scale(1); }
+            35%     { transform:translate(-45px,30px)  scale(0.9); }
+            70%     { transform:translate(35px,-25px)  scale(1.06); }
           }
-          .sz-orb-1 { animation: sz-orb-1 14s ease-in-out infinite; }
-          .sz-orb-2 { animation: sz-orb-2 18s ease-in-out infinite; }
+          @keyframes szl-bar {
+            0%   { width:0%; }
+            18%  { width:30%; }
+            45%  { width:58%; }
+            75%  { width:82%; }
+            100% { width:97%; }
+          }
+          /* Smooth color transitions on all themed elements */
+          .szl-orb { transition: background 0.9s cubic-bezier(.4,0,.2,1); }
+          .szl-icon-box { transition: background 0.9s cubic-bezier(.4,0,.2,1), box-shadow 0.9s ease; }
+          .szl-label { transition: color 0.7s ease; }
+          .szl-tagline { transition: color 0.7s ease; }
+          .szl-ring { transition: border-color 0.9s ease; }
+          .szl-arc { transition: stroke 0.9s ease; }
+          .szl-bar-fill { transition: background 0.9s ease; }
+          .szl-track { transition: background 0.7s ease; }
         `}</style>
 
-        {/* Background orbs */}
-        <div style={{ position:'absolute', inset:0, overflow:'hidden', pointerEvents:'none' }}>
-          <div className="sz-orb-1" style={{
-            position:'absolute', top:'-80px', left:'-80px',
-            width:'340px', height:'340px', borderRadius:'50%',
-            background:'var(--color-primary)', opacity:0.18, filter:'blur(80px)',
+        {/* Ambient orbs — transition from gray to real theme color */}
+        <div style={{position:'absolute',inset:0,overflow:'hidden',pointerEvents:'none'}}>
+          <div className="szl-orb" style={{
+            position:'absolute', top:'-100px', left:'-100px',
+            width:'440px', height:'440px', borderRadius:'50%',
+            background: PRIMARY, opacity:0.12, filter:'blur(100px)',
+            animation:'szl-orb1 18s ease-in-out infinite',
           }}/>
-          <div className="sz-orb-2" style={{
-            position:'absolute', bottom:'-60px', right:'-60px',
-            width:'280px', height:'280px', borderRadius:'50%',
-            background:'var(--color-accent)', opacity:0.14, filter:'blur(70px)',
+          <div className="szl-orb" style={{
+            position:'absolute', bottom:'-80px', right:'-80px',
+            width:'360px', height:'360px', borderRadius:'50%',
+            background: ACCENT, opacity:0.10, filter:'blur(85px)',
+            animation:'szl-orb2 22s ease-in-out infinite',
+          }}/>
+          {/* Dot grid — light on white, barely visible */}
+          <div style={{
+            position:'absolute', inset:0,
+            backgroundImage:'radial-gradient(rgba(0,0,0,0.04) 1px, transparent 1px)',
+            backgroundSize:'32px 32px',
+            transition:'opacity 0.9s ease',
+            opacity: hasTheme && settings.darkMode ? 0 : 1,
           }}/>
         </div>
 
-        {/* Subtle grid overlay */}
-        <div style={{
-          position:'absolute', inset:0, pointerEvents:'none',
-          backgroundImage:'linear-gradient(rgba(255,255,255,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.03) 1px,transparent 1px)',
-          backgroundSize:'48px 48px',
-        }}/>
+        {/* Main content */}
+        <div style={{position:'relative',zIndex:2,textAlign:'center',display:'flex',flexDirection:'column',alignItems:'center'}}>
 
-        {/* Content */}
-        <div style={{ position:'relative', zIndex:2, textAlign:'center', display:'flex', flexDirection:'column', alignItems:'center', gap:'0' }}>
-
-          {/* Logo or icon */}
-          <div style={{ animation:'sz-fade-up 0.7s cubic-bezier(.34,1.56,.64,1) 0.1s both', marginBottom:'24px' }}>
+          {/* Logo / icon */}
+          <div style={{animation:'szl-fade-up 0.65s cubic-bezier(.34,1.56,.64,1) 0.05s both', marginBottom:'28px'}}>
             {logoUrl ? (
-              <img
-                src={logoUrl}
-                alt={storeName}
-                style={{ height:'64px', maxWidth:'200px', objectFit:'contain', filter:'brightness(0) invert(1)' }}
-              />
+              <img src={logoUrl} alt={storeName} style={{
+                height:'60px', maxWidth:'200px', objectFit:'contain',
+                filter: LOGO_FILTER,
+                transition:'filter 0.8s ease',
+              }}/>
             ) : (
-              <div style={{
-                width:'68px', height:'68px', borderRadius:'20px',
-                background:'var(--theme-gradient)', display:'flex', alignItems:'center', justifyContent:'center',
-                boxShadow:'0 20px 50px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.1)',
+              <div className="szl-icon-box" style={{
+                width:'72px', height:'72px', borderRadius:'22px',
+                background: `linear-gradient(135deg,${PRIMARY},${ACCENT})`,
+                display:'flex', alignItems:'center', justifyContent:'center',
+                boxShadow:`0 20px 55px ${PRIMARY}40, 0 0 0 1px rgba(0,0,0,0.06)`,
                 position:'relative', overflow:'hidden',
               }}>
                 <div style={{
-                  position:'absolute', inset:0,
-                  background:'linear-gradient(135deg,rgba(255,255,255,0.2) 0%,transparent 60%)',
-                  borderRadius:'inherit',
+                  position:'absolute', inset:0, borderRadius:'inherit',
+                  background:'linear-gradient(135deg,rgba(255,255,255,0.22) 0%,transparent 55%)',
                 }}/>
-                <svg viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.6"
+                <svg viewBox="0 0 24 24" fill="none" stroke={ICON_FG} strokeWidth="1.6"
                   strokeLinecap="round" strokeLinejoin="round"
-                  style={{ width:'32px', height:'32px', position:'relative', zIndex:1 }}>
+                  style={{width:'34px',height:'34px',position:'relative',zIndex:1}}>
                   <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/>
                   <line x1="3" y1="6" x2="21" y2="6"/>
                   <path d="M16 10a4 4 0 01-8 0"/>
@@ -895,56 +936,67 @@ export default function Home() {
             )}
           </div>
 
-          {/* Welcome line */}
-          <p style={{
-            fontFamily:'var(--font-body)',
-            fontSize:'11px', fontWeight:600, letterSpacing:'0.3em', textTransform:'uppercase',
-            color:'rgba(255,255,255,0.4)',
-            animation:'sz-fade-up 0.6s ease 0.25s both',
+          {/* "Welcome to" */}
+          <p className="szl-label" style={{
+            fontFamily:'system-ui,sans-serif',
+            fontSize:'11px', fontWeight:700, letterSpacing:'0.32em', textTransform:'uppercase',
+            color: SUBTEXT,
+            animation:'szl-fade-up 0.5s ease 0.2s both',
             marginBottom:'10px',
-          }}>
-            Welcome to
-          </p>
+          }}>Welcome to</p>
 
-          {/* Store name — shimmer gradient */}
+          {/* Store name — shimmer using real theme colors once available */}
           <h1 style={{
-            fontFamily:'var(--font-display)',
-            fontSize:'clamp(32px,6vw,52px)', fontWeight:800, letterSpacing:'-0.03em', lineHeight:1,
-            background:'linear-gradient(90deg, #ffffff 0%, var(--color-accent) 40%, var(--color-primary-light) 60%, #ffffff 100%)',
+            fontFamily:'system-ui,sans-serif',
+            fontSize:'clamp(30px,6vw,52px)', fontWeight:800,
+            letterSpacing:'-0.03em', lineHeight:1,
+            background: hasTheme
+              ? `linear-gradient(90deg,${TEXT_COL} 0%,${ACCENT} 35%,${PRIMARY} 55%,${TEXT_COL} 100%)`
+              : `linear-gradient(90deg,#111827 0%,#9ca3af 40%,#6b7280 60%,#111827 100%)`,
             backgroundSize:'200% auto',
             WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text',
-            animation:'sz-shimmer 3s linear infinite, sz-fade-up 0.7s ease 0.35s both',
+            animation:'szl-shimmer 3.5s linear infinite, szl-fade-up 0.6s ease 0.3s both',
             margin:0,
-          }}>
-            {storeName}
-          </h1>
+            transition:'background 0.9s ease',
+          }}>{storeName}</h1>
 
           {/* Tagline */}
-          <p style={{
-            fontFamily:'var(--font-body)',
-            fontSize:'14px', fontWeight:400,
-            color:'rgba(255,255,255,0.45)',
-            marginTop:'12px', marginBottom:'40px',
-            animation:'sz-fade-up 0.7s ease 0.5s both',
-            maxWidth:'280px', lineHeight:1.5,
-          }}>
-            {storeTagline}
-          </p>
+          <p className="szl-tagline" style={{
+            fontFamily:'system-ui,sans-serif',
+            fontSize:'14px', fontWeight:400, color:SUBTEXT,
+            marginTop:'12px', marginBottom:'44px',
+            animation:'szl-fade-up 0.6s ease 0.42s both',
+            maxWidth:'260px', lineHeight:1.55,
+          }}>{storeTagline}</p>
 
-          {/* Spinner with pulse ring */}
-          <div style={{ position:'relative', width:'48px', height:'48px', animation:'sz-fade-up 0.6s ease 0.6s both' }}>
-            {/* Pulse ring */}
-            <div style={{
-              position:'absolute', inset:'-8px', borderRadius:'50%',
-              border:'1px solid var(--color-primary)',
-              animation:'sz-pulse-ring 2s ease-in-out infinite',
+          {/* Spinner + pulse ring */}
+          <div style={{position:'relative',width:'52px',height:'52px',animation:'szl-fade-up 0.55s ease 0.52s both'}}>
+            <div className="szl-ring" style={{
+              position:'absolute', inset:'-10px', borderRadius:'50%',
+              border:`1.5px solid ${PRIMARY}`,
+              animation:'szl-pulse 2.2s ease-in-out infinite',
             }}/>
-            {/* Spinner */}
-            <svg style={{ width:'48px', height:'48px', animation:'sz-spin 0.9s linear infinite' }}
-              viewBox="0 0 48 48" fill="none">
-              <circle cx="24" cy="24" r="20" stroke="rgba(255,255,255,0.08)" strokeWidth="3.5"/>
-              <path d="M44 24 A20 20 0 0 1 24 44" stroke="var(--color-primary-light)" strokeWidth="3.5" strokeLinecap="round"/>
+            <svg style={{width:'52px',height:'52px',animation:'szl-spin 0.95s linear infinite'}}
+              viewBox="0 0 52 52" fill="none">
+              <circle cx="26" cy="26" r="22"
+                stroke={hasTheme ? (settings.darkMode ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)') : 'rgba(0,0,0,0.07)'}
+                strokeWidth="4"/>
+              <path className="szl-arc" d="M48 26 A22 22 0 0 1 26 48"
+                stroke={PRIMARY} strokeWidth="4" strokeLinecap="round"/>
             </svg>
+          </div>
+
+          {/* Progress bar */}
+          <div className="szl-track" style={{
+            marginTop:'38px', width:'180px', height:'3px',
+            borderRadius:'99px', background:TRACK, overflow:'hidden',
+            animation:'szl-fade-up 0.55s ease 0.62s both',
+          }}>
+            <div className="szl-bar-fill" style={{
+              height:'100%', borderRadius:'99px',
+              background:`linear-gradient(90deg,${PRIMARY},${ACCENT})`,
+              animation:'szl-bar 4.5s cubic-bezier(.4,0,.2,1) forwards',
+            }}/>
           </div>
 
         </div>

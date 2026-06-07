@@ -262,37 +262,54 @@ const CartDrawer = ({ settings }) => {
 };
 
 /* ── Nav Link with 3D hover ─────────────────────────────────── */
+// Inject nav styles once — avoids ALL inline-style vs React re-render conflicts
+const NAV_STYLES_ID = 'sz-nav3d-styles';
+if (typeof document !== 'undefined' && !document.getElementById(NAV_STYLES_ID)) {
+  const s = document.createElement('style');
+  s.id = NAV_STYLES_ID;
+  s.textContent = `
+    .sz-nav3d {
+      position:relative; display:inline-flex; align-items:center;
+      padding:8px 16px; font-size:14px; font-weight:600; border-radius:12px;
+      text-decoration:none; transition:color .18s,background .18s,box-shadow .18s,transform .2s;
+      color:#64748b; background:transparent;
+      transform:perspective(500px) rotateX(0deg);
+      transform-style:preserve-3d; overflow:hidden;
+    }
+    .sz-nav3d:hover {
+      color:var(--color-primary) !important;
+      background:color-mix(in srgb,var(--color-primary) 10%,transparent) !important;
+      box-shadow:0 8px 20px color-mix(in srgb,var(--color-primary) 25%,transparent);
+      transform:perspective(500px) rotateX(-8deg) translateY(-2px);
+    }
+    .sz-nav3d.active {
+      color:var(--color-primary) !important;
+      background:color-mix(in srgb,var(--color-primary) 10%,transparent) !important;
+    }
+    .sz-nav3d.active:hover {
+      box-shadow:0 8px 20px color-mix(in srgb,var(--color-primary) 30%,transparent);
+    }
+    .sz-nav3d .sz-nav3d-dot {
+      position:absolute; bottom:4px; left:50%; transform:translateX(-50%);
+      width:4px; height:4px; border-radius:50%;
+      background:var(--color-primary);
+    }
+    .sz-nav3d .sz-nav3d-sheen {
+      position:absolute; inset:0; border-radius:12px; pointer-events:none;
+      background:linear-gradient(135deg,rgba(255,255,255,0.15) 0%,transparent 60%);
+      opacity:0; transition:opacity .25s;
+    }
+    .sz-nav3d:hover .sz-nav3d-sheen { opacity:1; }
+  `;
+  document.head.appendChild(s);
+}
+
 const NavLink3D = ({ to, label, isActive, emoji }) => (
-  <Link
-    to={to}
-    className="relative group px-4 py-2 text-sm font-semibold rounded-xl transition-all duration-200 overflow-hidden"
-    style={{
-      color: isActive ? 'var(--color-primary)' : '#64748b',
-      background: isActive ? 'color-mix(in srgb, var(--color-primary) 10%, transparent)' : 'transparent',
-      transform: 'perspective(500px) rotateX(0deg)',
-      transformStyle: 'preserve-3d',
-    }}
-    onMouseEnter={e => {
-      e.currentTarget.style.transform = 'perspective(500px) rotateX(-8deg) translateY(-2px)';
-      e.currentTarget.style.color = 'var(--color-primary)';
-      e.currentTarget.style.background = 'color-mix(in srgb, var(--color-primary) 10%, transparent)';
-      e.currentTarget.style.boxShadow = '0 8px 20px color-mix(in srgb, var(--color-primary) 25%, transparent)';
-    }}
-    onMouseLeave={e => {
-      e.currentTarget.style.transform = 'perspective(500px) rotateX(0deg) translateY(0)';
-      e.currentTarget.style.color = isActive ? 'var(--color-primary)' : '#64748b';
-      e.currentTarget.style.background = isActive ? 'color-mix(in srgb, var(--color-primary) 10%, transparent)' : 'transparent';
-      e.currentTarget.style.boxShadow = 'none';
-    }}
-  >
-    <span className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none"
-      style={{background:'linear-gradient(135deg,rgba(255,255,255,0.15) 0%,transparent 60%)'}}/>
-    {emoji && <span className="mr-1">{emoji}</span>}
+  <Link to={to} className={`sz-nav3d${isActive ? ' active' : ''}`}>
+    <span className="sz-nav3d-sheen"/>
+    {emoji && <span style={{marginRight:'4px'}}>{emoji}</span>}
     {label}
-    {isActive && (
-      <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full"
-        style={{background:'var(--color-primary)'}}/>
-    )}
+    {isActive && <span className="sz-nav3d-dot"/>}
   </Link>
 );
 
@@ -568,7 +585,7 @@ const Header = ({ settings, campaign }) => {
               }}
             >
               <NavLink3D to="/" label="Home" isActive={location.pathname==='/'} />
-              <NavLink3D to="/shop" label="Shop" isActive={location.pathname==='/shop'} />
+              <NavLink3D to="/shop" label="Shop" isActive={location.pathname==='/shop' || (location.pathname.startsWith('/shop/') && !categories.some(c=>location.pathname===`/shop/${c.slug}`))} />
               {categories.slice(0,4).map(cat => (
                 <NavLink3D
                   key={cat._id}
@@ -758,7 +775,7 @@ const MobileBottomNav = ({ settings }) => {
   const primary = 'var(--color-primary)';
 
   const tabs = [
-    { to:'/', icon:<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9,22 9,12 15,12 15,22"/></svg>, label:'Home' },
+    { to:'/', exact:true, icon:<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9,22 9,12 15,12 15,22"/></svg>, label:'Home' },
     { to:'/shop', icon:<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>, label:'Shop' },
     { cart:true, icon:<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 001.99 1.61h9.72a2 2 0 001.99-1.61L23 6H6"/></svg>, label:'Cart' },
     { to: settings?.enableWishlist!==false ? '/wishlist' : '/shop', icon:<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>, label:'Wishlist' },
@@ -766,10 +783,13 @@ const MobileBottomNav = ({ settings }) => {
   ];
 
   return (
-    /* FIX: height and padding managed by .mobile-bottom-nav CSS in ResponsiveStyles */
     <div className="mobile-bottom-nav">
       {tabs.map((tab, i) => {
-        const isActive = tab.to && location.pathname === tab.to;
+        const isActive = tab.to && (
+          tab.exact
+            ? location.pathname === tab.to
+            : location.pathname === tab.to || location.pathname.startsWith(tab.to + '/')
+        );
         if (tab.cart) return (
           <button key={i} onClick={() => setIsOpen(true)} className="sz-bottom-tab relative">
             <div className="relative">

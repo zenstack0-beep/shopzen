@@ -133,7 +133,7 @@ export default function PopupBanner() {
               color: '#9ca3af', fontSize: '13px', cursor: 'pointer', padding: '4px',
             }}
           >
-            No thanks, I'll pay full price
+            No thanks,
           </button>
         </div>
       </div>
