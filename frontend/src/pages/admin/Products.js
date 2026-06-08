@@ -18,7 +18,7 @@ const DRAFT_KEY = 'shopzen_product_draft';
 
 const emptyProduct = {
   name:'', description:'', shortDescription:'', price:'', salePrice:'',
-  costPrice:'', sku:'', category:'', brand:'', stock:'', lowStockThreshold:5,
+  costPrice:'', sku:'', category:'', brand:'', stock:'5', lowStockThreshold:5,
   weight:'', thumbnail:'', images:[],
   tags:'', isFeatured:false, isActive:true, isOnSale:false,
   specifications:[], variants:[]
@@ -278,6 +278,13 @@ export default function AdminProducts() {
   const autoSaveTimer = useRef(null);
   const isEditMode    = useRef(false);
 
+  // AI autofill state
+  const [aiFillingBrand, setAiFillingBrand]     = useState(false);
+  const [aiFillingShort, setAiFillingShort]     = useState(false);
+  const [tagSuggestions, setTagSuggestions]     = useState([]);
+  const [loadingTags, setLoadingTags]           = useState(false);
+  const aiNameTimer = useRef(null);
+
   // setForm wrapper that keeps formRef in sync
   const updateForm = useCallback((updater) => {
     setForm(prev => {
@@ -286,6 +293,59 @@ export default function AdminProducts() {
       return next;
     });
   }, []);
+
+  /* ── AI Autofill helpers (calls own backend → Anthropic) ── */
+  const autofillFromName = async (name) => {
+    if (!name || name.length < 3) return;
+    setAiFillingBrand(true);
+    setAiFillingShort(true);
+    try {
+      const { data } = await API.post('/ai/autofill', { name });
+      updateForm(p => ({
+        ...p,
+        brand:            (!p.brand            && data.brand)            ? data.brand            : p.brand,
+        shortDescription: (!p.shortDescription && data.shortDescription) ? data.shortDescription : p.shortDescription,
+      }));
+    } catch (err) {
+      console.error('[AI autofill]', err?.response?.data?.message || err.message);
+    } finally {
+      setAiFillingBrand(false);
+      setAiFillingShort(false);
+    }
+  };
+
+  const fetchTagSuggestions = async (name, category, brand) => {
+    if (!name || name.length < 3) return;
+    setLoadingTags(true);
+    setTagSuggestions([]);
+    try {
+      const { data } = await API.post('/ai/tags', { name, category, brand });
+      if (Array.isArray(data.tags)) setTagSuggestions(data.tags.slice(0, 10));
+    } catch (err) {
+      console.error('[AI tags]', err?.response?.data?.message || err.message);
+      toast.error('Could not fetch tag suggestions');
+    } finally {
+      setLoadingTags(false);
+    }
+  };
+
+  const handleNameChange = (name) => {
+    updateForm(p => ({ ...p, name }));
+    clearTimeout(aiNameTimer.current);
+    aiNameTimer.current = setTimeout(() => {
+      autofillFromName(name);
+    }, 900);
+  };
+
+  const toggleTag = (tag) => {
+    updateForm(p => {
+      const existing = p.tags ? p.tags.split(",").map(t => t.trim()).filter(Boolean) : [];
+      const idx = existing.indexOf(tag);
+      const updated = idx >= 0 ? existing.filter(t => t !== tag) : [...existing, tag];
+      return { ...p, tags: updated.join(", ") };
+    });
+  };
+
 
   /* ── Fetch products ── */
   const fetchProducts = useCallback(async () => {
@@ -370,15 +430,21 @@ export default function AdminProducts() {
       ...emptyProduct, ...p,
       category: p.category?._id || p.category,
       tags: Array.isArray(p.tags) ? p.tags.join(', ') : '',
-      salePrice: p.salePrice || '', costPrice: p.costPrice || '',
+      price:             p.price        != null ? String(p.price)             : '',
+      salePrice:         p.salePrice    != null ? String(p.salePrice)         : '',
+      costPrice:         p.costPrice    != null ? String(p.costPrice)         : '',
+      stock:             p.stock        != null ? String(p.stock)             : '',
+      weight:            p.weight       != null ? String(p.weight)            : '',
+      lowStockThreshold: p.lowStockThreshold != null ? String(p.lowStockThreshold) : '5',
       specifications: p.specifications || [], variants: p.variants || []
     };
     formRef.current = ef;
     setForm(ef);
     setModal('edit'); setActiveTab('basic');
   };
+  
 
-  const closeModal = () => setModal(null);
+  const closeModal = () => { setModal(null); setTagSuggestions([]); };
 
   /* ── Save ── */
   const handleSave = async () => {
@@ -390,11 +456,13 @@ export default function AdminProducts() {
     try {
       const payload = {
         ...f,
-        tags: f.tags ? f.tags.split(',').map(t=>t.trim()).filter(Boolean) : [],
-        price:     Number(f.price),
-        salePrice: f.salePrice  ? Number(f.salePrice)  : undefined,
-        costPrice: f.costPrice  ? Number(f.costPrice)  : undefined,
-        stock:     Number(f.stock) || 0,
+        tags: f.tags ? f.tags.split(",").map(t=>t.trim()).filter(Boolean) : [],
+        price:             Number(f.price),
+        salePrice:         f.salePrice  ? Number(f.salePrice)  : undefined,
+        costPrice:         f.costPrice  ? Number(f.costPrice)  : undefined,
+        stock:             Number(f.stock) || 0,
+        weight:            f.weight ? Number(f.weight) : undefined,
+        lowStockThreshold: f.lowStockThreshold ? Number(f.lowStockThreshold) : 5,
         specifications: f.specifications || [],
       };
       if (modal === 'edit' && f._id) {
@@ -496,6 +564,7 @@ export default function AdminProducts() {
 
   return (
     <div>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
         <div>
           <h2 className="font-display text-xl font-bold text-gray-900">Products</h2>
@@ -660,7 +729,7 @@ export default function AdminProducts() {
               <div className="grid sm:grid-cols-2 gap-4">
                 <div className="sm:col-span-2">
                   <label className="form-label">Product Name *</label>
-                  <input value={form.name} onChange={e=>updateForm(p=>({...p,name:e.target.value}))} className="form-input" placeholder="Enter product name"/>
+                  <input value={form.name} onChange={e=>handleNameChange(e.target.value)} className="form-input" placeholder="Enter product name"/>
                 </div>
                 <div>
                   <label className="form-label">Category *</label>
@@ -669,16 +738,28 @@ export default function AdminProducts() {
                     {categories.map(c=><option key={c._id} value={c._id}>{c.name}</option>)}
                   </select>
                 </div>
-                <div><label className="form-label">Brand</label><input value={form.brand} onChange={e=>updateForm(p=>({...p,brand:e.target.value}))} className="form-input" placeholder="Brand name"/></div>
+                <div>
+                  <label className="form-label" style={{display:'flex',alignItems:'center',gap:6}}>
+                    Brand
+                    {aiFillingBrand && <span style={{fontSize:11,color:'var(--color-primary)',fontWeight:600,display:'flex',alignItems:'center',gap:3}}><span style={{display:'inline-block',width:10,height:10,border:'2px solid var(--color-primary)',borderTopColor:'transparent',borderRadius:'50%',animation:'spin 0.7s linear infinite'}}></span>AI filling…</span>}
+                  </label>
+                  <input value={form.brand} onChange={e=>updateForm(p=>({...p,brand:e.target.value}))} className="form-input" placeholder="Brand name"/>
+                </div>
                 <div><label className="form-label">Regular Price (Rs.) *</label><input type="number" min="0" value={form.price} onChange={e=>updateForm(p=>({...p,price:e.target.value}))} className="form-input"/></div>
                 <div><label className="form-label">Sale Price (Rs.)</label><input type="number" min="0" value={form.salePrice} onChange={e=>updateForm(p=>({...p,salePrice:e.target.value}))} className="form-input" placeholder="Leave empty if not on sale"/></div>
                 <div><label className="form-label">Cost Price (Rs.)</label><input type="number" min="0" value={form.costPrice} onChange={e=>updateForm(p=>({...p,costPrice:e.target.value}))} className="form-input"/></div>
                 <div><label className="form-label">SKU</label><input value={form.sku} onChange={e=>updateForm(p=>({...p,sku:e.target.value}))} className="form-input" placeholder="Unique product code"/></div>
-                <div><label className="form-label">Stock Quantity</label><input type="number" min="0" value={form.stock} onChange={e=>updateForm(p=>({...p,stock:e.target.value}))} className="form-input"/></div>
+                <div>
+                  <label className="form-label">Stock Quantity</label>
+                  <input type="number" min="0" value={form.stock} onChange={e=>updateForm(p=>({...p,stock:e.target.value}))} className="form-input"/>
+                </div>
                 <div><label className="form-label">Low Stock Alert</label><input type="number" min="0" value={form.lowStockThreshold} onChange={e=>updateForm(p=>({...p,lowStockThreshold:e.target.value}))} className="form-input"/></div>
                 <div><label className="form-label">Weight (g)</label><input type="number" min="0" value={form.weight} onChange={e=>updateForm(p=>({...p,weight:e.target.value}))} className="form-input"/></div>
                 <div className="sm:col-span-2">
-                  <label className="form-label">Short Description</label>
+                  <label className="form-label" style={{display:'flex',alignItems:'center',gap:6}}>
+                    Short Description
+                    {aiFillingShort && <span style={{fontSize:11,color:'var(--color-primary)',fontWeight:600,display:'flex',alignItems:'center',gap:3}}><span style={{display:'inline-block',width:10,height:10,border:'2px solid var(--color-primary)',borderTopColor:'transparent',borderRadius:'50%',animation:'spin 0.7s linear infinite'}}></span>AI filling…</span>}
+                  </label>
                   <input value={form.shortDescription} onChange={e=>updateForm(p=>({...p,shortDescription:e.target.value}))} className="form-input" placeholder="Brief product summary"/>
                 </div>
                 <div className="sm:col-span-2">
@@ -686,8 +767,35 @@ export default function AdminProducts() {
                   <RichEditor value={form.description} onChange={val=>updateForm(p=>({...p,description:val}))} />
                 </div>
                 <div className="sm:col-span-2">
-                  <label className="form-label">Tags (comma separated)</label>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:4}}>
+                    <label className="form-label" style={{margin:0}}>Tags (comma separated)</label>
+                    <button type="button"
+                      onClick={()=>fetchTagSuggestions(form.name, categories.find(c=>c._id===form.category)?.name, form.brand)}
+                      disabled={!form.name || loadingTags}
+                      style={{fontSize:11,padding:'3px 10px',borderRadius:20,border:'1.5px solid var(--color-primary)',color:'var(--color-primary)',background:'transparent',cursor:'pointer',fontWeight:600,display:'flex',alignItems:'center',gap:5,opacity:(!form.name||loadingTags)?0.5:1}}>
+                      {loadingTags
+                        ? <><span style={{display:'inline-block',width:9,height:9,border:'2px solid var(--color-primary)',borderTopColor:'transparent',borderRadius:'50%',animation:'spin 0.7s linear infinite'}}></span>Suggesting…</>
+                        : <>✨ Suggest Tags</>}
+                    </button>
+                  </div>
                   <input value={form.tags} onChange={e=>updateForm(p=>({...p,tags:e.target.value}))} className="form-input" placeholder="electronics, gadget, trending"/>
+                  {tagSuggestions.length > 0 && (
+                    <div style={{marginTop:8,display:'flex',flexWrap:'wrap',gap:6}}>
+                      {tagSuggestions.map(tag => {
+                        const active = form.tags.split(',').map(t=>t.trim()).includes(tag);
+                        return (
+                          <button key={tag} type="button" onClick={()=>toggleTag(tag)}
+                            style={{fontSize:12,padding:'3px 10px',borderRadius:20,border:'1.5px solid',borderColor:active?'var(--color-primary)':'#d1d5db',background:active?'var(--color-primary)':'#f9fafb',color:active?'#fff':'#374151',cursor:'pointer',fontWeight:500,transition:'all 0.15s'}}>
+                            {active ? '✓ ' : ''}{tag}
+                          </button>
+                        );
+                      })}
+                      <button type="button" onClick={()=>setTagSuggestions([])}
+                        style={{fontSize:11,padding:'3px 8px',borderRadius:20,border:'1.5px solid #e5e7eb',background:'transparent',color:'#9ca3af',cursor:'pointer'}}>
+                        ✕ clear
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="flex flex-wrap gap-4 pt-2">

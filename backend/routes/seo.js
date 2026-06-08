@@ -1,53 +1,56 @@
 /**
- * seo.js — SEO backend routes
+ * routes/seo.js — Full SEO backend
  *
- * GET /api/seo/sitemap.xml   — Dynamic XML sitemap
- * GET /api/seo/robots.txt    — Dynamic robots.txt
+ * GET  /api/seo/sitemap.xml          — Dynamic XML sitemap (images included)
+ * GET  /api/seo/robots.txt           — Dynamic robots.txt
+ * GET  /api/seo/meta                 — Store-level meta tags
+ * GET  /api/seo/product-meta/:slug   — Per-product meta for SSR injection
+ * POST /api/seo/bust-cache           — Clear sitemap cache
  *
- * Mount in server.js:  app.use('/api/seo', require('./routes/seo'));
- *
- * Vercel serves the frontend, so the frontend must proxy these:
- *   /sitemap.xml  → <BACKEND_URL>/api/seo/sitemap.xml  (via vercel.json rewrite)
- *   /robots.txt   → <BACKEND_URL>/api/seo/robots.txt
- *
- * The sitemap is cached 1 hour in memory (configurable).
+ * SSR middleware exported:  seoRenderMiddleware
+ * Mount: app.use('/api/seo', require('./routes/seo'));
+ * Catch-all: app.get('*', require('./routes/seo').seoRenderMiddleware);
  */
 
 const express = require('express');
 const router  = express.Router();
-const Product    = require('../models/Product');
+const fs      = require('fs');
+const path    = require('path');
+const Product          = require('../models/Product');
 const { Category, Settings } = require('../models/index');
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-function xmlEscape(str) {
+// ── XML helpers ───────────────────────────────────────────────────────────────
+function xe(str) {
   if (!str) return '';
   return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-function urlEntry(loc, lastmod, changefreq = 'weekly', priority = '0.7') {
+function urlEntry(loc, lastmod, changefreq = 'weekly', priority = '0.7', imageUrl = null) {
+  const img = imageUrl
+    ? `\n    <image:image><image:loc>${xe(imageUrl)}</image:loc></image:image>`
+    : '';
   return `  <url>
-    <loc>${xmlEscape(loc)}</loc>
+    <loc>${xe(loc)}</loc>
     <lastmod>${lastmod}</lastmod>
     <changefreq>${changefreq}</changefreq>
-    <priority>${priority}</priority>
+    <priority>${priority}</priority>${img}
   </url>`;
 }
 
-// ── In-memory cache ───────────────────────────────────────────────────────────
+// ── In-memory sitemap cache ───────────────────────────────────────────────────
 let sitemapCache    = null;
 let sitemapCachedAt = 0;
 const CACHE_TTL_MS  = 60 * 60 * 1000; // 1 hour
 
 async function getSiteUrl() {
   const s = await Settings.findOne({ key: 'seo_config' });
-  return (s?.value?.siteUrl || process.env.FRONTEND_URL || 'https://yourstore.com').replace(/\/$/, '');
+  return (s?.value?.siteUrl || process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
 }
 
-// ── GET /api/seo/sitemap.xml ──────────────────────────────────────────────────
+// ── GET /api/seo/sitemap.xml ─────────────────────────────────────────────────
+// Now includes product images → Google Image Search visibility
 router.get('/sitemap.xml', async (req, res) => {
   try {
     const now = Date.now();
@@ -59,8 +62,8 @@ router.get('/sitemap.xml', async (req, res) => {
 
     const [siteUrl, products, categories] = await Promise.all([
       getSiteUrl(),
-      Product.find({ isActive: true }, 'slug updatedAt').lean(),
-      Category.find({ isActive: true }, 'slug updatedAt').lean(),
+      Product.find({ isActive: true }, 'slug updatedAt thumbnail name brand shortDescription').lean(),
+      Category.find({ isActive: true }, 'slug name updatedAt').lean(),
     ]);
 
     const today = new Date().toISOString().split('T')[0];
@@ -78,10 +81,12 @@ router.get('/sitemap.xml', async (req, res) => {
         c.updatedAt ? new Date(c.updatedAt).toISOString().split('T')[0] : today,
         'weekly', '0.8'
       )),
+      // Products — with thumbnail image for Google Image Search
       ...products.map(p => urlEntry(
         `${siteUrl}/product/${p.slug}`,
         p.updatedAt ? new Date(p.updatedAt).toISOString().split('T')[0] : today,
-        'weekly', '0.9'
+        'weekly', '0.9',
+        p.thumbnail || null
       )),
     ];
 
@@ -103,7 +108,7 @@ ${entries.join('\n')}
   }
 });
 
-// ── GET /api/seo/robots.txt ───────────────────────────────────────────────────
+// ── GET /api/seo/robots.txt ──────────────────────────────────────────────────
 router.get('/robots.txt', async (req, res) => {
   try {
     const siteUrl = await getSiteUrl();
@@ -111,7 +116,7 @@ router.get('/robots.txt', async (req, res) => {
 
     let txt;
     if (noindex) {
-      txt = `User-agent: *\nDisallow: /\n\n# Sitemap\nSitemap: ${siteUrl}/sitemap.xml\n`;
+      txt = `User-agent: *\nDisallow: /\n\nSitemap: ${siteUrl}/sitemap.xml\n`;
     } else {
       txt = `# ShopZen robots.txt — auto-generated
 User-agent: *
@@ -127,10 +132,14 @@ Disallow: /forgot-password
 Disallow: /*?*sort=
 Disallow: /*?*page=
 
-# Crawl-delay for well-behaved bots
+# Allow product images
+Allow: /images/
+Allow: /*.jpg$
+Allow: /*.png$
+Allow: /*.webp$
+
 Crawl-delay: 1
 
-# Sitemap
 Sitemap: ${siteUrl}/sitemap.xml
 `;
     }
@@ -144,18 +153,14 @@ Sitemap: ${siteUrl}/sitemap.xml
   }
 });
 
-// ── Bust sitemap cache (called after product/category save) ───────────────────
+// ── POST /api/seo/bust-cache ─────────────────────────────────────────────────
 router.post('/bust-cache', (req, res) => {
   sitemapCache    = null;
   sitemapCachedAt = 0;
   res.json({ success: true, message: 'Sitemap cache cleared' });
 });
 
-module.exports = router;
-
-// ── GET /api/seo/meta — Returns all live SEO values from DB ──────────────────
-// Frontend calls this on mount to hydrate dynamic meta tags.
-// Googlebot also calls this when crawling via the SSR-lite endpoint below.
+// ── GET /api/seo/meta — Store-level meta ─────────────────────────────────────
 router.get('/meta', async (req, res) => {
   try {
     const rows = await Settings.find({
@@ -168,29 +173,24 @@ router.get('/meta', async (req, res) => {
         ],
       },
     }).lean();
+
     const s = {};
     rows.forEach(r => { s[r.key] = r.value; });
 
-    const siteUrl    = (s.seo_config?.siteUrl || process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
-    const storeName  = s.storeName  || 'ShopZen';
-    const metaTitle  = s.seo_metaTitle || `${storeName} — Premium Online Store`;
-    const metaDesc   = s.seo_metaDesc  || 'Shop the best products online in Sri Lanka. Fast delivery, best prices at ShopZen.';
-    const ogTitle    = s.seo_ogTitle   || metaTitle;
-    const ogDesc     = s.seo_ogDesc    || metaDesc;
-    const ogImage    = s.seo_ogImage   || `${siteUrl}/og-default.png`;
+    const siteUrl   = (s.seo_config?.siteUrl || process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
+    const storeName = s.storeName  || 'ShopZen';
+    const metaTitle = s.seo_metaTitle || `${storeName} — Shop Online in Sri Lanka`;
+    const metaDesc  = s.seo_metaDesc  || 'Shop the best products online in Sri Lanka. Fast delivery, best prices guaranteed at ShopZen.';
+    const ogTitle   = s.seo_ogTitle   || metaTitle;
+    const ogDesc    = s.seo_ogDesc    || metaDesc;
+    const ogImage   = s.seo_ogImage   || `${siteUrl}/og-default.png`;
 
     res.json({
-      siteUrl,
-      storeName,
-      metaTitle,
-      metaDesc,
-      ogTitle,
-      ogDesc,
-      ogImage,
+      siteUrl, storeName, metaTitle, metaDesc, ogTitle, ogDesc, ogImage,
       canonicalUrl:       siteUrl,
       googleVerification: s.seo_googleVerification || '',
-      ga4Id:              s.seo_ga4Id   || '',
-      gtmId:              s.seo_gtmId   || '',
+      ga4Id:              s.seo_ga4Id    || '',
+      gtmId:              s.seo_gtmId    || '',
       fbPixelId:          s.seo_fbPixelId || '',
     });
   } catch (err) {
@@ -198,25 +198,155 @@ router.get('/meta', async (req, res) => {
   }
 });
 
-// ── GET /api/seo/render — SSR-lite: index.html with injected meta tags ────────
-// server.js serves ALL non-API routes via this handler so Googlebot gets
-// a fully-populated <head> instead of the placeholder-filled static file.
-// Usage in server.js:
-//   const { seoRenderMiddleware } = require('./routes/seo');
-//   app.get('*', seoRenderMiddleware);
-const fs   = require('fs');
-const pathm = require('path');
+// ── GET /api/seo/product-meta/:slug ──────────────────────────────────────────
+// Returns per-product SEO data: meta title, description, OG tags, JSON-LD schema
+// Frontend calls this on the product page to set dynamic <head> tags
+router.get('/product-meta/:slug', async (req, res) => {
+  try {
+    const product = await Product.findOne({ slug: req.params.slug, isActive: true })
+      .populate('category', 'name slug')
+      .lean();
 
-// Cache the base HTML template in memory (file read only once)
+    if (!product) return res.status(404).json({ message: 'Product not found' });
+
+    const siteUrl    = (process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
+    const productUrl = `${siteUrl}/product/${product.slug}`;
+    const storeName  = 'ShopZen';
+
+    // ── Build meta title (50–60 chars ideal) ──────────────────────────────────
+    // Format: "Product Name - Brand | ShopZen"  OR  "Product Name | ShopZen"
+    const brandPart   = product.brand ? ` - ${product.brand}` : '';
+    const rawTitle    = `${product.name}${brandPart} | ${storeName}`;
+    const metaTitle   = rawTitle.length > 65
+      ? `${product.name.slice(0, 50)} | ${storeName}`
+      : rawTitle;
+
+    // ── Build meta description (140–160 chars ideal) ───────────────────────────
+    const plainDesc  = String(product.shortDescription || product.description || '')
+      .replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    const priceText  = product.salePrice
+      ? `Rs.${product.salePrice.toLocaleString()} (was Rs.${product.price.toLocaleString()})`
+      : `Rs.${product.price.toLocaleString()}`;
+    const catName    = product.category?.name || '';
+    const baseDesc   = plainDesc.slice(0, 100) || `${product.name} available online`;
+    const metaDesc   = `${baseDesc}. Buy ${product.name} for ${priceText}. Fast delivery across Sri Lanka. Shop at ${storeName}.`.slice(0, 165);
+
+    // ── OG image ──────────────────────────────────────────────────────────────
+    const ogImage = product.thumbnail || (product.images?.[0]) || `${siteUrl}/og-default.png`;
+
+    // ── Canonical URL ─────────────────────────────────────────────────────────
+    const canonical = productUrl;
+
+    // ── Breadcrumb keywords ───────────────────────────────────────────────────
+    const keywords = [
+      product.name,
+      product.brand,
+      catName,
+      ...(product.tags || []),
+      'buy in sri lanka',
+      'online shopping sri lanka',
+    ].filter(Boolean).join(', ');
+
+    // ── JSON-LD Product Schema (Google Rich Results) ──────────────────────────
+    const availability = product.stock > 0
+      ? 'https://schema.org/InStock'
+      : 'https://schema.org/OutOfStock';
+
+    const offers = {
+      '@type':           'Offer',
+      url:               productUrl,
+      priceCurrency:     'LKR',
+      price:             product.salePrice || product.price,
+      priceValidUntil:   new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      availability,
+      seller: { '@type': 'Organization', name: storeName },
+    };
+
+    // Add price specification if on sale
+    if (product.salePrice) {
+      offers.priceSpecification = {
+        '@type':         'PriceSpecification',
+        price:           product.salePrice,
+        priceCurrency:   'LKR',
+      };
+    }
+
+    const schema = {
+      '@context':   'https://schema.org',
+      '@type':      'Product',
+      name:         product.name,
+      description:  plainDesc.slice(0, 500) || product.name,
+      image:        [ogImage, ...(product.images || [])].filter(Boolean).slice(0, 5),
+      sku:          product.sku || product._id.toString(),
+      brand:        product.brand ? { '@type': 'Brand', name: product.brand } : undefined,
+      category:     catName,
+      url:          productUrl,
+      offers,
+      ...(product.ratings?.count > 0 ? {
+        aggregateRating: {
+          '@type':       'AggregateRating',
+          ratingValue:   product.ratings.average.toFixed(1),
+          reviewCount:   product.ratings.count,
+          bestRating:    '5',
+          worstRating:   '1',
+        },
+      } : {}),
+    };
+
+    // Remove undefined brand
+    if (!product.brand) delete schema.brand;
+
+    // ── Breadcrumb Schema ─────────────────────────────────────────────────────
+    const breadcrumbSchema = {
+      '@context': 'https://schema.org',
+      '@type':    'BreadcrumbList',
+      itemListElement: [
+        { '@type': 'ListItem', position: 1, name: 'Home',    item: siteUrl },
+        { '@type': 'ListItem', position: 2, name: 'Shop',    item: `${siteUrl}/shop` },
+        catName && { '@type': 'ListItem', position: 3, name: catName, item: `${siteUrl}/shop?category=${product.category?.slug}` },
+        { '@type': 'ListItem', position: catName ? 4 : 3, name: product.name, item: productUrl },
+      ].filter(Boolean),
+    };
+
+    res.json({
+      metaTitle,
+      metaDesc,
+      canonical,
+      ogTitle:       metaTitle,
+      ogDesc:        metaDesc,
+      ogImage,
+      ogType:        'product',
+      productUrl,
+      keywords,
+      schema,
+      breadcrumbSchema,
+      // Raw product data the frontend might need
+      price:         product.price,
+      salePrice:     product.salePrice,
+      availability:  product.stock > 0 ? 'InStock' : 'OutOfStock',
+      brand:         product.brand,
+      category:      catName,
+    });
+  } catch (err) {
+    console.error('[SEO /product-meta]', err.message);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  SSR-lite middleware — injects correct meta into index.html for Googlebot
+//  Usage in server.js:
+//    const { seoRenderMiddleware } = require('./routes/seo');
+//    app.get('*', seoRenderMiddleware);
+// ══════════════════════════════════════════════════════════════════════════════
 let _htmlTemplate = null;
 function getHtmlTemplate() {
   if (_htmlTemplate) return _htmlTemplate;
-  // Walk up from routes/ to find the built frontend
   const candidates = [
-    pathm.join(__dirname, '..', 'frontend', 'build', 'index.html'),
-    pathm.join(__dirname, '..', 'public', 'index.html'),
-    pathm.join(process.cwd(), 'frontend', 'build', 'index.html'),
-    pathm.join(process.cwd(), 'public', 'index.html'),
+    path.join(__dirname, '..', 'frontend', 'build', 'index.html'),
+    path.join(__dirname, '..', 'public', 'index.html'),
+    path.join(process.cwd(), 'frontend', 'build', 'index.html'),
+    path.join(process.cwd(), 'public', 'index.html'),
   ];
   for (const p of candidates) {
     if (fs.existsSync(p)) { _htmlTemplate = fs.readFileSync(p, 'utf8'); return _htmlTemplate; }
@@ -227,12 +357,7 @@ function getHtmlTemplate() {
 async function getSeoMeta() {
   try {
     const rows = await Settings.find({
-      key: {
-        $in: [
-          'seo_config', 'seo_metaTitle', 'seo_metaDesc', 'seo_ogTitle',
-          'seo_ogDesc', 'seo_ogImage', 'seo_googleVerification', 'storeName',
-        ],
-      },
+      key: { $in: ['seo_config','seo_metaTitle','seo_metaDesc','seo_ogTitle','seo_ogDesc','seo_ogImage','seo_googleVerification','storeName'] },
     }).lean();
     const s = {};
     rows.forEach(r => { s[r.key] = r.value; });
@@ -240,62 +365,127 @@ async function getSeoMeta() {
     const storeName = s.storeName || 'ShopZen';
     return {
       siteUrl,
-      metaTitle:  s.seo_metaTitle || `${storeName} — Premium Online Store`,
-      metaDesc:   s.seo_metaDesc  || 'Shop the best products online in Sri Lanka.',
-      ogTitle:    s.seo_ogTitle   || s.seo_metaTitle || `${storeName} — Premium Online Store`,
-      ogDesc:     s.seo_ogDesc    || s.seo_metaDesc  || 'Shop the best products online in Sri Lanka.',
-      ogImage:    s.seo_ogImage   || `${siteUrl}/og-default.png`,
+      metaTitle:    s.seo_metaTitle || `${storeName} — Shop Online in Sri Lanka`,
+      metaDesc:     s.seo_metaDesc  || 'Shop the best products online in Sri Lanka. Fast delivery, best prices at ShopZen.',
+      ogTitle:      s.seo_ogTitle   || s.seo_metaTitle || `${storeName} — Shop Online in Sri Lanka`,
+      ogDesc:       s.seo_ogDesc    || s.seo_metaDesc  || 'Shop the best products online in Sri Lanka.',
+      ogImage:      s.seo_ogImage   || `${siteUrl}/og-default.png`,
       verification: s.seo_googleVerification || '',
     };
   } catch { return null; }
 }
 
 const seoRenderMiddleware = async (req, res) => {
-  // Never intercept API or static asset requests
-  if (req.path.startsWith('/api/') || req.path.match(/\.(js|css|png|jpg|ico|svg|json|xml|txt|woff2?)$/)) {
+  if (req.path.startsWith('/api/') || req.path.match(/\.(js|css|png|jpg|ico|svg|json|xml|txt|woff2?)$/))
     return res.status(404).send('Not found');
-  }
 
   const html = getHtmlTemplate();
   if (!html) return res.status(500).send('Frontend build not found. Run: cd frontend && npm run build');
 
-  const meta = await getSeoMeta();
-  if (!meta) return res.send(html); // fallback: serve as-is
+  // ── Per-product SSR: inject product-specific meta ──────────────────────────
+  const productMatch = req.path.match(/^\/product\/([^/]+)$/);
+  if (productMatch) {
+    try {
+      const slug    = productMatch[1];
+      const product = await Product.findOne({ slug, isActive: true })
+        .populate('category', 'name slug').lean();
 
-  const xe = (s) => String(s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      if (product) {
+        const siteUrl    = (process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
+        const productUrl = `${siteUrl}/product/${product.slug}`;
+        const storeName  = 'ShopZen';
+        const brandPart  = product.brand ? ` - ${product.brand}` : '';
+        const rawTitle   = `${product.name}${brandPart} | ${storeName}`;
+        const metaTitle  = rawTitle.length > 65 ? `${product.name.slice(0, 50)} | ${storeName}` : rawTitle;
+        const plainDesc  = String(product.shortDescription || product.description || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+        const priceText  = product.salePrice ? `Rs.${product.salePrice.toLocaleString()} (was Rs.${product.price.toLocaleString()})` : `Rs.${product.price.toLocaleString()}`;
+        const metaDesc   = `${(plainDesc.slice(0,100) || product.name)}. Buy for ${priceText}. Fast delivery across Sri Lanka. Shop at ${storeName}.`.slice(0, 165);
+        const ogImage    = product.thumbnail || product.images?.[0] || `${siteUrl}/og-default.png`;
+        const keywords   = [product.name, product.brand, product.category?.name, ...(product.tags||[]), 'sri lanka'].filter(Boolean).join(', ');
 
-  let out = html
-    // Fix title
-    .replace(/<title>[^<]*<\/title>/, `<title>${xe(meta.metaTitle)}</title>`)
-    // Fix meta description
-    .replace(/(<meta name="description" content=")[^"]*(")/,  `$1${xe(meta.metaDesc)}$2`)
-    // Fix canonical
-    .replace(/(<link rel="canonical" href=")[^"]*(")/,        `$1${xe(meta.siteUrl)}$2`)
-    // Fix OG title
-    .replace(/(<meta property="og:title" content=")[^"]*(")/,       `$1${xe(meta.ogTitle)}$2`)
-    // Fix OG description
-    .replace(/(<meta property="og:description" content=")[^"]*(")/,`$1${xe(meta.ogDesc)}$2`)
-    // Fix OG image
-    .replace(/(<meta property="og:image" content=")[^"]*(")/,       `$1${xe(meta.ogImage)}$2`)
-    // Fix OG url
-    .replace(/(<meta property="og:url" content=")[^"]*(")/,         `$1${xe(meta.siteUrl)}$2`)
-    // Fix twitter title
-    .replace(/(<meta name="twitter:title" content=")[^"]*(")/,       `$1${xe(meta.ogTitle)}$2`)
-    // Fix twitter description
-    .replace(/(<meta name="twitter:description" content=")[^"]*(")/,`$1${xe(meta.ogDesc)}$2`)
-    // Fix twitter image
-    .replace(/(<meta name="twitter:image" content=")[^"]*(")/,       `$1${xe(meta.ogImage)}$2`)
-    // Fix yourstore.com placeholders anywhere remaining
-    .replace(/yourstore\.com/g, 'shopzen.lk');
+        // Build JSON-LD
+        const schema = {
+          '@context': 'https://schema.org', '@type': 'Product',
+          name: product.name, description: plainDesc.slice(0,500) || product.name,
+          image: [ogImage, ...(product.images||[])].filter(Boolean).slice(0,5),
+          sku: product.sku || product._id.toString(),
+          ...(product.brand ? { brand: { '@type': 'Brand', name: product.brand } } : {}),
+          offers: {
+            '@type': 'Offer', url: productUrl, priceCurrency: 'LKR',
+            price: product.salePrice || product.price,
+            availability: product.stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+            seller: { '@type': 'Organization', name: storeName },
+          },
+          ...(product.ratings?.count > 0 ? { aggregateRating: { '@type': 'AggregateRating', ratingValue: product.ratings.average.toFixed(1), reviewCount: product.ratings.count, bestRating: '5', worstRating: '1' } } : {}),
+        };
 
-  // Inject Google verification tag if set (before </head>)
-  if (meta.verification) {
-    out = out.replace('</head>', `<meta name="google-site-verification" content="${xe(meta.verification)}"/>\n</head>`);
+        const breadcrumb = {
+          '@context': 'https://schema.org', '@type': 'BreadcrumbList',
+          itemListElement: [
+            { '@type': 'ListItem', position: 1, name: 'Home', item: siteUrl },
+            { '@type': 'ListItem', position: 2, name: 'Shop', item: `${siteUrl}/shop` },
+            ...(product.category ? [{ '@type': 'ListItem', position: 3, name: product.category.name, item: `${siteUrl}/shop?category=${product.category.slug}` }] : []),
+            { '@type': 'ListItem', position: product.category ? 4 : 3, name: product.name, item: productUrl },
+          ],
+        };
+
+        let out = html
+          .replace(/<title>[^<]*<\/title>/, `<title>${xe(metaTitle)}</title>`)
+          .replace(/(<meta name="description" content=")[^"]*(")/, `$1${xe(metaDesc)}$2`)
+          .replace(/(<link rel="canonical" href=")[^"]*(")/, `$1${xe(productUrl)}$2`)
+          .replace(/(<meta property="og:title" content=")[^"]*(")/, `$1${xe(metaTitle)}$2`)
+          .replace(/(<meta property="og:description" content=")[^"]*(")/, `$1${xe(metaDesc)}$2`)
+          .replace(/(<meta property="og:image" content=")[^"]*(")/, `$1${xe(ogImage)}$2`)
+          .replace(/(<meta property="og:url" content=")[^"]*(")/, `$1${xe(productUrl)}$2`)
+          .replace(/(<meta property="og:type" content=")[^"]*(")/, `$1product$2`)
+          .replace(/(<meta name="twitter:title" content=")[^"]*(")/, `$1${xe(metaTitle)}$2`)
+          .replace(/(<meta name="twitter:description" content=")[^"]*(")/, `$1${xe(metaDesc)}$2`)
+          .replace(/(<meta name="twitter:image" content=")[^"]*(")/, `$1${xe(ogImage)}$2`)
+          .replace(/yourstore\.com/g, 'shopzen.lk');
+
+        // Inject keywords meta
+        if (!out.includes('name="keywords"')) {
+          out = out.replace('</head>', `<meta name="keywords" content="${xe(keywords)}"/>\n</head>`);
+        }
+
+        // Inject JSON-LD schemas
+        const schemaBlock = `<script type="application/ld+json">${JSON.stringify(schema)}</script>\n<script type="application/ld+json">${JSON.stringify(breadcrumb)}</script>\n</head>`;
+        out = out.replace('</head>', schemaBlock);
+
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+        return res.send(out);
+      }
+    } catch (err) {
+      console.error('[SSR product]', err.message);
+      // fall through to generic render
+    }
   }
 
+  // ── Generic page SSR ──────────────────────────────────────────────────────
+  const meta = await getSeoMeta();
+  if (!meta) return res.send(html);
+
+  let out = html
+    .replace(/<title>[^<]*<\/title>/, `<title>${xe(meta.metaTitle)}</title>`)
+    .replace(/(<meta name="description" content=")[^"]*(")/, `$1${xe(meta.metaDesc)}$2`)
+    .replace(/(<link rel="canonical" href=")[^"]*(")/, `$1${xe(meta.siteUrl)}$2`)
+    .replace(/(<meta property="og:title" content=")[^"]*(")/, `$1${xe(meta.ogTitle)}$2`)
+    .replace(/(<meta property="og:description" content=")[^"]*(")/, `$1${xe(meta.ogDesc)}$2`)
+    .replace(/(<meta property="og:image" content=")[^"]*(")/, `$1${xe(meta.ogImage)}$2`)
+    .replace(/(<meta property="og:url" content=")[^"]*(")/, `$1${xe(meta.siteUrl)}$2`)
+    .replace(/(<meta name="twitter:title" content=")[^"]*(")/, `$1${xe(meta.ogTitle)}$2`)
+    .replace(/(<meta name="twitter:description" content=")[^"]*(")/, `$1${xe(meta.ogDesc)}$2`)
+    .replace(/(<meta name="twitter:image" content=")[^"]*(")/, `$1${xe(meta.ogImage)}$2`)
+    .replace(/yourstore\.com/g, 'shopzen.lk');
+
+  if (meta.verification)
+    out = out.replace('</head>', `<meta name="google-site-verification" content="${xe(meta.verification)}"/>\n</head>`);
+
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-cache, must-revalidate'); // always fresh for crawlers
+  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
   res.send(out);
 };
 
+module.exports = router;
 module.exports.seoRenderMiddleware = seoRenderMiddleware;
