@@ -361,16 +361,24 @@ async function getHtmlTemplate() {
     }
 
     // 2. Fallback: fetch index.html from the Vercel frontend (split-deploy setup)
-    const frontendUrl = (process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
+    // Use VERCEL_FRONTEND_URL env var to avoid proxy loops (set this in Railway).
+    // Falls back to FRONTEND_URL / shopzen.lk.
+    const frontendUrl = (process.env.VERCEL_FRONTEND_URL || process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
     try {
       const https = require('https');
       const http  = require('http');
-      const fetcher = frontendUrl.startsWith('https') ? https : http;
+      const parsed = new URL(frontendUrl + '/index.html');
+      const fetcher = parsed.protocol === 'https:' ? https : http;
       const html = await new Promise((resolve, reject) => {
-        const req = fetcher.get(`${frontendUrl}/index.html`, { headers: { 'User-Agent': 'ShopZen-SSR/1.0' } }, (res) => {
-          if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
+        const req = fetcher.get({
+          hostname: parsed.hostname,
+          port: parsed.port || undefined,
+          path: parsed.pathname,
+          headers: { 'User-Agent': 'ShopZen-SSR/1.0', 'x-ssr-bypass': '1' },
+        }, (res) => {
+          if (res.statusCode !== 200) return reject(new Error('HTTP ' + res.statusCode));
           let data = '';
-          res.on('data', c => data += c);
+          res.on('data', c => { data += c; });
           res.on('end', () => resolve(data));
         });
         req.on('error', reject);
