@@ -340,60 +340,37 @@ router.get('/product-meta/:slug', async (req, res) => {
 //    app.get('*', seoRenderMiddleware);
 // ══════════════════════════════════════════════════════════════════════════════
 let _htmlTemplate = null;
-let _htmlTemplateFetchedAt = 0;
-const HTML_CACHE_TTL = 60 * 60 * 1000; // 1 hour
 
-async function getHtmlTemplate() {
+// Fallback HTML template used when no local frontend build exists (split Vercel+Railway deploy).
+// This is the actual shopzen.lk index.html shell — keep in sync when you do a major rebuild
+// that changes the <head> tags (e.g. new CSS/JS chunk hashes don't matter here; only meta tags do).
+const FALLBACK_HTML_TEMPLATE = '<!doctype html><html lang="en-LK"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=5,viewport-fit=cover"/><link rel="icon" href="/favicon.ico"/><link rel="icon" href="/favicon-32x32.png" sizes="32x32" type="image/png"/><link rel="icon" href="/apple-touch-icon.png"/><link rel="apple-touch-icon" href="/apple-touch-icon.png"/><link rel="manifest" href="/manifest.json"/><meta name="theme-color" content="#b5451b" id="meta-theme-color"/><meta name="mobile-web-app-capable" content="yes"/><meta name="apple-mobile-web-app-capable" content="yes"/><meta name="apple-mobile-web-app-status-bar-style" content="default"/><meta name="apple-mobile-web-app-title" content="ShopZen"/><meta name="format-detection" content="telephone=no"/><title>ShopZen — Premium Online Store Sri Lanka</title><meta name="description" content="Shop the best products online in Sri Lanka. Fast delivery, guaranteed best prices on electronics, fashion and more at ShopZen."/><meta name="robots" content="index,follow,max-image-preview:large"/><link rel="canonical" href="https://shopzen.lk"/><meta property="og:type" content="website"/><meta property="og:title" content="ShopZen — Premium Online Store Sri Lanka"/><meta property="og:description" content="Shop the best products online in Sri Lanka. Fast delivery, best prices on electronics at ShopZen."/><meta property="og:image" content="https://shopzen.lk/og-default.png"/><meta property="og:url" content="https://shopzen.lk"/><meta property="og:site_name" content="ShopZen"/><meta property="og:locale" content="en_US"/><meta name="twitter:card" content="summary_large_image"/><meta name="twitter:title" content="ShopZen — Premium Online Store Sri Lanka"/><meta name="twitter:description" content="Shop the best products online in Sri Lanka. Fast delivery, best prices on electronics at ShopZen."/><meta name="twitter:image" content="https://shopzen.lk/og-default.png"/></head><body><noscript>You need to enable JavaScript to run this app.</noscript><div id="root"></div></body></html>';
+
+function getHtmlTemplate() {
+  if (_htmlTemplate) return _htmlTemplate;
+
   // 1. Try local build first (monorepo / Railway monolith deployment)
-  if (!_htmlTemplate || Date.now() - _htmlTemplateFetchedAt > HTML_CACHE_TTL) {
-    const candidates = [
-      path.join(__dirname, '../', 'frontend', 'build', 'index.html'),
-      path.join(__dirname, '../', 'public', 'index.html'),
-      path.join(process.cwd(), 'frontend', 'build', 'index.html'),
-      path.join(process.cwd(), 'public', 'index.html'),
-    ];
-    for (const p of candidates) {
-      if (fs.existsSync(p)) {
-        _htmlTemplate = fs.readFileSync(p, 'utf8');
-        _htmlTemplateFetchedAt = Date.now();
-        return _htmlTemplate;
-      }
-    }
-
-    // 2. Fallback: fetch index.html from the Vercel frontend (split-deploy setup)
-    // Use VERCEL_FRONTEND_URL env var to avoid proxy loops (set this in Railway).
-    // Falls back to FRONTEND_URL / shopzen.lk.
-    const frontendUrl = (process.env.VERCEL_FRONTEND_URL || process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
-    try {
-      const https = require('https');
-      const http  = require('http');
-      const parsed = new URL(frontendUrl + '/index.html');
-      const fetcher = parsed.protocol === 'https:' ? https : http;
-      const html = await new Promise((resolve, reject) => {
-        const req = fetcher.get({
-          hostname: parsed.hostname,
-          port: parsed.port || undefined,
-          path: parsed.pathname,
-          headers: { 'User-Agent': 'ShopZen-SSR/1.0', 'x-ssr-bypass': '1' },
-        }, (res) => {
-          if (res.statusCode !== 200) return reject(new Error('HTTP ' + res.statusCode));
-          let data = '';
-          res.on('data', c => { data += c; });
-          res.on('end', () => resolve(data));
-        });
-        req.on('error', reject);
-        req.setTimeout(5000, () => { req.destroy(); reject(new Error('timeout')); });
-      });
-      _htmlTemplate = html;
-      _htmlTemplateFetchedAt = Date.now();
+  const candidates = [
+    require('path').join(__dirname, '..', 'frontend', 'build', 'index.html'),
+    require('path').join(__dirname, '..', 'public', 'index.html'),
+    require('path').join(process.cwd(), 'frontend', 'build', 'index.html'),
+    require('path').join(process.cwd(), 'public', 'index.html'),
+  ];
+  for (const p of candidates) {
+    if (require('fs').existsSync(p)) {
+      _htmlTemplate = require('fs').readFileSync(p, 'utf8');
       return _htmlTemplate;
-    } catch (e) {
-      console.error('[SSR] Could not fetch index.html from frontend:', e.message);
-      return null;
     }
   }
+
+  // 2. Fallback: use the hardcoded template (no network fetch = no loops, no timeouts).
+  //    The SSR middleware replaces title/description/og tags dynamically so the
+  //    static chunk hashes in the real build don't matter for crawlers.
+  console.log('[SSR] No local build found — using embedded fallback template');
+  _htmlTemplate = FALLBACK_HTML_TEMPLATE;
   return _htmlTemplate;
 }
+
 
 async function getSeoMeta() {
   try {
@@ -426,7 +403,7 @@ const seoRenderMiddleware = async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', process.env.FRONTEND_URL || 'https://shopzen.lk');
   }
 
-  const html = await getHtmlTemplate();
+  const html = getHtmlTemplate();
   if (!html) return res.status(500).send('Frontend build not found and could not fetch from frontend URL.');
 
   // ── Per-product SSR: inject product-specific meta ──────────────────────────

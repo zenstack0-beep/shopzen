@@ -84,22 +84,17 @@ const { seoRenderMiddleware } = require('./routes/seo');
 const frontendBuildPath = path.join(__dirname, '..', 'frontend', 'build');
 const fs = require('fs');
 
+// If a local frontend build exists (monorepo deploy), serve its static assets.
+// Either way, always wire up seoRenderMiddleware as the catch-all so that
+// Vercel can proxy /product/:slug here and get SSR-injected meta tags back.
 if (fs.existsSync(frontendBuildPath)) {
   app.use(express.static(frontendBuildPath, {
     index: false,
     maxAge: '7d',
     immutable: true,
   }));
-  app.get('*', seoRenderMiddleware);
-} else {
-  app.use((req, res) => {
-    if (req.path.startsWith('/api/')) {
-      res.status(404).json({ message: `Route not found: ${req.method} ${req.url}` });
-    } else {
-      res.status(200).send('<p>Frontend not built yet. Run: <code>cd frontend && npm run build</code></p>');
-    }
-  });
 }
+app.get('*', seoRenderMiddleware);
 
 async function startServer() {
   try {
