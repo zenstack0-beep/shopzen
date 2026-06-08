@@ -107,16 +107,43 @@ export default function ProductDetail() {
   const sym = settings?.currencySymbol || 'Rs.';
 
   // ── SEO: dynamic meta for this product ─────────────────────────────────────
+  // Build a rich buying-intent description for Google ranking
+  const seoDescription = React.useMemo(() => {
+    if (!product) return undefined;
+    const price    = product.salePrice || product.price;
+    const priceStr = price ? 'Rs.' + price.toLocaleString() : '';
+    const brand    = product.brand ? product.brand + ' ' : '';
+    const cat      = product.category?.name ? ' ' + product.category.name : '';
+    const plain    = String(product.shortDescription || product.description || '')
+                       .replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    const snippet  = plain.slice(0, 80) || (brand + product.name);
+    return priceStr
+      ? (snippet + '. Buy ' + brand + product.name + cat + ' for ' + priceStr + ' in Sri Lanka. Fast delivery. Best price at ShopZen.').slice(0, 165)
+      : (snippet + '. Shop ' + brand + product.name + cat + ' online in Sri Lanka. Fast delivery, best prices at ShopZen.').slice(0, 165);
+  }, [product]);
+
+  // Build rich keywords with buying intent
+  const seoKeywords = React.useMemo(() => {
+    if (!product) return undefined;
+    const base = [product.name, product.brand, product.sku, product.category?.name, ...(product.tags || [])].filter(Boolean);
+    const intent = [
+      'buy ' + product.name,
+      product.name + ' price sri lanka',
+      product.name + ' online',
+      product.brand ? product.brand + ' ' + (product.category?.name || '') : null,
+      'online shopping sri lanka',
+      'shopzen',
+    ].filter(Boolean);
+    return [...base, ...intent].join(', ');
+  }, [product]);
+
   useSEO({
     title:       product?.name,
-    description: product?.shortDescription || product?.description?.slice(0, 160),
+    description: seoDescription,
     image:       product?.images?.[0] || product?.thumbnail,
     type:        'product',
     product,
-    keywords:    product?.tags?.length
-      ? [product.name, product.brand, product.category?.name, ...product.tags, 'sri lanka']
-          .filter(Boolean).join(', ')
-      : undefined,
+    keywords:    seoKeywords,
     breadcrumbs: product ? [
       { name: 'Shop', url: '/shop' },
       { name: product.category?.name || 'Products', url: `/shop/${product.category?.slug || ''}` },

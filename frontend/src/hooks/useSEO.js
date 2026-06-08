@@ -145,10 +145,39 @@ export default function useSEO({
   const defaultImage  = cfg.defaultOgImage || `${siteUrl}/og-default.png`;
   const defaultDesc   = cfg.defaultDescription || 'Premium online store — quality products, delivered fast.';
 
-  const finalTitle = title       ? `${title} | ${siteName}` : siteName;
-  const finalDesc   = description || defaultDesc;
+  // ── Build title ──────────────────────────────────────────────────────────────
+  // For products: include buying intent and Sri Lanka for local SEO (max 65 chars)
+  let finalTitle;
+  if (title && type === 'product') {
+    const withSite  = title + ' | ShopZen Sri Lanka';
+    const withShort = title + ' | ShopZen';
+    finalTitle = withSite.length <= 65 ? withSite : withShort.length <= 65 ? withShort : title.slice(0, 50) + ' | ShopZen';
+  } else {
+    finalTitle = title ? title + ' | ' + siteName : siteName;
+  }
+
+  // ── Build description ─────────────────────────────────────────────────────────
+  // For products: rich buying-intent description with price and location signals
+  let finalDesc;
+  if (description) {
+    finalDesc = description;
+  } else if (type === 'product' && product) {
+    const price    = product.salePrice || product.price;
+    const priceStr = price ? 'Rs.' + price.toLocaleString() : '';
+    const brand    = product.brand ? product.brand + ' ' : '';
+    const cat      = product.category && product.category.name ? ' ' + product.category.name : '';
+    const plain    = String(product.shortDescription || product.description || '')
+                       .replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    const snippet  = plain.slice(0, 80) || (brand + product.name);
+    finalDesc = priceStr
+      ? (snippet + '. Buy ' + brand + product.name + cat + ' for ' + priceStr + ' in Sri Lanka. Fast delivery. Best price at ShopZen.').slice(0, 165)
+      : (snippet + '. Shop ' + brand + product.name + cat + ' online in Sri Lanka. Fast delivery, best prices at ShopZen.').slice(0, 165);
+  } else {
+    finalDesc = defaultDesc;
+  }
+
   const finalImage  = image       || defaultImage;
-  const finalUrl    = url         || `${siteUrl}${location.pathname}`;
+  const finalUrl    = url         || siteUrl + location.pathname;
 
   useEffect(() => {
     document.title = finalTitle;
@@ -156,14 +185,20 @@ export default function useSEO({
     setMeta('description', finalDesc);
     setMeta('robots', noindex ? 'noindex,nofollow' : 'index,follow,max-image-preview:large');
 
-    // Keywords meta — built from product tags + name + brand + category + country
-    // Used by Google, Bing, and other search engines to understand what the page is about.
-    // The tags you add in admin → product form drive this field.
-    const kwString = keywords ||
-      (product?.tags?.length
-        ? [product.name, product.brand, product.category?.name, ...product.tags, 'sri lanka']
-            .filter(Boolean).join(', ')
-        : null);
+    // Keywords meta — rich buying-intent signals for Google/Bing
+    let kwString = keywords;
+    if (!kwString && product) {
+      const base = [product.name, product.brand, product.sku, product.category?.name, ...(product.tags || [])].filter(Boolean);
+      const intent = [
+        'buy ' + product.name,
+        product.name + ' price sri lanka',
+        product.name + ' online',
+        product.brand ? product.brand + ' ' + (product.category?.name || '') : null,
+        'online shopping sri lanka',
+        'shopzen',
+      ].filter(Boolean);
+      kwString = [...base, ...intent].join(', ');
+    }
     if (kwString) setMeta('keywords', kwString);
     setLink('canonical', finalUrl);
 

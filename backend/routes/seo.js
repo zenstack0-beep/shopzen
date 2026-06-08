@@ -213,23 +213,26 @@ router.get('/product-meta/:slug', async (req, res) => {
     const productUrl = `${siteUrl}/product/${product.slug}`;
     const storeName  = 'ShopZen';
 
-    // ── Build meta title (50–60 chars ideal) ──────────────────────────────────
-    // Format: "Product Name - Brand | ShopZen"  OR  "Product Name | ShopZen"
-    const brandPart   = product.brand ? ` - ${product.brand}` : '';
-    const rawTitle    = `${product.name}${brandPart} | ${storeName}`;
-    const metaTitle   = rawTitle.length > 65
-      ? `${product.name.slice(0, 50)} | ${storeName}`
-      : rawTitle;
+    // ── Build meta title: include brand + location for competitive ranking ───────
+    // Format: "Product Name | Brand | ShopZen Sri Lanka" (≤65 chars)
+    const catName    = product.category?.name || '';
+    const brandPart  = product.brand ? ` | ${product.brand}` : '';
+    const withLoc    = `${product.name}${brandPart} | ${storeName} Sri Lanka`;
+    const withoutLoc = `${product.name}${brandPart} | ${storeName}`;
+    const metaTitle  = withLoc.length <= 65 ? withLoc
+                     : withoutLoc.length <= 65 ? withoutLoc
+                     : `${product.name.slice(0, 48)} | ${storeName}`;
 
-    // ── Build meta description (140–160 chars ideal) ───────────────────────────
+    // ── Build meta description: rich buying-intent (140–160 chars ideal) ───────
     const plainDesc  = String(product.shortDescription || product.description || '')
       .replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
     const priceText  = product.salePrice
       ? `Rs.${product.salePrice.toLocaleString()} (was Rs.${product.price.toLocaleString()})`
       : `Rs.${product.price.toLocaleString()}`;
-    const catName    = product.category?.name || '';
-    const baseDesc   = plainDesc.slice(0, 100) || `${product.name} available online`;
-    const metaDesc   = `${baseDesc}. Buy ${product.name} for ${priceText}. Fast delivery across Sri Lanka. Shop at ${storeName}.`.slice(0, 165);
+    const brand      = product.brand ? product.brand + ' ' : '';
+    const catPart    = catName ? ' ' + catName : '';
+    const snippet    = plainDesc.slice(0, 80) || (brand + product.name);
+    const metaDesc   = `${snippet}. Buy ${brand}${product.name}${catPart} for ${priceText} in Sri Lanka. Fast delivery. Best price at ${storeName}.`.slice(0, 165);
 
     // ── OG image ──────────────────────────────────────────────────────────────
     const ogImage = product.thumbnail || (product.images?.[0]) || `${siteUrl}/og-default.png`;
@@ -237,14 +240,20 @@ router.get('/product-meta/:slug', async (req, res) => {
     // ── Canonical URL ─────────────────────────────────────────────────────────
     const canonical = productUrl;
 
-    // ── Breadcrumb keywords ───────────────────────────────────────────────────
+    // ── Keywords: buying-intent terms for ranking ────────────────────────────
     const keywords = [
       product.name,
       product.brand,
+      product.sku,
       catName,
       ...(product.tags || []),
-      'buy in sri lanka',
+      `buy ${product.name}`,
+      `${product.name} price sri lanka`,
+      `${product.name} online`,
+      product.brand ? `${product.brand} ${catName}`.trim() : null,
       'online shopping sri lanka',
+      'fast delivery sri lanka',
+      storeName.toLowerCase(),
     ].filter(Boolean).join(', ');
 
     // ── JSON-LD Product Schema (Google Rich Results) ──────────────────────────
@@ -464,12 +473,16 @@ const seoRenderMiddleware = async (req, res) => {
         const siteUrl    = (process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
         const productUrl = `${siteUrl}/product/${product.slug}`;
         const storeName  = 'ShopZen';
-        const brandPart  = product.brand ? ` - ${product.brand}` : '';
-        const rawTitle   = `${product.name}${brandPart} | ${storeName}`;
-        const metaTitle  = rawTitle.length > 65 ? `${product.name.slice(0, 50)} | ${storeName}` : rawTitle;
-        const plainDesc  = String(product.shortDescription || product.description || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
-        const priceText  = product.salePrice ? `Rs.${product.salePrice.toLocaleString()} (was Rs.${product.price.toLocaleString()})` : `Rs.${product.price.toLocaleString()}`;
-        const metaDesc   = `${(plainDesc.slice(0,100) || product.name)}. Buy for ${priceText}. Fast delivery across Sri Lanka. Shop at ${storeName}.`.slice(0, 165);
+        const brandPart2  = product.brand ? ` | ${product.brand}` : '';
+        const withLoc2    = `${product.name}${brandPart2} | ${storeName} Sri Lanka`;
+        const withoutLoc2 = `${product.name}${brandPart2} | ${storeName}`;
+        const metaTitle   = withLoc2.length <= 65 ? withLoc2 : withoutLoc2.length <= 65 ? withoutLoc2 : `${product.name.slice(0, 48)} | ${storeName}`;
+        const plainDesc   = String(product.shortDescription || product.description || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+        const priceText   = product.salePrice ? `Rs.${product.salePrice.toLocaleString()} (was Rs.${product.price.toLocaleString()})` : `Rs.${product.price.toLocaleString()}`;
+        const brand2      = product.brand ? product.brand + ' ' : '';
+        const catPart2    = product.category?.name ? ' ' + product.category.name : '';
+        const snippet2    = plainDesc.slice(0, 80) || (brand2 + product.name);
+        const metaDesc    = `${snippet2}. Buy ${brand2}${product.name}${catPart2} for ${priceText} in Sri Lanka. Fast delivery. Best price at ${storeName}.`.slice(0, 165);
         const ogImage    = product.thumbnail || product.images?.[0] || `${siteUrl}/og-default.png`;
         const keywords   = [product.name, product.brand, product.category?.name, ...(product.tags||[]), 'sri lanka'].filter(Boolean).join(', ');
 
