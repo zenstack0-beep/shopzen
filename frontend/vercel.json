@@ -1,17 +1,6 @@
 {
   "routes": [
     {
-      "src": "/product/(?<slug>[^/]+)",
-      "dest": "https://shopzen-production.up.railway.app/product/$slug",
-      "headers": {
-        "x-ssr-request": "1"
-      }
-    },
-    {
-      "src": "/shop",
-      "dest": "https://shopzen-production.up.railway.app/shop"
-    },
-    {
       "src": "/sitemap.xml",
       "dest": "https://shopzen-production.up.railway.app/api/seo/sitemap.xml"
     },
