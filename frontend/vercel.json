@@ -1,60 +1,61 @@
 {
-  "rewrites": [
+  "routes": [
     {
-      "source": "/sitemap.xml",
-      "destination": "https://shopzen-production.up.railway.app/api/seo/sitemap.xml"
+      "src": "/product/(?<slug>[^/]+)",
+      "dest": "https://shopzen-production.up.railway.app/product/$slug",
+      "headers": {
+        "x-ssr-request": "1"
+      }
     },
     {
-      "source": "/robots.txt",
-      "destination": "https://shopzen-production.up.railway.app/api/seo/robots.txt"
+      "src": "/shop",
+      "dest": "https://shopzen-production.up.railway.app/shop"
     },
     {
-      "source": "/product/:slug",
-      "destination": "https://shopzen-production.up.railway.app/product/:slug"
+      "src": "/sitemap.xml",
+      "dest": "https://shopzen-production.up.railway.app/api/seo/sitemap.xml"
     },
     {
-      "source": "/shop",
-      "destination": "https://shopzen-production.up.railway.app/shop"
+      "src": "/robots.txt",
+      "dest": "https://shopzen-production.up.railway.app/api/seo/robots.txt"
     },
     {
-      "source": "/(.*)",
-      "destination": "/index.html"
+      "handle": "filesystem"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
     }
   ],
   "headers": [
     {
       "source": "/static/(.*)",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
-      ]
-    },
-    {
-      "source": "/index.html",
-      "headers": [
-        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" },
-        { "key": "Pragma",        "value": "no-cache" },
-        { "key": "Expires",       "value": "0" }
-      ]
-    },
-    {
-      "source": "/sitemap.xml",
-      "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=3600" }
-      ]
-    },
-    {
-      "source": "/robots.txt",
-      "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=86400" }
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
       ]
     },
     {
       "source": "/(.*)",
       "headers": [
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "X-Frame-Options",        "value": "DENY" },
-        { "key": "X-XSS-Protection",       "value": "1; mode=block" },
-        { "key": "Referrer-Policy",         "value": "strict-origin-when-cross-origin" }
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "X-XSS-Protection",
+          "value": "1; mode=block"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        }
       ]
     }
   ]
