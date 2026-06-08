@@ -213,26 +213,23 @@ router.get('/product-meta/:slug', async (req, res) => {
     const productUrl = `${siteUrl}/product/${product.slug}`;
     const storeName  = 'ShopZen';
 
-    // ── Build meta title: include brand + location for competitive ranking ───────
-    // Format: "Product Name | Brand | ShopZen Sri Lanka" (≤65 chars)
-    const catName    = product.category?.name || '';
-    const brandPart  = product.brand ? ` | ${product.brand}` : '';
-    const withLoc    = `${product.name}${brandPart} | ${storeName} Sri Lanka`;
-    const withoutLoc = `${product.name}${brandPart} | ${storeName}`;
-    const metaTitle  = withLoc.length <= 65 ? withLoc
-                     : withoutLoc.length <= 65 ? withoutLoc
-                     : `${product.name.slice(0, 48)} | ${storeName}`;
+    // ── Build meta title (50–60 chars ideal) ──────────────────────────────────
+    // Format: "Product Name - Brand | ShopZen"  OR  "Product Name | ShopZen"
+    const brandPart   = product.brand ? ` - ${product.brand}` : '';
+    const rawTitle    = `${product.name}${brandPart} | ${storeName}`;
+    const metaTitle   = rawTitle.length > 65
+      ? `${product.name.slice(0, 50)} | ${storeName}`
+      : rawTitle;
 
-    // ── Build meta description: rich buying-intent (140–160 chars ideal) ───────
+    // ── Build meta description (140–160 chars ideal) ───────────────────────────
     const plainDesc  = String(product.shortDescription || product.description || '')
       .replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
     const priceText  = product.salePrice
       ? `Rs.${product.salePrice.toLocaleString()} (was Rs.${product.price.toLocaleString()})`
       : `Rs.${product.price.toLocaleString()}`;
-    const brand      = product.brand ? product.brand + ' ' : '';
-    const catPart    = catName ? ' ' + catName : '';
-    const snippet    = plainDesc.slice(0, 80) || (brand + product.name);
-    const metaDesc   = `${snippet}. Buy ${brand}${product.name}${catPart} for ${priceText} in Sri Lanka. Fast delivery. Best price at ${storeName}.`.slice(0, 165);
+    const catName    = product.category?.name || '';
+    const baseDesc   = plainDesc.slice(0, 100) || `${product.name} available online`;
+    const metaDesc   = `${baseDesc}. Buy ${product.name} for ${priceText}. Fast delivery across Sri Lanka. Shop at ${storeName}.`.slice(0, 165);
 
     // ── OG image ──────────────────────────────────────────────────────────────
     const ogImage = product.thumbnail || (product.images?.[0]) || `${siteUrl}/og-default.png`;
@@ -240,20 +237,14 @@ router.get('/product-meta/:slug', async (req, res) => {
     // ── Canonical URL ─────────────────────────────────────────────────────────
     const canonical = productUrl;
 
-    // ── Keywords: buying-intent terms for ranking ────────────────────────────
+    // ── Breadcrumb keywords ───────────────────────────────────────────────────
     const keywords = [
       product.name,
       product.brand,
-      product.sku,
       catName,
       ...(product.tags || []),
-      `buy ${product.name}`,
-      `${product.name} price sri lanka`,
-      `${product.name} online`,
-      product.brand ? `${product.brand} ${catName}`.trim() : null,
+      'buy in sri lanka',
       'online shopping sri lanka',
-      'fast delivery sri lanka',
-      storeName.toLowerCase(),
     ].filter(Boolean).join(', ');
 
     // ── JSON-LD Product Schema (Google Rich Results) ──────────────────────────
@@ -348,82 +339,104 @@ router.get('/product-meta/:slug', async (req, res) => {
 //    const { seoRenderMiddleware } = require('./routes/seo');
 //    app.get('*', seoRenderMiddleware);
 // ══════════════════════════════════════════════════════════════════════════════
-let _htmlTemplate = null;
+// ── HTML template cache ───────────────────────────────────────────────────────
+// We cache the real index.html fetched from Vercel so SSR pages load the
+// actual React app (correct JS/CSS bundles) instead of a blank shell.
+// Cache refreshes every 6 hours so new Vercel deploys are picked up automatically.
+let _htmlTemplate    = null;
+let _htmlTemplateFetchedAt = 0;
+const HTML_CACHE_TTL = 6 * 60 * 60 * 1000; // 6 hours
 
-// Fallback HTML template used when no local frontend build exists (split Vercel+Railway deploy).
-// This is the actual shopzen.lk index.html shell — keep in sync when you do a major rebuild
-// that changes the <head> tags (e.g. new CSS/JS chunk hashes don't matter here; only meta tags do).
-// Fallback HTML shell for SSR when no local build exists.
-// IMPORTANT: Set VERCEL_JS_BUNDLE and VERCEL_CSS_BUNDLE env vars in Railway
-// after each frontend redeploy so the SSR page loads the correct JS/CSS.
-// e.g. VERCEL_JS_BUNDLE=/static/js/main.d1408473.js
-//      VERCEL_CSS_BUNDLE=/static/css/main.76474454.css
-// If not set, the page will show correct meta tags for crawlers but may appear
-// blank in browsers (crawlers don't execute JS so this doesn't affect SEO).
-const FALLBACK_HTML_SHELL = '<!doctype html><html lang="en-LK"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=5,viewport-fit=cover"/><link rel="icon" href="/favicon.ico"/><link rel="manifest" href="/manifest.json"/><meta name="theme-color" content="#b5451b" id="meta-theme-color"/><title>ShopZen — Premium Online Store Sri Lanka</title><meta name="description" content="Shop the best products online in Sri Lanka. Fast delivery, guaranteed best prices on electronics, fashion and more at ShopZen."/><meta name="robots" content="index,follow,max-image-preview:large"/><link rel="canonical" href="https://shopzen.lk"/><meta property="og:type" content="website"/><meta property="og:title" content="ShopZen — Premium Online Store Sri Lanka"/><meta property="og:description" content="Shop the best products online in Sri Lanka. Fast delivery, best prices on electronics at ShopZen."/><meta property="og:image" content="https://shopzen.lk/og-default.png"/><meta property="og:url" content="https://shopzen.lk"/><meta property="og:site_name" content="ShopZen"/><meta property="og:locale" content="en_US"/><meta name="twitter:card" content="summary_large_image"/><meta name="twitter:title" content="ShopZen — Premium Online Store Sri Lanka"/><meta name="twitter:description" content="Shop the best products online in Sri Lanka."/><meta name="twitter:image" content="https://shopzen.lk/og-default.png"/>__HEAD_INJECT__</head><body><noscript>You need to enable JavaScript to run this app.</noscript><div id="root"></div>__BODY_INJECT__</body></html>';
-
-function getFallbackTemplate() {
-  // VERCEL_JS_BUNDLE / VERCEL_CSS_BUNDLE: set these in Railway env vars after each
-  // frontend redeploy on Vercel. e.g. VERCEL_JS_BUNDLE=/static/js/main.abc123.js
-  // If not set, fall back to loading the full page from the Vercel frontend URL so
-  // browsers always get a working React app (not a blank page).
-  const js  = process.env.VERCEL_JS_BUNDLE  || '';
-  const css = process.env.VERCEL_CSS_BUNDLE || '';
+// Fetch the real index.html from the Vercel frontend and cache it.
+// Falls back to a minimal shell (meta-tags only) if the fetch fails.
+async function fetchAndCacheTemplate() {
   const frontendUrl = (process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
-
-  let headInject = '';
-  let bodyInject = '';
-
-  if (css) {
-    headInject = `<link href="${css}" rel="stylesheet"/>`;
-  } else {
-    // No bundle known — inject a redirect so real browsers get the Vercel page
-    // while search-engine crawlers (which don't execute JS) still see the injected meta tags.
-    headInject = `<noscript><meta http-equiv="refresh" content="0;url=${frontendUrl}"/></noscript>`;
-    bodyInject = `<script>
-  // If we landed here via Vercel→Railway SSR proxy and no JS bundle is configured,
-  // redirect browsers to the Vercel frontend which has the full React app.
-  // Crawlers that don't execute JS will still see the correct meta tags injected above.
-  (function(){
-    var here = window.location.pathname + window.location.search;
-    var target = '${frontendUrl}' + here;
-    if (window.location.href !== target) { window.location.replace(target); }
-  })();
-</script>`;
+  try {
+    const https = require('https');
+    const html = await new Promise((resolve, reject) => {
+      const req = https.get(frontendUrl, { timeout: 8000 }, (res) => {
+        if (res.statusCode !== 200) return reject(new Error('HTTP ' + res.statusCode));
+        let data = '';
+        res.on('data', chunk => { data += chunk; });
+        res.on('end', () => resolve(data));
+      });
+      req.on('error', reject);
+      req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    });
+    // Only cache if it looks like a real React app (has <div id="root">)
+    if (html.includes('id="root"') && html.includes('<script')) {
+      _htmlTemplate = html;
+      _htmlTemplateFetchedAt = Date.now();
+      console.log('[SSR] Fetched and cached real index.html from Vercel (' + html.length + ' bytes)');
+      return _htmlTemplate;
+    }
+    throw new Error('Fetched HTML missing React root or scripts');
+  } catch (err) {
+    console.warn('[SSR] Could not fetch index.html from Vercel:', err.message);
+    return null;
   }
-
-  if (js) {
-    bodyInject = `<script defer="defer" src="${js}"></script>`;
-  }
-
-  return FALLBACK_HTML_SHELL
-    .replace('__HEAD_INJECT__', headInject)
-    .replace('__BODY_INJECT__', bodyInject);
 }
 
-function getHtmlTemplate() {
-  if (_htmlTemplate) return _htmlTemplate;
+// Minimal fallback shell — only used if Vercel fetch fails AND no local build exists.
+// Includes a client-side redirect so real browsers are sent to Vercel.
+// Crawlers (Googlebot) don't follow JS redirects, so they still see the SSR meta tags.
+function getMinimalShell() {
+  const frontendUrl = (process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
+  return `<!doctype html><html lang="en-LK"><head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=5,viewport-fit=cover"/>
+<link rel="icon" href="/favicon.ico"/>
+<title>ShopZen</title>
+<meta name="description" content="Shop online in Sri Lanka. Fast delivery, best prices at ShopZen."/>
+<meta name="robots" content="index,follow,max-image-preview:large"/>
+<link rel="canonical" href="${frontendUrl}"/>
+__META_INJECT__
+</head>
+<body>
+<noscript>You need to enable JavaScript to run this app.</noscript>
+<div id="root"></div>
+<script>
+  // Redirect browsers to Vercel (crawlers ignore JS redirects — they see the meta tags above)
+  (function(){
+    var dest = '${frontendUrl}' + window.location.pathname + window.location.search;
+    if (window.location.href.indexOf('${frontendUrl}') !== 0) window.location.replace(dest);
+  })();
+</script>
+</body></html>`;
+}
 
-  // 1. Try local build first (monorepo / Railway monolith deployment)
+async function getHtmlTemplate() {
+  const now = Date.now();
+
+  // 1. Try local build first (Railway monolith deploy)
+  const fs   = require('fs');
+  const path = require('path');
   const candidates = [
-    require('path').join(__dirname, '..', 'frontend', 'build', 'index.html'),
-    require('path').join(__dirname, '..', 'public', 'index.html'),
-    require('path').join(process.cwd(), 'frontend', 'build', 'index.html'),
-    require('path').join(process.cwd(), 'public', 'index.html'),
+    path.join(__dirname, '..', 'frontend', 'build', 'index.html'),
+    path.join(__dirname, '..', 'public',   'index.html'),
+    path.join(process.cwd(), 'frontend',   'build', 'index.html'),
+    path.join(process.cwd(), 'public',     'index.html'),
   ];
   for (const p of candidates) {
-    if (require('fs').existsSync(p)) {
-      _htmlTemplate = require('fs').readFileSync(p, 'utf8');
-      return _htmlTemplate;
+    if (fs.existsSync(p)) {
+      const html = fs.readFileSync(p, 'utf8');
+      console.log('[SSR] Using local build:', p);
+      return html;
     }
   }
 
-  // 2. Fallback: use the hardcoded template (no network fetch = no loops, no timeouts).
-  //    The SSR middleware replaces title/description/og tags dynamically so the
-  //    static chunk hashes in the real build don't matter for crawlers.
-  console.log('[SSR] No local build found — using embedded fallback template');
-  _htmlTemplate = getFallbackTemplate();
-  return _htmlTemplate;
+  // 2. Use cached Vercel fetch if still fresh
+  if (_htmlTemplate && (now - _htmlTemplateFetchedAt) < HTML_CACHE_TTL) {
+    return _htmlTemplate;
+  }
+
+  // 3. Fetch fresh copy from Vercel (and cache it)
+  const fetched = await fetchAndCacheTemplate();
+  if (fetched) return fetched;
+
+  // 4. Last resort: minimal shell with browser redirect
+  console.log('[SSR] Using minimal shell fallback');
+  return getMinimalShell();
 }
 
 
@@ -458,8 +471,8 @@ const seoRenderMiddleware = async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', process.env.FRONTEND_URL || 'https://shopzen.lk');
   }
 
-  const html = getHtmlTemplate();
-  if (!html) return res.status(500).send('Frontend build not found and could not fetch from frontend URL.');
+  const html = await getHtmlTemplate();
+  if (!html) return res.status(500).send('Frontend build not found.');
 
   // ── Per-product SSR: inject product-specific meta ──────────────────────────
   const productMatch = req.path.match(/^\/product\/([^/]+)$/);
@@ -473,16 +486,12 @@ const seoRenderMiddleware = async (req, res) => {
         const siteUrl    = (process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
         const productUrl = `${siteUrl}/product/${product.slug}`;
         const storeName  = 'ShopZen';
-        const brandPart2  = product.brand ? ` | ${product.brand}` : '';
-        const withLoc2    = `${product.name}${brandPart2} | ${storeName} Sri Lanka`;
-        const withoutLoc2 = `${product.name}${brandPart2} | ${storeName}`;
-        const metaTitle   = withLoc2.length <= 65 ? withLoc2 : withoutLoc2.length <= 65 ? withoutLoc2 : `${product.name.slice(0, 48)} | ${storeName}`;
-        const plainDesc   = String(product.shortDescription || product.description || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
-        const priceText   = product.salePrice ? `Rs.${product.salePrice.toLocaleString()} (was Rs.${product.price.toLocaleString()})` : `Rs.${product.price.toLocaleString()}`;
-        const brand2      = product.brand ? product.brand + ' ' : '';
-        const catPart2    = product.category?.name ? ' ' + product.category.name : '';
-        const snippet2    = plainDesc.slice(0, 80) || (brand2 + product.name);
-        const metaDesc    = `${snippet2}. Buy ${brand2}${product.name}${catPart2} for ${priceText} in Sri Lanka. Fast delivery. Best price at ${storeName}.`.slice(0, 165);
+        const brandPart  = product.brand ? ` - ${product.brand}` : '';
+        const rawTitle   = `${product.name}${brandPart} | ${storeName}`;
+        const metaTitle  = rawTitle.length > 65 ? `${product.name.slice(0, 50)} | ${storeName}` : rawTitle;
+        const plainDesc  = String(product.shortDescription || product.description || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+        const priceText  = product.salePrice ? `Rs.${product.salePrice.toLocaleString()} (was Rs.${product.price.toLocaleString()})` : `Rs.${product.price.toLocaleString()}`;
+        const metaDesc   = `${(plainDesc.slice(0,100) || product.name)}. Buy for ${priceText}. Fast delivery across Sri Lanka. Shop at ${storeName}.`.slice(0, 165);
         const ogImage    = product.thumbnail || product.images?.[0] || `${siteUrl}/og-default.png`;
         const keywords   = [product.name, product.brand, product.category?.name, ...(product.tags||[]), 'sri lanka'].filter(Boolean).join(', ');
 
@@ -512,7 +521,8 @@ const seoRenderMiddleware = async (req, res) => {
           ],
         };
 
-        let out = html
+        // Replace __META_INJECT__ placeholder if using minimal shell fallback
+        let out = (html.includes('__META_INJECT__') ? html.replace('__META_INJECT__', '') : html)
           .replace(/<title>[^<]*<\/title>/, `<title>${xe(metaTitle)}</title>`)
           .replace(/(<meta name="description" content=")[^"]*(")/, `$1${xe(metaDesc)}$2`)
           .replace(/(<link rel="canonical" href=")[^"]*(")/, `$1${xe(productUrl)}$2`)
