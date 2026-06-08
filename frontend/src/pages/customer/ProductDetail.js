@@ -113,6 +113,10 @@ export default function ProductDetail() {
     image:       product?.images?.[0] || product?.thumbnail,
     type:        'product',
     product,
+    keywords:    product?.tags?.length
+      ? [product.name, product.brand, product.category?.name, ...product.tags, 'sri lanka']
+          .filter(Boolean).join(', ')
+      : undefined,
     breadcrumbs: product ? [
       { name: 'Shop', url: '/shop' },
       { name: product.category?.name || 'Products', url: `/shop/${product.category?.slug || ''}` },
@@ -452,11 +456,7 @@ export default function ProductDetail() {
           {/* Meta */}
           <div className="text-xs text-gray-400 space-y-1 border-t border-gray-100 pt-3">
             {product.sku && <p>SKU: <span className="font-mono">{product.sku}</span></p>}
-            {product.tags?.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {product.tags.map(t => <span key={t} className="bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full text-xs">{t}</span>)}
-              </div>
-            )}
+{/* Tags are used for SEO meta keywords only — not displayed in UI */}
           </div>
         </div>
       </div>

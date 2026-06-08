@@ -156,12 +156,15 @@ export default function useSEO({
     setMeta('description', finalDesc);
     setMeta('robots', noindex ? 'noindex,nofollow' : 'index,follow,max-image-preview:large');
 
-    // Keywords: explicit prop > product tags > nothing
-    const kw = keywords ||
+    // Keywords meta — built from product tags + name + brand + category + country
+    // Used by Google, Bing, and other search engines to understand what the page is about.
+    // The tags you add in admin → product form drive this field.
+    const kwString = keywords ||
       (product?.tags?.length
-        ? [product.name, product.brand, product.category?.name, ...product.tags, 'sri lanka'].filter(Boolean).join(', ')
+        ? [product.name, product.brand, product.category?.name, ...product.tags, 'sri lanka']
+            .filter(Boolean).join(', ')
         : null);
-    if (kw) setMeta('keywords', kw);
+    if (kwString) setMeta('keywords', kwString);
     setLink('canonical', finalUrl);
 
     // Open Graph
@@ -272,5 +275,5 @@ export default function useSEO({
       window.dataLayer.push({ event: 'pageview', page: { url: finalUrl, title: finalTitle } });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [finalTitle, finalDesc, finalImage, finalUrl, type, noindex, location.pathname]);
+  }, [finalTitle, finalDesc, finalImage, finalUrl, type, noindex, keywords, location.pathname]);
 }
