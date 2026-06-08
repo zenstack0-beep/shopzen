@@ -340,18 +340,51 @@ router.get('/product-meta/:slug', async (req, res) => {
 //    app.get('*', seoRenderMiddleware);
 // ══════════════════════════════════════════════════════════════════════════════
 let _htmlTemplate = null;
-function getHtmlTemplate() {
-  if (_htmlTemplate) return _htmlTemplate;
-  const candidates = [
-    path.join(__dirname, '..', 'frontend', 'build', 'index.html'),
-    path.join(__dirname, '..', 'public', 'index.html'),
-    path.join(process.cwd(), 'frontend', 'build', 'index.html'),
-    path.join(process.cwd(), 'public', 'index.html'),
-  ];
-  for (const p of candidates) {
-    if (fs.existsSync(p)) { _htmlTemplate = fs.readFileSync(p, 'utf8'); return _htmlTemplate; }
+let _htmlTemplateFetchedAt = 0;
+const HTML_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+
+async function getHtmlTemplate() {
+  // 1. Try local build first (monorepo / Railway monolith deployment)
+  if (!_htmlTemplate || Date.now() - _htmlTemplateFetchedAt > HTML_CACHE_TTL) {
+    const candidates = [
+      path.join(__dirname, '../', 'frontend', 'build', 'index.html'),
+      path.join(__dirname, '../', 'public', 'index.html'),
+      path.join(process.cwd(), 'frontend', 'build', 'index.html'),
+      path.join(process.cwd(), 'public', 'index.html'),
+    ];
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        _htmlTemplate = fs.readFileSync(p, 'utf8');
+        _htmlTemplateFetchedAt = Date.now();
+        return _htmlTemplate;
+      }
+    }
+
+    // 2. Fallback: fetch index.html from the Vercel frontend (split-deploy setup)
+    const frontendUrl = (process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
+    try {
+      const https = require('https');
+      const http  = require('http');
+      const fetcher = frontendUrl.startsWith('https') ? https : http;
+      const html = await new Promise((resolve, reject) => {
+        const req = fetcher.get(`${frontendUrl}/index.html`, { headers: { 'User-Agent': 'ShopZen-SSR/1.0' } }, (res) => {
+          if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
+          let data = '';
+          res.on('data', c => data += c);
+          res.on('end', () => resolve(data));
+        });
+        req.on('error', reject);
+        req.setTimeout(5000, () => { req.destroy(); reject(new Error('timeout')); });
+      });
+      _htmlTemplate = html;
+      _htmlTemplateFetchedAt = Date.now();
+      return _htmlTemplate;
+    } catch (e) {
+      console.error('[SSR] Could not fetch index.html from frontend:', e.message);
+      return null;
+    }
   }
-  return null;
+  return _htmlTemplate;
 }
 
 async function getSeoMeta() {
@@ -379,8 +412,14 @@ const seoRenderMiddleware = async (req, res) => {
   if (req.path.startsWith('/api/') || req.path.match(/\.(js|css|png|jpg|ico|svg|json|xml|txt|woff2?)$/))
     return res.status(404).send('Not found');
 
-  const html = getHtmlTemplate();
-  if (!html) return res.status(500).send('Frontend build not found. Run: cd frontend && npm run build');
+  // Allow Vercel proxy to forward SSR responses
+  const origin = req.headers.origin || req.headers.referer || '';
+  if (origin.includes('shopzen.lk') || origin.includes('vercel.app') || !origin) {
+    res.setHeader('Access-Control-Allow-Origin', process.env.FRONTEND_URL || 'https://shopzen.lk');
+  }
+
+  const html = await getHtmlTemplate();
+  if (!html) return res.status(500).send('Frontend build not found and could not fetch from frontend URL.');
 
   // ── Per-product SSR: inject product-specific meta ──────────────────────────
   const productMatch = req.path.match(/^\/product\/([^/]+)$/);

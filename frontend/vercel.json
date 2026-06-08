@@ -9,6 +9,14 @@
       "destination": "https://shopzen-production.up.railway.app/api/seo/robots.txt"
     },
     {
+      "source": "/product/:slug",
+      "destination": "https://shopzen-production.up.railway.app/product/:slug"
+    },
+    {
+      "source": "/shop",
+      "destination": "https://shopzen-production.up.railway.app/shop"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
@@ -46,7 +54,7 @@
         { "key": "X-Content-Type-Options", "value": "nosniff" },
         { "key": "X-Frame-Options",        "value": "DENY" },
         { "key": "X-XSS-Protection",       "value": "1; mode=block" },
-        { "key": "Referrer-Policy",        "value": "strict-origin-when-cross-origin" }
+        { "key": "Referrer-Policy",         "value": "strict-origin-when-cross-origin" }
       ]
     }
   ]

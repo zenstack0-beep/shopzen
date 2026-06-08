@@ -134,6 +134,7 @@ export default function useSEO({
   product,
   breadcrumbs,
   noindex = false,
+  keywords,
 } = {}) {
   const location = useLocation();
   const cfg = getSeoConfig();
@@ -154,6 +155,13 @@ export default function useSEO({
 
     setMeta('description', finalDesc);
     setMeta('robots', noindex ? 'noindex,nofollow' : 'index,follow,max-image-preview:large');
+
+    // Keywords: explicit prop > product tags > nothing
+    const kw = keywords ||
+      (product?.tags?.length
+        ? [product.name, product.brand, product.category?.name, ...product.tags, 'sri lanka'].filter(Boolean).join(', ')
+        : null);
+    if (kw) setMeta('keywords', kw);
     setLink('canonical', finalUrl);
 
     // Open Graph
