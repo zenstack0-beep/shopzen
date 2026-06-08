@@ -354,10 +354,39 @@ let _htmlTemplate = null;
 const FALLBACK_HTML_SHELL = '<!doctype html><html lang="en-LK"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=5,viewport-fit=cover"/><link rel="icon" href="/favicon.ico"/><link rel="manifest" href="/manifest.json"/><meta name="theme-color" content="#b5451b" id="meta-theme-color"/><title>ShopZen — Premium Online Store Sri Lanka</title><meta name="description" content="Shop the best products online in Sri Lanka. Fast delivery, guaranteed best prices on electronics, fashion and more at ShopZen."/><meta name="robots" content="index,follow,max-image-preview:large"/><link rel="canonical" href="https://shopzen.lk"/><meta property="og:type" content="website"/><meta property="og:title" content="ShopZen — Premium Online Store Sri Lanka"/><meta property="og:description" content="Shop the best products online in Sri Lanka. Fast delivery, best prices on electronics at ShopZen."/><meta property="og:image" content="https://shopzen.lk/og-default.png"/><meta property="og:url" content="https://shopzen.lk"/><meta property="og:site_name" content="ShopZen"/><meta property="og:locale" content="en_US"/><meta name="twitter:card" content="summary_large_image"/><meta name="twitter:title" content="ShopZen — Premium Online Store Sri Lanka"/><meta name="twitter:description" content="Shop the best products online in Sri Lanka."/><meta name="twitter:image" content="https://shopzen.lk/og-default.png"/>__HEAD_INJECT__</head><body><noscript>You need to enable JavaScript to run this app.</noscript><div id="root"></div>__BODY_INJECT__</body></html>';
 
 function getFallbackTemplate() {
+  // VERCEL_JS_BUNDLE / VERCEL_CSS_BUNDLE: set these in Railway env vars after each
+  // frontend redeploy on Vercel. e.g. VERCEL_JS_BUNDLE=/static/js/main.abc123.js
+  // If not set, fall back to loading the full page from the Vercel frontend URL so
+  // browsers always get a working React app (not a blank page).
   const js  = process.env.VERCEL_JS_BUNDLE  || '';
   const css = process.env.VERCEL_CSS_BUNDLE || '';
-  const headInject = css ? `<link href="${css}" rel="stylesheet"/>` : '';
-  const bodyInject = js  ? `<script defer="defer" src="${js}"></script>` : '';
+  const frontendUrl = (process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
+
+  let headInject = '';
+  let bodyInject = '';
+
+  if (css) {
+    headInject = `<link href="${css}" rel="stylesheet"/>`;
+  } else {
+    // No bundle known — inject a redirect so real browsers get the Vercel page
+    // while search-engine crawlers (which don't execute JS) still see the injected meta tags.
+    headInject = `<noscript><meta http-equiv="refresh" content="0;url=${frontendUrl}"/></noscript>`;
+    bodyInject = `<script>
+  // If we landed here via Vercel→Railway SSR proxy and no JS bundle is configured,
+  // redirect browsers to the Vercel frontend which has the full React app.
+  // Crawlers that don't execute JS will still see the correct meta tags injected above.
+  (function(){
+    var here = window.location.pathname + window.location.search;
+    var target = '${frontendUrl}' + here;
+    if (window.location.href !== target) { window.location.replace(target); }
+  })();
+</script>`;
+  }
+
+  if (js) {
+    bodyInject = `<script defer="defer" src="${js}"></script>`;
+  }
+
   return FALLBACK_HTML_SHELL
     .replace('__HEAD_INJECT__', headInject)
     .replace('__BODY_INJECT__', bodyInject);
