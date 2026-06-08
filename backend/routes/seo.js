@@ -344,7 +344,24 @@ let _htmlTemplate = null;
 // Fallback HTML template used when no local frontend build exists (split Vercel+Railway deploy).
 // This is the actual shopzen.lk index.html shell — keep in sync when you do a major rebuild
 // that changes the <head> tags (e.g. new CSS/JS chunk hashes don't matter here; only meta tags do).
-const FALLBACK_HTML_TEMPLATE = '<!doctype html><html lang="en-LK"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=5,viewport-fit=cover"/><link rel="icon" href="/favicon.ico"/><link rel="icon" href="/favicon-32x32.png" sizes="32x32" type="image/png"/><link rel="icon" href="/apple-touch-icon.png"/><link rel="apple-touch-icon" href="/apple-touch-icon.png"/><link rel="manifest" href="/manifest.json"/><meta name="theme-color" content="#b5451b" id="meta-theme-color"/><meta name="mobile-web-app-capable" content="yes"/><meta name="apple-mobile-web-app-capable" content="yes"/><meta name="apple-mobile-web-app-status-bar-style" content="default"/><meta name="apple-mobile-web-app-title" content="ShopZen"/><meta name="format-detection" content="telephone=no"/><title>ShopZen — Premium Online Store Sri Lanka</title><meta name="description" content="Shop the best products online in Sri Lanka. Fast delivery, guaranteed best prices on electronics, fashion and more at ShopZen."/><meta name="robots" content="index,follow,max-image-preview:large"/><link rel="canonical" href="https://shopzen.lk"/><meta property="og:type" content="website"/><meta property="og:title" content="ShopZen — Premium Online Store Sri Lanka"/><meta property="og:description" content="Shop the best products online in Sri Lanka. Fast delivery, best prices on electronics at ShopZen."/><meta property="og:image" content="https://shopzen.lk/og-default.png"/><meta property="og:url" content="https://shopzen.lk"/><meta property="og:site_name" content="ShopZen"/><meta property="og:locale" content="en_US"/><meta name="twitter:card" content="summary_large_image"/><meta name="twitter:title" content="ShopZen — Premium Online Store Sri Lanka"/><meta name="twitter:description" content="Shop the best products online in Sri Lanka. Fast delivery, best prices on electronics at ShopZen."/><meta name="twitter:image" content="https://shopzen.lk/og-default.png"/></head><body><noscript>You need to enable JavaScript to run this app.</noscript><div id="root"></div></body></html>';
+// Fallback HTML shell for SSR when no local build exists.
+// IMPORTANT: Set VERCEL_JS_BUNDLE and VERCEL_CSS_BUNDLE env vars in Railway
+// after each frontend redeploy so the SSR page loads the correct JS/CSS.
+// e.g. VERCEL_JS_BUNDLE=/static/js/main.d1408473.js
+//      VERCEL_CSS_BUNDLE=/static/css/main.76474454.css
+// If not set, the page will show correct meta tags for crawlers but may appear
+// blank in browsers (crawlers don't execute JS so this doesn't affect SEO).
+const FALLBACK_HTML_SHELL = '<!doctype html><html lang="en-LK"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=5,viewport-fit=cover"/><link rel="icon" href="/favicon.ico"/><link rel="manifest" href="/manifest.json"/><meta name="theme-color" content="#b5451b" id="meta-theme-color"/><title>ShopZen — Premium Online Store Sri Lanka</title><meta name="description" content="Shop the best products online in Sri Lanka. Fast delivery, guaranteed best prices on electronics, fashion and more at ShopZen."/><meta name="robots" content="index,follow,max-image-preview:large"/><link rel="canonical" href="https://shopzen.lk"/><meta property="og:type" content="website"/><meta property="og:title" content="ShopZen — Premium Online Store Sri Lanka"/><meta property="og:description" content="Shop the best products online in Sri Lanka. Fast delivery, best prices on electronics at ShopZen."/><meta property="og:image" content="https://shopzen.lk/og-default.png"/><meta property="og:url" content="https://shopzen.lk"/><meta property="og:site_name" content="ShopZen"/><meta property="og:locale" content="en_US"/><meta name="twitter:card" content="summary_large_image"/><meta name="twitter:title" content="ShopZen — Premium Online Store Sri Lanka"/><meta name="twitter:description" content="Shop the best products online in Sri Lanka."/><meta name="twitter:image" content="https://shopzen.lk/og-default.png"/>__HEAD_INJECT__</head><body><noscript>You need to enable JavaScript to run this app.</noscript><div id="root"></div>__BODY_INJECT__</body></html>';
+
+function getFallbackTemplate() {
+  const js  = process.env.VERCEL_JS_BUNDLE  || '';
+  const css = process.env.VERCEL_CSS_BUNDLE || '';
+  const headInject = css ? `<link href="${css}" rel="stylesheet"/>` : '';
+  const bodyInject = js  ? `<script defer="defer" src="${js}"></script>` : '';
+  return FALLBACK_HTML_SHELL
+    .replace('__HEAD_INJECT__', headInject)
+    .replace('__BODY_INJECT__', bodyInject);
+}
 
 function getHtmlTemplate() {
   if (_htmlTemplate) return _htmlTemplate;
@@ -367,7 +384,7 @@ function getHtmlTemplate() {
   //    The SSR middleware replaces title/description/og tags dynamically so the
   //    static chunk hashes in the real build don't matter for crawlers.
   console.log('[SSR] No local build found — using embedded fallback template');
-  _htmlTemplate = FALLBACK_HTML_TEMPLATE;
+  _htmlTemplate = getFallbackTemplate();
   return _htmlTemplate;
 }
 
