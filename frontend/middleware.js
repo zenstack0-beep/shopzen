@@ -1,58 +1,58 @@
 /**
- * middleware.js  — Vercel Edge Middleware for ShopZen
+ * middleware.js — Vercel Edge Middleware for ShopZen
  *
- * ALL page requests are proxied to Railway seoRenderMiddleware.
- * Railway injects per-page title, meta, OG, JSON-LD into the real
- * built index.html (which contains the JS/CSS bundles), so:
- *   • Page source shows correct SEO meta for every page  ✓
- *   • JS/CSS bundles are present so React loads normally  ✓
- *   • Bots and browsers both get the same correct HTML    ✓
- *
- * Static assets (/static/*, /favicon.ico, etc.) bypass this
- * middleware and are served directly by Vercel CDN.
+ * Flow for every request:
+ *   Static files (.js/.css/images)  → pass through → Vercel CDN serves them
+ *   /api/*                          → pass through → vercel.json proxies to Railway
+ *   Private pages (/login, /admin)  → pass through → Vercel serves index.html
+ *   Public pages (/, /product/*, /shop, /page/*, /campaign/*)
+ *                                   → proxy to Railway seoRenderMiddleware
+ *                                   → Railway injects per-page meta into real index.html
+ *                                   → Page source has correct SEO + JS bundles load React ✓
  */
 
 export const config = {
     runtime: 'edge',
-    matcher: [
-      // Match all navigable page routes — skip static files and API
-      '/((?!_vercel|static|api|favicon\\.ico|favicon-|apple-touch|manifest\\.json|robots\\.txt|sitemap\\.xml|og-default\\.png|googleee.*\\.html|.*\\.(?:js|css|png|jpg|jpeg|gif|ico|svg|woff2?|ttf|eot|map|json|xml|txt)).*)',
-    ],
+    matcher: ['/(.*)', ],
   };
   
-  // Pages that don't need SSR — serve plain index.html directly
-  // (login/account/checkout have no public SEO value and no product data)
-  const SKIP_SSR = /^\/(login|register|forgot-password|account|my-orders|checkout|order-success|track-order|admin)(\/|$)/;
+  // Static asset extensions — never proxy these, Vercel serves them from CDN
+  const STATIC_EXT = /\.(?:js|css|png|jpg|jpeg|gif|ico|svg|webp|woff2?|ttf|eot|map|json|xml|txt|html)$/i;
+  
+  // Private/auth/internal paths — skip SSR, Vercel serves index.html directly
+  const SKIP_SSR_PATH = /^\/(api|_vercel|static|favicon|apple-touch|manifest\.json|robots\.txt|sitemap\.xml|og-default\.png|googleee|login|register|forgot-password|account|my-orders|checkout|order-success|track-order|admin)(\/|$|\?|$)/;
   
   export default async function middleware(request) {
     const url = new URL(request.url);
+    const path = url.pathname;
   
-    // Skip SSR for private/auth pages — serve React shell directly
-    if (SKIP_SSR.test(url.pathname)) {
-      return; // Vercel serves index.html
-    }
+    // Pass through static files immediately
+    if (STATIC_EXT.test(path)) return;
   
+    // Pass through private/internal paths
+    if (SKIP_SSR_PATH.test(path)) return;
+  
+    // All public pages → Railway SSR
     const RAILWAY = (process.env.RAILWAY_BACKEND_URL || 'https://shopzen-production.up.railway.app').replace(/\/$/, '');
-    const target = `${RAILWAY}${url.pathname}${url.search}`;
-  
-    const headers = new Headers();
-    headers.set('user-agent', request.headers.get('user-agent') || 'Mozilla/5.0');
-    headers.set('accept', 'text/html');
-    headers.set('accept-language', request.headers.get('accept-language') || 'en');
-    headers.set('x-forwarded-host', url.host);
-    headers.set('x-forwarded-proto', 'https');
-    headers.set('x-real-ip', request.headers.get('x-real-ip') || '');
+    const target = `${RAILWAY}${path}${url.search}`;
   
     try {
       const ssrRes = await fetch(target, {
         method: 'GET',
-        headers,
+        headers: {
+          'user-agent': request.headers.get('user-agent') || 'Mozilla/5.0',
+          'accept': 'text/html,application/xhtml+xml',
+          'accept-language': request.headers.get('accept-language') || 'en',
+          'x-forwarded-host': url.host,
+          'x-forwarded-proto': 'https',
+          'x-real-ip': request.headers.get('x-real-ip') || '',
+        },
         signal: AbortSignal.timeout(8000),
       });
   
       if (ssrRes.ok) {
         const body = await ssrRes.text();
-        // Must contain React root AND our JS bundle to be valid
+        // Only return if it's valid — must have React root AND our JS bundle
         if (body.includes('id="root"') && body.includes('/static/js/')) {
           return new Response(body, {
             status: 200,
@@ -65,7 +65,7 @@ export const config = {
         }
       }
     } catch (_) {
-      // Railway timeout or error — fall back to Vercel's index.html
+      // Railway timeout or error — fall through to Vercel's plain index.html
       // React still loads, just without injected per-page meta
     }
   
