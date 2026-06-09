@@ -210,7 +210,7 @@ export default function useSEO({
     setMeta('og:image',       finalImage, 'property');
     setMeta('og:url',         finalUrl,   'property');
     setMeta('og:site_name',   siteName,   'property');
-    setMeta('og:locale',      'en_US',    'property');
+    setMeta('og:locale',      'en_LK',    'property');
 
     // Twitter Cards
     setMeta('twitter:card',        finalImage ? 'summary_large_image' : 'summary');

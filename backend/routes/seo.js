@@ -218,8 +218,9 @@ router.get('/product-meta/:slug', async (req, res) => {
       ? `Rs.${product.salePrice.toLocaleString()} (was Rs.${product.price.toLocaleString()})`
       : `Rs.${product.price.toLocaleString()}`;
     const catName    = product.category?.name || '';
-    const baseDesc   = plainDesc.slice(0, 100) || `${product.name} available online`;
-    const metaDesc   = `${baseDesc}. Buy ${product.name} for ${priceText}. Fast delivery across Sri Lanka. Shop at ${storeName}.`.slice(0, 165);
+    const _raw1      = (plainDesc.split('.')[0] || plainDesc).trim();
+    const baseDesc   = _raw1.length <= 85 ? _raw1 : _raw1.slice(0, _raw1.lastIndexOf(' ', 85));
+    const metaDesc   = `${baseDesc || product.name}. ${priceText}. Fast delivery across Sri Lanka. Shop at ${storeName}.`.slice(0, 165);
 
     const ogImage = product.thumbnail || (product.images?.[0]) || `${siteUrl}/og-default.png`;
     const canonical = productUrl;
@@ -627,7 +628,9 @@ const seoRenderMiddleware = async (req, res) => {
         const metaTitle  = buildProductTitle(product, storeName);
         const plainDesc  = String(product.shortDescription || product.description || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
         const priceText  = product.salePrice ? `Rs.${product.salePrice.toLocaleString()} (was Rs.${product.price.toLocaleString()})` : `Rs.${product.price.toLocaleString()}`;
-        const metaDesc   = `${(plainDesc.slice(0,100) || product.name)}. Buy for ${priceText}. Fast delivery across Sri Lanka. Shop at ${storeName}.`.slice(0, 165);
+        const _raw2      = (plainDesc.split('.')[0] || plainDesc).trim();
+        const baseDesc   = _raw2.length <= 85 ? _raw2 : _raw2.slice(0, _raw2.lastIndexOf(' ', 85));
+        const metaDesc   = `${baseDesc || product.name}. ${priceText}. Fast delivery across Sri Lanka. Shop at ${storeName}.`.slice(0, 165);
         const ogImage    = product.thumbnail || product.images?.[0] || defaultOgImage;
         const keywords   = [product.name, product.brand, product.category?.name, ...(product.tags||[]), 'sri lanka'].filter(Boolean).join(', ');
 
