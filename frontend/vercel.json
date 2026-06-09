@@ -9,20 +9,8 @@
       "dest": "https://shopzen-production.up.railway.app/api/seo/robots.txt"
     },
     {
-      "src": "/product/([^/]+)",
-      "dest": "https://shopzen-production.up.railway.app/product/$1"
-    },
-    {
-      "src": "/shop",
-      "dest": "https://shopzen-production.up.railway.app/shop"
-    },
-    {
-      "src": "/shop/?(.*)",
-      "dest": "https://shopzen-production.up.railway.app/shop?$1"
-    },
-    {
-      "src": "/",
-      "dest": "https://shopzen-production.up.railway.app/"
+      "src": "/api/(.*)",
+      "dest": "https://shopzen-production.up.railway.app/api/$1"
     },
     {
       "handle": "filesystem"
