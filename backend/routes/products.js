@@ -175,6 +175,72 @@ router.get('/', async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
+// Public — similar products by product ID (scored by tags, category, brand, price range)
+// GET /api/products/:id/similar?limit=6
+router.get('/:id/similar', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 6, 12);
+    const source = await Product.findById(req.params.id).populate('category', 'name slug').lean();
+    if (!source) return res.status(404).json({ message: 'Product not found' });
+
+    // Build a broad candidate pool: same category OR overlapping tags OR same brand
+    const orConditions = [];
+    if (source.category?._id) orConditions.push({ category: source.category._id });
+    if (source.tags?.length)   orConditions.push({ tags: { $in: source.tags } });
+    if (source.brand)          orConditions.push({ brand: source.brand });
+
+    const candidates = await Product.find({
+      _id:      { $ne: source._id },
+      isActive: true,
+      ...(orConditions.length ? { $or: orConditions } : {}),
+    })
+      .populate('category', 'name slug')
+      .lean();
+
+    // Score each candidate — higher = more similar
+    const effectivePrice = p => p.isOnSale && p.salePrice ? p.salePrice : p.price;
+    const sourcePrice    = effectivePrice(source);
+
+    const scored = candidates.map(p => {
+      let score = 0;
+
+      // Same category → strong signal
+      if (p.category?._id?.toString() === source.category?._id?.toString()) score += 40;
+
+      // Overlapping tags — weight by overlap ratio
+      const srcTags  = new Set((source.tags || []).map(t => t.toLowerCase()));
+      const candTags = (p.tags || []).map(t => t.toLowerCase());
+      const sharedTags = candTags.filter(t => srcTags.has(t)).length;
+      if (srcTags.size > 0) score += Math.round((sharedTags / srcTags.size) * 35);
+
+      // Same brand
+      if (source.brand && p.brand && source.brand.toLowerCase() === p.brand.toLowerCase()) score += 15;
+
+      // Similar price (within 30% of source price)
+      if (sourcePrice > 0) {
+        const priceDiff = Math.abs(effectivePrice(p) - sourcePrice) / sourcePrice;
+        if (priceDiff <= 0.1) score += 10;
+        else if (priceDiff <= 0.2) score += 6;
+        else if (priceDiff <= 0.3) score += 3;
+      }
+
+      // Popularity boost (normalised, max 5 pts)
+      score += Math.min(5, Math.round((p.soldCount || 0) / 20));
+
+      return { ...p, _similarityScore: score };
+    });
+
+    // Sort by score desc, then by soldCount for ties
+    scored.sort((a, b) =>
+      b._similarityScore - a._similarityScore ||
+      (b.soldCount || 0) - (a.soldCount || 0)
+    );
+
+    const results = scored.slice(0, limit).map(({ _similarityScore, ...p }) => p);
+    res.json(results);
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
 // Public — single product by slug (wildcard — MUST be last)
 router.get('/:slug', async (req, res) => {
   try {
