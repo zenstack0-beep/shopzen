@@ -57,5 +57,8 @@
         }
       ]
     }
-  ]
+  ],
+  "env": {
+    "RAILWAY_BACKEND_URL": "https://shopzen-production.up.railway.app"
+  }
 }

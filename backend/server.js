@@ -74,10 +74,28 @@ app.use('/api/automation',    require('./routes/automation'));
 app.use('/api/deals',         require('./routes/deals'));
 app.use('/api/ai',            require('./routes/ai'));
 
-// ── Health check ───────────────────────────────────────────────────────────────
-// All page routing is handled by Vercel (rewrites → /index.html).
-// Railway only handles /api/* requests.
-// The seoRenderMiddleware / static file serving below is intentionally removed.
+// ── Page SSR for crawlers ──────────────────────────────────────────────────────
+// Real users are served /index.html directly by Vercel (React SPA).
+// Crawlers/bots are proxied here by Vercel Edge Middleware (middleware.js)
+// so we can inject dynamic per-page meta, OG tags, and JSON-LD schema.
+// The seoRenderMiddleware fetches the real index.html from Vercel, injects
+// the correct tags, and returns the enriched HTML to the crawler.
+const { seoRenderMiddleware } = require('./routes/seo');
+const fs = require('fs');
+
+// Only serve static files if a local build exists (monorepo / self-hosted deploy)
+const frontendBuildPath = path.join(__dirname, '..', 'frontend', 'build');
+if (fs.existsSync(frontendBuildPath)) {
+  app.use(express.static(frontendBuildPath, {
+    index: false,   // don't auto-serve index.html — let seoRenderMiddleware handle it
+    maxAge: '7d',
+    immutable: true,
+  }));
+}
+
+// Catch-all: SSR for bots proxied via Vercel Edge Middleware,
+// or fallback index.html for any other request that reaches Railway.
+app.get('*', seoRenderMiddleware);
 
 async function startServer() {
   try {
