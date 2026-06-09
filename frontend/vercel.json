@@ -13,8 +13,28 @@
       "destination": "https://shopzen-production.up.railway.app/api/:path*"
     },
     {
-      "source": "/(.*)",
-      "destination": "/index.html"
+      "source": "/product/:slug",
+      "destination": "https://shopzen-production.up.railway.app/product/:slug"
+    },
+    {
+      "source": "/shop",
+      "destination": "https://shopzen-production.up.railway.app/shop"
+    },
+    {
+      "source": "/shop/:path*",
+      "destination": "https://shopzen-production.up.railway.app/shop/:path*"
+    },
+    {
+      "source": "/",
+      "destination": "https://shopzen-production.up.railway.app/"
+    },
+    {
+      "source": "/page/:slug",
+      "destination": "https://shopzen-production.up.railway.app/page/:slug"
+    },
+    {
+      "source": "/campaign/:slug",
+      "destination": "https://shopzen-production.up.railway.app/campaign/:slug"
     }
   ],
   "headers": [

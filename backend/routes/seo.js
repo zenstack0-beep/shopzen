@@ -318,16 +318,27 @@ router.get('/product-meta/:slug', async (req, res) => {
 //  SSR-lite middleware — injects correct meta into index.html for Googlebot
 // ══════════════════════════════════════════════════════════════════════════════
 
-let _htmlTemplate    = null;
-let _htmlTemplateFetchedAt = 0;
+// ── Embedded build template (real index.html from frontend/build) ─────────────
+// This is the actual compiled React app HTML, embedded so Railway always has
+// the correct template with JS/CSS bundles — no fetching required.
+const BUILT_HTML_TEMPLATE = "<!doctype html><html lang=\"en-LK\"><head><meta charset=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,maximum-scale=5,viewport-fit=cover\"/><link rel=\"icon\" href=\"/favicon.ico\"/><link rel=\"icon\" href=\"/favicon-32x32.png\" sizes=\"32x32\" type=\"image/png\"/><link rel=\"icon\" href=\"/favicon-16x16.png\" sizes=\"16x16\" type=\"image/png\"/><link rel=\"apple-touch-icon\" href=\"/apple-touch-icon.png\"/><link rel=\"manifest\" href=\"/manifest.json\"/><meta name=\"theme-color\" content=\"#b5451b\" id=\"meta-theme-color\"/><meta name=\"mobile-web-app-capable\" content=\"yes\"/><meta name=\"apple-mobile-web-app-capable\" content=\"yes\"/><meta name=\"apple-mobile-web-app-status-bar-style\" content=\"default\"/><meta name=\"apple-mobile-web-app-title\" content=\"ShopZen\"/><meta name=\"format-detection\" content=\"telephone=no\"/><title>ShopZen \u2014 Premium Online Store Sri Lanka</title><meta name=\"description\" content=\"Shop the best products online in Sri Lanka. Fast delivery, guaranteed best prices on electronics, fashion and more at ShopZen.\"/><meta name=\"robots\" content=\"index,follow,max-image-preview:large\"/><link rel=\"canonical\" href=\"https://shopzen.lk\"/><meta property=\"og:type\" content=\"website\"/><meta property=\"og:title\" content=\"ShopZen \u2014 Premium Online Store Sri Lanka\"/><meta property=\"og:description\" content=\"Shop the best products online in Sri Lanka. Fast delivery, guaranteed best prices on electronics, fashion and more at ShopZen.\"/><meta property=\"og:image\" content=\"https://shopzen.lk/og-default.png\"/><meta property=\"og:url\" content=\"https://shopzen.lk\"/><meta property=\"og:site_name\" content=\"ShopZen\"/><meta property=\"og:locale\" content=\"en_US\"/><meta name=\"twitter:card\" content=\"summary_large_image\"/><meta name=\"twitter:title\" content=\"ShopZen \u2014 Premium Online Store Sri Lanka\"/><meta name=\"twitter:description\" content=\"Shop the best products online in Sri Lanka. Fast delivery, guaranteed best prices on electronics, fashion and more at ShopZen.\"/><meta name=\"twitter:image\" content=\"https://shopzen.lk/og-default.png\"/><link rel=\"preconnect\" href=\"https://fonts.googleapis.com\"/><link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin/><link rel=\"dns-prefetch\" href=\"https://res.cloudinary.com\"/><link rel=\"dns-prefetch\" href=\"https://www.googletagmanager.com\"/><link rel=\"dns-prefetch\" href=\"https://connect.facebook.net\"/><script>!function(){var e={default:{p:\"#b5451b\",pd:\"#8b3214\",pl:\"#e8643c\",a:\"#f0a500\",d:\"#0f172a\",s:\"#1e293b\",g:\"linear-gradient(135deg,#b5451b 0%,#e8643c 50%,#f0a500 100%)\",hg:\"linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#b5451b 100%)\",cb:\"#ffffff\",bb:\"#fafaf8\"},ocean:{p:\"#0369a1\",pd:\"#024f7a\",pl:\"#0ea5e9\",a:\"#06b6d4\",d:\"#0c1a2e\",s:\"#0f2744\",g:\"linear-gradient(135deg,#0369a1 0%,#0ea5e9 50%,#06b6d4 100%)\",hg:\"linear-gradient(135deg,#0c1a2e 0%,#0f2744 50%,#0369a1 100%)\",cb:\"#ffffff\",bb:\"#f0f9ff\"},forest:{p:\"#15803d\",pd:\"#0f5f2e\",pl:\"#22c55e\",a:\"#84cc16\",d:\"#052e16\",s:\"#0a3d20\",g:\"linear-gradient(135deg,#15803d 0%,#22c55e 50%,#84cc16 100%)\",hg:\"linear-gradient(135deg,#052e16 0%,#0a3d20 50%,#15803d 100%)\",cb:\"#ffffff\",bb:\"#f0fdf4\"},royal:{p:\"#7c3aed\",pd:\"#5b21b6\",pl:\"#a78bfa\",a:\"#f59e0b\",d:\"#1e1b4b\",s:\"#2e1065\",g:\"linear-gradient(135deg,#7c3aed 0%,#a78bfa 50%,#f59e0b 100%)\",hg:\"linear-gradient(135deg,#1e1b4b 0%,#2e1065 50%,#7c3aed 100%)\",cb:\"#ffffff\",bb:\"#faf5ff\"},rose:{p:\"#be185d\",pd:\"#9d174d\",pl:\"#f43f5e\",a:\"#fb7185\",d:\"#1f0a14\",s:\"#3b0a20\",g:\"linear-gradient(135deg,#be185d 0%,#f43f5e 50%,#fb7185 100%)\",hg:\"linear-gradient(135deg,#1f0a14 0%,#3b0a20 50%,#be185d 100%)\",cb:\"#ffffff\",bb:\"#fff1f2\"},amber:{p:\"#b45309\",pd:\"#92400e\",pl:\"#f59e0b\",a:\"#fbbf24\",d:\"#1c0a00\",s:\"#451a03\",g:\"linear-gradient(135deg,#b45309 0%,#f59e0b 50%,#fbbf24 100%)\",hg:\"linear-gradient(135deg,#1c0a00 0%,#451a03 50%,#b45309 100%)\",cb:\"#ffffff\",bb:\"#fffbeb\"},midnight:{p:\"#6366f1\",pd:\"#4338ca\",pl:\"#818cf8\",a:\"#38bdf8\",d:\"#0a0a0f\",s:\"#111120\",g:\"linear-gradient(135deg,#4338ca 0%,#6366f1 50%,#38bdf8 100%)\",hg:\"linear-gradient(135deg,#0a0a0f 0%,#111120 50%,#4338ca 100%)\",cb:\"#1a1a2e\",bb:\"#0d0d1a\"},coral:{p:\"#f97316\",pd:\"#ea580c\",pl:\"#fb923c\",a:\"#fcd34d\",d:\"#1c0a00\",s:\"#431407\",g:\"linear-gradient(135deg,#ea580c 0%,#f97316 50%,#fcd34d 100%)\",hg:\"linear-gradient(135deg,#1c0a00 0%,#431407 50%,#ea580c 100%)\",cb:\"#ffffff\",bb:\"#fff7ed\"},slate:{p:\"#334155\",pd:\"#1e293b\",pl:\"#475569\",a:\"#38bdf8\",d:\"#0f172a\",s:\"#1e293b\",g:\"linear-gradient(135deg,#1e293b 0%,#334155 50%,#38bdf8 100%)\",hg:\"linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#334155 100%)\",cb:\"#ffffff\",bb:\"#f8fafc\"},sakura:{p:\"#db2777\",pd:\"#be185d\",pl:\"#f472b6\",a:\"#a78bfa\",d:\"#1a0a14\",s:\"#2d1020\",g:\"linear-gradient(135deg,#be185d 0%,#db2777 50%,#a78bfa 100%)\",hg:\"linear-gradient(135deg,#1a0a14 0%,#2d1020 50%,#db2777 100%)\",cb:\"#ffffff\",bb:\"#fdf2f8\"},emerald:{p:\"#059669\",pd:\"#047857\",pl:\"#34d399\",a:\"#6ee7b7\",d:\"#022c22\",s:\"#064e3b\",g:\"linear-gradient(135deg,#047857 0%,#059669 50%,#34d399 100%)\",hg:\"linear-gradient(135deg,#022c22 0%,#064e3b 50%,#047857 100%)\",cb:\"#ffffff\",bb:\"#ecfdf5\"},neon:{p:\"#a855f7\",pd:\"#7c3aed\",pl:\"#c084fc\",a:\"#22d3ee\",d:\"#050010\",s:\"#0d001a\",g:\"linear-gradient(135deg,#7c3aed 0%,#a855f7 50%,#22d3ee 100%)\",hg:\"linear-gradient(135deg,#050010 0%,#0d001a 50%,#7c3aed 100%)\",cb:\"#0d001a\",bb:\"#080010\"}},a={default:{fd:\"'Playfair Display',serif\",fb:\"'DM Sans',sans-serif\",u:\"https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700;900&family=DM+Sans:wght@300;400;500;600;700&display=swap\"},modern:{fd:\"'Poppins',sans-serif\",fb:\"'Inter',sans-serif\",u:\"https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&family=Inter:wght@300;400;500;600&display=swap\"},elegant:{fd:\"'Cormorant Garamond',serif\",fb:\"'Raleway',sans-serif\",u:\"https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=Raleway:wght@300;400;500;600;700&display=swap\"},bold:{fd:\"'Syne',sans-serif\",fb:\"'Work Sans',sans-serif\",u:\"https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Work+Sans:wght@300;400;500;600&display=swap\"},luxury:{fd:\"'Bodoni Moda',serif\",fb:\"'Jost',sans-serif\",u:\"https://fonts.googleapis.com/css2?family=Bodoni+Moda:wght@400;600;700&family=Jost:wght@300;400;500;600&display=swap\"},tech:{fd:\"'Space Grotesk',sans-serif\",fb:\"'IBM Plex Sans',sans-serif\",u:\"https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap\"},minimal:{fd:\"'Outfit',sans-serif\",fb:\"'Nunito',sans-serif\",u:\"https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Nunito:wght@300;400;500;600&display=swap\"},classic:{fd:\"'Libre Baskerville',serif\",fb:\"'Source Sans 3',sans-serif\",u:\"https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@400;700&family=Source+Sans+3:wght@300;400;500;600&display=swap\"}},f=null;try{var t=localStorage.getItem(\"shopzen_theme_v1\");t&&(f=JSON.parse(t))}catch(e){}var d=e[f&&f.theme||\"default\"]||e.default,r=f&&f.primaryColor||d.p,s=f&&f.primaryDarkColor||d.pd,l=f&&f.primaryLightColor||d.pl,i=f&&f.secondaryColor||d.a,n=f&&f.darkBgColor||d.d,o=document.documentElement;o.style.setProperty(\"--color-primary\",r),o.style.setProperty(\"--color-primary-dark\",s),o.style.setProperty(\"--color-primary-light\",l),o.style.setProperty(\"--color-accent\",i),o.style.setProperty(\"--color-dark\",n),o.style.setProperty(\"--color-surface\",d.s),o.style.setProperty(\"--theme-gradient\",d.g),o.style.setProperty(\"--hero-gradient\",d.hg),o.style.setProperty(\"--card-bg\",d.cb),o.style.setProperty(\"--body-bg\",d.bb),o.style.setProperty(\"--glow-primary\",r+\"66\"),o.style.setProperty(\"--glow-accent\",i+\"4d\");var g=document.createElement(\"style\");g.id=\"theme-bootstrap-bg\",g.textContent=\"html,body{background:\"+d.bb+\" !important}\",document.head.appendChild(g);var b=a[f&&f.fontStyle||\"default\"]||a.default;o.style.setProperty(\"--font-display\",b.fd),o.style.setProperty(\"--font-body\",b.fb);var p=document.createElement(\"link\");if(p.id=\"theme-font\",p.rel=\"stylesheet\",p.href=b.u,document.head.appendChild(p),f&&f.customCSS){var c=document.createElement(\"style\");c.id=\"theme-custom-css\",c.textContent=f.customCSS,document.head.appendChild(c)}var y=document.getElementById(\"meta-theme-color\");y&&(y.content=r)}()</script><script defer=\"defer\" src=\"/static/js/main.5d4ddad7.js\"></script><link href=\"/static/css/main.1a2ef7b8.css\" rel=\"stylesheet\"></head><body><noscript>You need to enable JavaScript to run this app.</noscript><div id=\"root\"></div></body></html>";
+
+let _fetchedTemplate = null;
+let _fetchedAt = 0;
 const HTML_CACHE_TTL = 6 * 60 * 60 * 1000;
 
-async function fetchAndCacheTemplate() {
+// Try to fetch fresher build from Vercel (updates after each deploy)
+// Falls back to embedded template if fetch fails
+async function tryFetchFreshTemplate() {
+  const now = Date.now();
+  if (_fetchedTemplate && (now - _fetchedAt) < HTML_CACHE_TTL) {
+    return _fetchedTemplate;
+  }
   const frontendUrl = (process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
   try {
     const https = require('https');
     const html = await new Promise((resolve, reject) => {
-      const req = https.get(frontendUrl, { timeout: 8000 }, (res) => {
+      const req = https.get(frontendUrl, { timeout: 5000 }, (res) => {
         if (res.statusCode !== 200) return reject(new Error('HTTP ' + res.statusCode));
         let data = '';
         res.on('data', chunk => { data += chunk; });
@@ -336,69 +347,43 @@ async function fetchAndCacheTemplate() {
       req.on('error', reject);
       req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
     });
-    if (html.includes('id="root"') && html.includes('<script')) {
-      _htmlTemplate = html;
-      _htmlTemplateFetchedAt = Date.now();
-      console.log('[SSR] Fetched and cached real index.html from Vercel (' + html.length + ' bytes)');
-      return _htmlTemplate;
+    // Only use if it looks like the real React build (has JS bundle)
+    if (html.includes('id="root"') && html.includes('/static/js/') && html.includes('shopzen')) {
+      _fetchedTemplate = html;
+      _fetchedAt = now;
+      console.log('[SSR] Fetched fresh template from Vercel (' + html.length + ' bytes)');
+      return _fetchedTemplate;
     }
-    throw new Error('Fetched HTML missing React root or scripts');
   } catch (err) {
-    console.warn('[SSR] Could not fetch index.html from Vercel:', err.message);
-    return null;
+    console.log('[SSR] Could not fetch fresh template, using embedded build:', err.message);
   }
-}
-
-function getMinimalShell() {
-  const frontendUrl = (process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
-  return `<!doctype html><html lang="en-LK"><head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=5,viewport-fit=cover"/>
-<link rel="icon" href="/favicon.ico"/>
-<title>ShopZen</title>
-<meta name="description" content="Shop online in Sri Lanka. Fast delivery, best prices at ShopZen."/>
-<meta name="robots" content="index,follow,max-image-preview:large"/>
-<link rel="canonical" href="${frontendUrl}"/>
-__META_INJECT__
-</head>
-<body>
-<noscript>You need to enable JavaScript to run this app.</noscript>
-<div id="root"></div>
-<script>
-  (function(){
-    var dest = '${frontendUrl}' + window.location.pathname + window.location.search;
-    if (window.location.href.indexOf('${frontendUrl}') !== 0) window.location.replace(dest);
-  })();
-</script>
-</body></html>`;
+  return null;
 }
 
 async function getHtmlTemplate() {
-  const now = Date.now();
-
+  // 1. Check local filesystem (monorepo / self-hosted)
   const candidates = [
-    path.join(__dirname, '..', 'frontend', 'build', 'index.html'),
-    path.join(__dirname, '..', 'public',   'index.html'),
-    path.join(process.cwd(), 'frontend',   'build', 'index.html'),
-    path.join(process.cwd(), 'public',     'index.html'),
+    require('path').join(__dirname, '..', 'frontend', 'build', 'index.html'),
+    require('path').join(__dirname, '..', 'public', 'index.html'),
+    require('path').join(process.cwd(), 'frontend', 'build', 'index.html'),
   ];
   for (const p of candidates) {
-    if (fs.existsSync(p)) {
-      const html = fs.readFileSync(p, 'utf8');
-      console.log('[SSR] Using local build:', p);
-      return html;
+    if (require('fs').existsSync(p)) {
+      const html = require('fs').readFileSync(p, 'utf8');
+      if (html.includes('/static/js/')) {
+        console.log('[SSR] Using local build:', p);
+        return html;
+      }
     }
   }
 
-  if (_htmlTemplate && (now - _htmlTemplateFetchedAt) < HTML_CACHE_TTL) {
-    return _htmlTemplate;
-  }
+  // 2. Try fetching fresh from Vercel
+  const fresh = await tryFetchFreshTemplate();
+  if (fresh) return fresh;
 
-  const fetched = await fetchAndCacheTemplate();
-  if (fetched) return fetched;
-
-  console.log('[SSR] Using minimal shell fallback');
-  return getMinimalShell();
+  // 3. Always-available fallback: embedded compiled build
+  console.log('[SSR] Using embedded build template');
+  return BUILT_HTML_TEMPLATE;
 }
 
 
@@ -462,20 +447,43 @@ function buildProductTitle(product, storeName) {
 
 // ── injectMeta: replace all standard meta tags in the HTML template ───────────
 function injectMeta(html, { title, desc, canonical, ogTitle, ogDesc, ogImage, ogUrl, ogType, keywords, schemas, verification }) {
-  let out = (html.includes('__META_INJECT__') ? html.replace('__META_INJECT__', '') : html)
+  // Remove __META_INJECT__ placeholder if present
+  let out = html.includes('__META_INJECT__') ? html.replace('__META_INJECT__', '') : html;
+
+  // ── Strip any existing JSON-LD to prevent duplicates on repeat renders ─────
+  out = out.replace(/<script type="application\/ld\+json">[\s\S]*?<\/script>\n?/g, '');
+
+  // ── Replace standard meta tags ─────────────────────────────────────────────
+  out = out
     .replace(/<title>[^<]*<\/title>/, `<title>${xe(title)}</title>`)
-    .replace(/(<meta name="description" content=")[^"]*(")/,    `$1${xe(desc)}$2`)
-    .replace(/(<link rel="canonical" href=")[^"]*(")/,          `$1${xe(canonical)}$2`)
-    .replace(/(<meta property="og:title" content=")[^"]*(")/,   `$1${xe(ogTitle || title)}$2`)
-    .replace(/(<meta property="og:description" content=")[^"]*(")/, `$1${xe(ogDesc || desc)}$2`)
-    .replace(/(<meta property="og:image" content=")[^"]*(")/,   `$1${xe(ogImage)}$2`)
-    .replace(/(<meta property="og:url" content=")[^"]*(")/,     `$1${xe(ogUrl || canonical)}$2`)
-    .replace(/(<meta property="og:type" content=")[^"]*(")/,    `$1${xe(ogType || 'website')}$2`)
-    .replace(/(<meta name="twitter:title" content=")[^"]*(")/,  `$1${xe(ogTitle || title)}$2`)
-    .replace(/(<meta name="twitter:description" content=")[^"]*(")/, `$1${xe(ogDesc || desc)}$2`)
-    .replace(/(<meta name="twitter:image" content=")[^"]*(")/,  `$1${xe(ogImage)}$2`)
+    .replace(/(<meta name="description" content=")[^"]*(")/,         `$1${xe(desc)}$2`)
+    .replace(/(<link rel="canonical" href=")[^"]*(")/,               `$1${xe(canonical)}$2`)
+    .replace(/(<meta property="og:title" content=")[^"]*(")/,        `$1${xe(ogTitle || title)}$2`)
+    .replace(/(<meta property="og:description" content=")[^"]*(")/,  `$1${xe(ogDesc || desc)}$2`)
+    .replace(/(<meta property="og:image" content=")[^"]*(")/,        `$1${xe(ogImage)}$2`)
+    .replace(/(<meta property="og:url" content=")[^"]*(")/,          `$1${xe(ogUrl || canonical)}$2`)
+    .replace(/(<meta property="og:type" content=")[^"]*(")/,         `$1${xe(ogType || 'website')}$2`)
+    .replace(/(<meta name="twitter:title" content=")[^"]*(")/,       `$1${xe(ogTitle || title)}$2`)
+    .replace(/(<meta name="twitter:description" content=")[^"]*(")/,  `$1${xe(ogDesc || desc)}$2`)
+    .replace(/(<meta name="twitter:image" content=")[^"]*(")/,       `$1${xe(ogImage)}$2`)
     .replace(/yourstore\.com/g, 'shopzen.lk');
 
+  // ── Insert OG/Twitter tags if missing in template ──────────────────────────
+  const missing = [
+    !out.includes('property="og:type"')         ? `<meta property="og:type" content="${xe(ogType || 'website')}"/>` : '',
+    !out.includes('property="og:title"')        ? `<meta property="og:title" content="${xe(ogTitle || title)}"/>` : '',
+    !out.includes('property="og:description"')  ? `<meta property="og:description" content="${xe(ogDesc || desc)}"/>` : '',
+    !out.includes('property="og:image"')        ? `<meta property="og:image" content="${xe(ogImage)}"/>` : '',
+    !out.includes('property="og:url"')          ? `<meta property="og:url" content="${xe(ogUrl || canonical)}"/>` : '',
+    !out.includes('property="og:site_name"')    ? `<meta property="og:site_name" content="ShopZen"/>` : '',
+    !out.includes('name="twitter:card"')        ? `<meta name="twitter:card" content="summary_large_image"/>` : '',
+    !out.includes('name="twitter:title"')       ? `<meta name="twitter:title" content="${xe(ogTitle || title)}"/>` : '',
+    !out.includes('name="twitter:description"') ? `<meta name="twitter:description" content="${xe(ogDesc || desc)}"/>` : '',
+    !out.includes('name="twitter:image"')       ? `<meta name="twitter:image" content="${xe(ogImage)}"/>` : '',
+  ].filter(Boolean).join('\n');
+  if (missing) out = out.replace('</head>', missing + '\n</head>');
+
+  // ── Keywords ───────────────────────────────────────────────────────────────
   if (keywords) {
     if (!out.includes('name="keywords"')) {
       out = out.replace('</head>', `<meta name="keywords" content="${xe(keywords)}"/>\n</head>`);
@@ -484,10 +492,12 @@ function injectMeta(html, { title, desc, canonical, ogTitle, ogDesc, ogImage, og
     }
   }
 
-  if (verification) {
+  // ── Google verification ────────────────────────────────────────────────────
+  if (verification && !out.includes('google-site-verification')) {
     out = out.replace('</head>', `<meta name="google-site-verification" content="${xe(verification)}"/>\n</head>`);
   }
 
+  // ── JSON-LD schemas ────────────────────────────────────────────────────────
   if (schemas && schemas.length) {
     const schemaBlock = schemas
       .map(s => `<script type="application/ld+json">${JSON.stringify(s)}</script>`)
@@ -691,13 +701,80 @@ const seoRenderMiddleware = async (req, res) => {
     }
   }
 
-  // ── Generic page fallback ─────────────────────────────────────────────────
+  // ── /cart ─────────────────────────────────────────────────────────────────
+  if (req.path === '/cart') {
+    const meta = await getSeoMeta();
+    const out = injectMeta(html, {
+      title: `Your Cart | ${storeName}`,
+      desc: `Review your cart and checkout. Fast delivery across Sri Lanka at ${storeName}.`,
+      canonical: `${siteUrl}/cart`, ogImage: defaultOgImage, ogType: 'website',
+    });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    return res.send(out);
+  }
+
+  // ── /wishlist ──────────────────────────────────────────────────────────────
+  if (req.path === '/wishlist') {
+    const out = injectMeta(html, {
+      title: `Wishlist | ${storeName}`,
+      desc: `Your saved products at ${storeName}. Shop online in Sri Lanka.`,
+      canonical: `${siteUrl}/wishlist`, ogImage: defaultOgImage, ogType: 'website',
+    });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    return res.send(out);
+  }
+
+  // ── /gift-cards ────────────────────────────────────────────────────────────
+  if (req.path === '/gift-cards') {
+    const out = injectMeta(html, {
+      title: `Gift Cards | ${storeName} Sri Lanka`,
+      desc: `Buy ${storeName} gift cards online. Perfect gift for anyone in Sri Lanka.`,
+      canonical: `${siteUrl}/gift-cards`, ogImage: defaultOgImage, ogType: 'website',
+    });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    return res.send(out);
+  }
+
+  // ── /page/:slug (business/static pages) ───────────────────────────────────
+  const pageMatch = req.path.match(/^\/page\/([^/]+)$/);
+  if (pageMatch) {
+    const out = injectMeta(html, {
+      title: `${pageMatch[1].replace(/-/g, ' ').replace(/\w/g, c => c.toUpperCase())} | ${storeName}`,
+      desc: `Learn more at ${storeName}. Shop online in Sri Lanka.`,
+      canonical: `${siteUrl}/page/${pageMatch[1]}`, ogImage: defaultOgImage, ogType: 'website',
+    });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    return res.send(out);
+  }
+
+  // ── /campaign/:slug ────────────────────────────────────────────────────────
+  const campaignMatch = req.path.match(/^\/campaign\/([^/]+)$/);
+  if (campaignMatch) {
+    const out = injectMeta(html, {
+      title: `${campaignMatch[1].replace(/-/g, ' ').replace(/\w/g, c => c.toUpperCase())} | ${storeName}`,
+      desc: `Special campaign at ${storeName}. Best deals in Sri Lanka.`,
+      canonical: `${siteUrl}/campaign/${campaignMatch[1]}`, ogImage: defaultOgImage, ogType: 'website',
+    });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    return res.send(out);
+  }
+
+  // ── Generic page fallback ──────────────────────────────────────────────────
   const meta = await getSeoMeta();
-  if (!meta) return res.send(html);
+  const fallbackMeta = meta || { metaTitle: `${storeName} — Shop Online in Sri Lanka`, metaDesc: 'Shop the best products online in Sri Lanka.', ogImage: defaultOgImage };
 
   const out = injectMeta(html, {
-    title: meta.metaTitle, desc: meta.metaDesc, canonical: siteUrl,
-    ogImage: meta.ogImage, ogType: 'website', verification: meta.verification,
+    title: fallbackMeta.metaTitle,
+    desc: fallbackMeta.metaDesc,
+    canonical: `${siteUrl}${req.path}`,
+    ogImage: fallbackMeta.ogImage,
+    ogType: 'website',
+    verification: meta ? meta.verification : undefined,
   });
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
