@@ -29,6 +29,28 @@ router.post('/', auth, async (req, res) => {
   try {
     const { order, items, reason, description, images } = req.body;
 
+    // ── Guard: block duplicate / active return requests ──────────────────────
+    // Check if there is already a non-rejected return request for this order by this customer.
+    // Statuses that block a new request: pending, approved, received, refunded.
+    // Only 'rejected' allows the customer to re-submit.
+    const existingReturn = await ReturnRequest.findOne({
+      order,
+      customer: req.user._id,
+      status: { $in: ['pending', 'approved', 'received', 'refunded'] },
+    });
+
+    if (existingReturn) {
+      const statusMessages = {
+        pending:  'You already have a pending return request for this order. Please wait for it to be reviewed.',
+        approved: 'Your return request for this order has already been approved.',
+        received: 'Your return item has already been received and is being processed.',
+        refunded: 'This order has already been refunded.',
+      };
+      return res.status(400).json({
+        message: statusMessages[existingReturn.status] || 'A return request already exists for this order.',
+      });
+    }
+
     const returnReq = await ReturnRequest.create({
       order,
       customer:      req.user._id,

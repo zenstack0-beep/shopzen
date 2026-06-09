@@ -24,12 +24,55 @@ export default function Returns() {
     API.get('/returns/my-returns').then(r => setMyReturns(r.data)).catch(() => {});
   }, [user, navigate]);
 
+  // ── Helpers to determine return eligibility ────────────────────────────────
+
+  // Returns the return request for a given orderId (if any)
+  const getReturnForOrder = (orderId) =>
+    myReturns.find(r => (r.order?._id || r.order) === orderId);
+
+  // An order is blocked from a NEW return if it already has a pending/approved/received/refunded request
+  // Rejected orders ARE allowed to re-request (returns false for rejected)
+  const isOrderReturnBlocked = (orderId) => {
+    const ret = getReturnForOrder(orderId);
+    if (!ret) return false;
+    // Only 'rejected' allows re-request; all others block
+    return ret.status !== 'rejected';
+  };
+
+  // Returns a human-friendly label for why an order is blocked
+  const getOrderBlockReason = (orderId) => {
+    const ret = getReturnForOrder(orderId);
+    if (!ret) return null;
+    const labels = {
+      pending:  'Return request pending review',
+      approved: 'Return already approved',
+      received: 'Return item received',
+      refunded: 'Already refunded',
+    };
+    return labels[ret.status] || null;
+  };
+
+  // Returns the set of product IDs that are locked in an active/completed return for a given order
+  const getLockedProductIds = (orderId) => {
+    const ret = getReturnForOrder(orderId);
+    if (!ret || ret.status === 'rejected') return new Set();
+    return new Set((ret.items || []).map(i => (i.product?._id || i.product)?.toString()));
+  };
+
   const toggleItem = (item) => {
     setSelectedItems(prev => {
-      const exists = prev.find(i => i.product === item.product?._id);
-      if (exists) return prev.filter(i => i.product !== item.product?._id);
-      return [...prev, { product: item.product?._id, name: item.name, quantity: item.quantity, reason: '', condition: 'opened' }];
+      const productId = item.product?._id;
+      const exists = prev.find(i => i.product === productId);
+      if (exists) return prev.filter(i => i.product !== productId);
+      return [...prev, { product: productId, name: item.name, quantity: item.quantity, reason: '', condition: 'opened' }];
     });
+  };
+
+  const handleOrderSelect = (order) => {
+    if (isOrderReturnBlocked(order._id)) return; // safety guard
+    setSelectedOrder(order);
+    setSelectedItems([]);
+    setStep(2);
   };
 
   const handleSubmit = async () => {
@@ -64,63 +107,113 @@ export default function Returns() {
                     <p>No delivered orders eligible for return</p>
                     <Link to="/shop" className="text-primary hover:underline text-sm mt-2 block">Continue Shopping</Link>
                   </div>
-                ) : orders.map(order => (
-                  <button key={order._id} onClick={() => { setSelectedOrder(order); setStep(2); }}
-                    className="w-full text-left p-4 border-2 border-gray-100 rounded-xl hover:border-primary hover:bg-primary/5 transition-all mb-3 group">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-mono font-bold text-primary">{order.orderNumber}</p>
-                        <p className="text-xs text-gray-400 mt-0.5">{new Date(order.createdAt).toLocaleDateString()} · {order.items?.length} item(s)</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="font-bold text-gray-800">Rs. {order.total?.toLocaleString()}</p>
-                        <svg className="w-4 h-4 text-gray-400 group-hover:text-primary ml-auto mt-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                ) : orders.map(order => {
+                  const blocked = isOrderReturnBlocked(order._id);
+                  const blockReason = getOrderBlockReason(order._id);
+                  const ret = getReturnForOrder(order._id);
+                  return (
+                    <div
+                      key={order._id}
+                      onClick={() => !blocked && handleOrderSelect(order)}
+                      className={`w-full text-left p-4 border-2 rounded-xl transition-all mb-3 group
+                        ${blocked
+                          ? 'border-gray-100 bg-gray-50 cursor-not-allowed opacity-70'
+                          : 'border-gray-100 hover:border-primary hover:bg-primary/5 cursor-pointer'
+                        }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="font-mono font-bold text-primary">{order.orderNumber}</p>
+                          <p className="text-xs text-gray-400 mt-0.5">{new Date(order.createdAt).toLocaleDateString()} · {order.items?.length} item(s)</p>
+                          {blockReason && (
+                            <p className="text-xs mt-1 font-medium text-amber-600 flex items-center gap-1">
+                              <svg className="w-3 h-3 inline" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd"/></svg>
+                              {blockReason}
+                            </p>
+                          )}
+                          {/* Show re-request hint for rejected */}
+                          {ret?.status === 'rejected' && (
+                            <p className="text-xs mt-1 font-medium text-blue-500">Previous request rejected — you may submit a new request</p>
+                          )}
+                        </div>
+                        <div className="text-right">
+                          <p className="font-bold text-gray-800">Rs. {order.total?.toLocaleString()}</p>
+                          {!blocked && (
+                            <svg className="w-4 h-4 text-gray-400 group-hover:text-primary ml-auto mt-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                          )}
+                          {blocked && (
+                            <svg className="w-4 h-4 text-gray-300 ml-auto mt-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </button>
-                ))}
+                  );
+                })}
               </div>
             )}
 
-            {step === 2 && selectedOrder && (
-              <div>
-                <button onClick={() => { setStep(1); setSelectedItems([]); }} className="text-sm text-gray-400 hover:text-primary mb-4 flex items-center gap-1">
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7"/></svg> Back
-                </button>
-                <p className="text-sm font-semibold text-gray-700 mb-3">Select items to return:</p>
-                <div className="space-y-3 mb-5">
-                  {selectedOrder.items?.map((item, i) => {
-                    const selected = selectedItems.find(s => s.product === item.product?._id);
-                    return (
-                      <label key={i} className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${selected ? 'border-primary bg-primary/5' : 'border-gray-100 hover:border-gray-200'}`}>
-                        <input type="checkbox" checked={!!selected} onChange={() => toggleItem(item)} className="accent-primary w-4 h-4" />
-                        <img src={item.image || 'https://via.placeholder.com/50'} alt={item.name} className="w-10 h-10 rounded-lg object-cover" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-800 truncate">{item.name}</p>
-                          <p className="text-xs text-gray-400">Qty: {item.quantity} · Rs. {item.price?.toLocaleString()}</p>
-                        </div>
-                      </label>
-                    );
-                  })}
-                </div>
-                <div className="space-y-3">
-                  <div>
-                    <label className="form-label">Reason for Return *</label>
-                    <select value={form.reason} onChange={e => setForm(p => ({...p, reason: e.target.value}))} className="form-input">
-                      <option value="">Select a reason...</option>
-                      {REASONS.map(r => <option key={r} value={r}>{r}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="form-label">Additional Details</label>
-                    <textarea value={form.description} onChange={e => setForm(p => ({...p, description: e.target.value}))} rows={3} className="form-input resize-none" placeholder="Describe the issue in detail..." />
-                  </div>
-                  <button onClick={handleSubmit} disabled={submitting || selectedItems.length === 0 || !form.reason} className="btn-primary w-full py-3">
-                    {submitting ? 'Submitting...' : 'Submit Return Request'}
+            {step === 2 && selectedOrder && (() => {
+              const lockedIds = getLockedProductIds(selectedOrder._id);
+              return (
+                <div>
+                  <button onClick={() => { setStep(1); setSelectedItems([]); }} className="text-sm text-gray-400 hover:text-primary mb-4 flex items-center gap-1">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7"/></svg> Back
                   </button>
+                  <p className="text-sm font-semibold text-gray-700 mb-3">Select items to return:</p>
+                  <div className="space-y-3 mb-5">
+                    {selectedOrder.items?.map((item, i) => {
+                      const productId = item.product?._id?.toString();
+                      const isLocked = lockedIds.has(productId);
+                      const selected = selectedItems.find(s => s.product === item.product?._id);
+                      return (
+                        <label
+                          key={i}
+                          className={`flex items-center gap-3 p-3 rounded-xl border-2 transition-all
+                            ${isLocked
+                              ? 'border-gray-100 bg-gray-50 opacity-60 cursor-not-allowed'
+                              : selected
+                                ? 'border-primary bg-primary/5 cursor-pointer'
+                                : 'border-gray-100 hover:border-gray-200 cursor-pointer'
+                            }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={!!selected}
+                            disabled={isLocked}
+                            onChange={() => !isLocked && toggleItem(item)}
+                            className="accent-primary w-4 h-4"
+                          />
+                          <img src={item.image || 'https://via.placeholder.com/50'} alt={item.name} className="w-10 h-10 rounded-lg object-cover" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-800 truncate">{item.name}</p>
+                            <p className="text-xs text-gray-400">Qty: {item.quantity} · Rs. {item.price?.toLocaleString()}</p>
+                            {isLocked && (
+                              <p className="text-xs text-amber-500 mt-0.5">Already in a return request</p>
+                            )}
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="form-label">Reason for Return *</label>
+                      <select value={form.reason} onChange={e => setForm(p => ({...p, reason: e.target.value}))} className="form-input">
+                        <option value="">Select a reason...</option>
+                        {REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label">Additional Details</label>
+                      <textarea value={form.description} onChange={e => setForm(p => ({...p, description: e.target.value}))} rows={3} className="form-input resize-none" placeholder="Describe the issue in detail..." />
+                    </div>
+                    <button onClick={handleSubmit} disabled={submitting || selectedItems.length === 0 || !form.reason} className="btn-primary w-full py-3">
+                      {submitting ? 'Submitting...' : 'Submit Return Request'}
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         </div>
 
