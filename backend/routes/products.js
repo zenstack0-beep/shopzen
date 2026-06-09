@@ -142,9 +142,23 @@ router.get('/', async (req, res) => {
       { tags: new RegExp(search, 'i') },
     ];
     if (minPrice || maxPrice) {
-      filter.price = {};
-      if (minPrice) filter.price.$gte = Number(minPrice);
-      if (maxPrice) filter.price.$lte = Number(maxPrice);
+      const min = minPrice ? Number(minPrice) : null;
+      const max = maxPrice ? Number(maxPrice) : null;
+      const priceRange = {};
+      if (min !== null) priceRange.$gte = min;
+      if (max !== null) priceRange.$lte = max;
+      // Match products where effective price is in range:
+      // - On-sale products: use salePrice (discounted price)
+      // - Regular products: use price
+      filter.$and = filter.$and || [];
+      filter.$and.push({
+        $or: [
+          // Product has an active sale — match against salePrice
+          { isOnSale: true, salePrice: priceRange },
+          // Product has no active sale — match against regular price
+          { $or: [{ isOnSale: false }, { isOnSale: { $exists: false } }], price: priceRange },
+        ],
+      });
     }
     let sortObj = { createdAt: -1 };
     if (sort === 'price_asc')  sortObj = { price: 1 };

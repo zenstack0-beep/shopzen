@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useLocation, useNavigate, Link } from 'react-router-dom';
+import { useLocation, useNavigate, useParams, Link } from 'react-router-dom';
 import { gsap } from 'gsap';
 import API from '../../utils/api';
 import { useCart } from '../../context/CartContext';
@@ -20,11 +20,12 @@ export default function Shop() {
   const sym = settings?.currencySymbol || 'Rs.';
   const gridRef = useRef(null);
 
-  const params = new URLSearchParams(location.search);
-  const catParam    = params.get('category') || '';
-  const searchParam = params.get('search')   || '';
-  const saleParam   = params.get('onSale')   === 'true';
-  const featParam   = params.get('featured') === 'true';
+  const { category: routeCategory } = useParams(); // from /shop/:category route
+  const qParams     = new URLSearchParams(location.search);
+  const catParam    = routeCategory || qParams.get('category') || '';
+  const searchParam = qParams.get('search')   || '';
+  const saleParam   = qParams.get('onSale')   === 'true';
+  const featParam   = qParams.get('featured') === 'true';
 
   const [products,   setProducts]   = useState([]);
   const [categories, setCategories] = useState([]);
@@ -44,10 +45,20 @@ export default function Shop() {
 
   useEffect(() => { API.get('/categories').then(r=>setCategories(r.data||[])).catch(()=>{}); }, []);
 
+  // Sync category state when navigating via /shop/:category route or ?category= param
+  useEffect(() => {
+    setCategory(catParam);
+    setPage(1);
+  }, [catParam]);
+
   const fetchProducts = useCallback(() => {
     setLoading(true);
     const q = new URLSearchParams({ page, limit:12, sort:sortBy });
-    if (category) q.set('category', category);
+    // Resolve category: could be an _id (from filter panel) or a slug (from navbar /shop/:category)
+    if (category) {
+      const matched = categories.find(c => c._id === category || c.slug === category);
+      q.set('category', matched ? matched._id : category);
+    }
     if (search)   q.set('search', search);
     if (onSale)   q.set('onSale', 'true');
     if (featParam) q.set('featured','true');
@@ -65,7 +76,7 @@ export default function Shop() {
         }
       }, 50);
     }).catch(()=>{}).finally(()=>setLoading(false));
-  }, [page, category, search, sortBy, onSale, inStock, priceMin, priceMax, featParam]);
+  }, [page, category, categories, search, sortBy, onSale, inStock, priceMin, priceMax, featParam]);
 
   useEffect(() => { setPage(1); }, [category, search, sortBy, onSale, inStock, priceMin, priceMax]);
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
