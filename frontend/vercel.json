@@ -1,35 +1,20 @@
 {
-  "routes": [
+  "rewrites": [
     {
-      "src": "/sitemap.xml",
-      "dest": "https://shopzen-production.up.railway.app/api/seo/sitemap.xml"
+      "source": "/api/:path*",
+      "destination": "https://shopzen-production.up.railway.app/api/:path*"
     },
     {
-      "src": "/robots.txt",
-      "dest": "https://shopzen-production.up.railway.app/api/seo/robots.txt"
+      "source": "/sitemap.xml",
+      "destination": "https://shopzen-production.up.railway.app/api/seo/sitemap.xml"
     },
     {
-      "src": "/product/([^/]+)",
-      "dest": "https://shopzen-production.up.railway.app/product/$1"
+      "source": "/robots.txt",
+      "destination": "https://shopzen-production.up.railway.app/api/seo/robots.txt"
     },
     {
-      "src": "/shop",
-      "dest": "https://shopzen-production.up.railway.app/shop"
-    },
-    {
-      "src": "/shop/?(.*)",
-      "dest": "https://shopzen-production.up.railway.app/shop?$1"
-    },
-    {
-      "src": "/",
-      "dest": "https://shopzen-production.up.railway.app/"
-    },
-    {
-      "handle": "filesystem"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/index.html"
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ],
   "headers": [
@@ -39,6 +24,15 @@
         {
           "key": "Cache-Control",
           "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
+      "source": "/api/:path*",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
         }
       ]
     },

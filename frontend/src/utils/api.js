@@ -2,18 +2,17 @@ import axios from 'axios';
 
 /**
  * API base URL resolution:
- *  - Production (Vercel): REACT_APP_API_URL is set to the Railway backend URL.
+ *  - Production (Vercel): /api is rewritten to Railway via vercel.json rewrites.
+ *    REACT_APP_API_URL is no longer needed — all /api/* calls stay on the same
+ *    Vercel domain and are proxied server-side, so cookies & CORS are never an issue.
  *  - Local dev: React proxy in package.json forwards /api/* to localhost:5001.
- *    BUT the proxy only works when the backend is running. If it's not up yet,
- *    we still use /api and let calls fail gracefully (ThemeContext catches errors).
+ *
+ * We always use /api as the base — Vercel handles the routing in both cases.
  */
-const BASE = process.env.REACT_APP_API_URL
-  ? `${process.env.REACT_APP_API_URL}/api`
-  : '/api';
-
 const API = axios.create({
-  baseURL: BASE,
-  timeout: 15000, // 15s — prevents hanging requests from blocking the UI
+  baseURL: '/api',
+  timeout: 15000,
+  withCredentials: true,
 });
 
 API.interceptors.request.use(config => {
@@ -25,7 +24,6 @@ API.interceptors.request.use(config => {
 API.interceptors.response.use(
   res => res,
   err => {
-    // Auto-logout on 401
     if (err.response?.status === 401) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');

@@ -9,59 +9,35 @@ const app = express();
 if (!process.env.MONGODB_URI) { console.error('❌ MONGODB_URI not defined'); process.exit(1); }
 console.log('🔗 MongoDB:', process.env.MONGODB_URI.replace(/\/\/(.*?):(.*)@/, '//***:***@'));
 
-// ─── Allow Vercel SSR proxy (server-to-server, no Origin header) ──────────────
-// When Vercel proxies /product/:slug to Railway for SSR, there is no Origin
-// header — it's a server-to-server request. We detect it via x-forwarded-host
-// or x-vercel-id and set CORS headers before the cors() middleware runs.
-app.use((req, res, next) => {
-  const fwdHost = req.headers['x-forwarded-host'] || '';
-  const vercelId = req.headers['x-vercel-id'] || '';
-  const isVercelProxy = !req.headers.origin && (
-    vercelId ||
-    fwdHost.includes('shopzen.lk') ||
-    fwdHost.includes('vercel.app')
-  );
-  if (isVercelProxy) {
-    res.setHeader('Access-Control-Allow-Origin', process.env.FRONTEND_URL || 'https://shopzen.lk');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-  }
-  next();
-});
-
 // ─── CORS ─────────────────────────────────────────────────────────────────────
+// Since Vercel rewrites /api/* server-side to Railway, the Origin header seen
+// by Railway will be the Vercel deployment URL (shopzen.lk or *.vercel.app).
+// We also keep localhost for local dev. No origin (server-to-server) is allowed.
 const allowedOrigins = [
+  // Local dev
   /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/,
-  /^https:\/\/[a-z0-9-]+-[a-z0-9]+-[a-z0-9-]+\.vercel\.app$/,
-  /^https:\/\/shopzen\.lk$/,
-  /^https:\/\/www\.shopzen\.lk$/,
+  // Any Vercel preview / production deployment
+  /^https:\/\/.*\.vercel\.app$/,
+  // Production custom domain
+  /^https:\/\/(www\.)?shopzen\.lk$/,
 ];
 
-if (process.env.FRONTEND_URL) {
-  const fu = process.env.FRONTEND_URL.trim().replace(/\/$/, '');
-  if (!allowedOrigins.some(o => typeof o === 'string' && o === fu)) {
-    allowedOrigins.push(fu);
-  }
-}
-
+// Extra origins from env (comma-separated), e.g. EXTRA_ORIGINS=https://staging.shopzen.lk
 if (process.env.EXTRA_ORIGINS) {
   process.env.EXTRA_ORIGINS.split(',').forEach(o => {
     const trimmed = o.trim().replace(/\/$/, '');
-    if (trimmed) allowedOrigins.push(trimmed);
+    if (trimmed) allowedOrigins.push(new RegExp('^' + trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'));
   });
 }
 
 app.use(cors({
   origin: (origin, cb) => {
+    // No origin = server-to-server (Vercel rewrite, curl, health checks) — allow
     if (!origin) return cb(null, true);
-    const ok = allowedOrigins.some(o =>
-      typeof o === 'string' ? o === origin : o.test(origin)
-    );
-    if (ok) {
-      cb(null, true);
-    } else {
-      console.warn(`[CORS] Blocked: ${origin}`);
-      cb(new Error('CORS blocked: ' + origin));
-    }
+    const ok = allowedOrigins.some(o => o.test(origin));
+    if (ok) return cb(null, true);
+    console.warn(`[CORS] Blocked: ${origin}`);
+    cb(new Error('CORS blocked: ' + origin));
   },
   credentials: true,
 }));
@@ -98,22 +74,10 @@ app.use('/api/automation',    require('./routes/automation'));
 app.use('/api/deals',         require('./routes/deals'));
 app.use('/api/ai',            require('./routes/ai'));
 
-// ── Serve built frontend ───────────────────────────────────────────────────────
-const { seoRenderMiddleware } = require('./routes/seo');
-const frontendBuildPath = path.join(__dirname, '..', 'frontend', 'build');
-const fs = require('fs');
-
-// If a local frontend build exists (monorepo deploy), serve its static assets.
-// Either way, always wire up seoRenderMiddleware as the catch-all so that
-// Vercel can proxy /product/:slug here and get SSR-injected meta tags back.
-if (fs.existsSync(frontendBuildPath)) {
-  app.use(express.static(frontendBuildPath, {
-    index: false,
-    maxAge: '7d',
-    immutable: true,
-  }));
-}
-app.get('*', seoRenderMiddleware);
+// ── Health check ───────────────────────────────────────────────────────────────
+// All page routing is handled by Vercel (rewrites → /index.html).
+// Railway only handles /api/* requests.
+// The seoRenderMiddleware / static file serving below is intentionally removed.
 
 async function startServer() {
   try {
