@@ -1,23 +1,20 @@
 {
-  "routes": [
+  "rewrites": [
     {
-      "src": "/sitemap.xml",
-      "dest": "https://shopzen-production.up.railway.app/api/seo/sitemap.xml"
+      "source": "/sitemap.xml",
+      "destination": "https://shopzen-production.up.railway.app/api/seo/sitemap.xml"
     },
     {
-      "src": "/robots.txt",
-      "dest": "https://shopzen-production.up.railway.app/api/seo/robots.txt"
+      "source": "/robots.txt",
+      "destination": "https://shopzen-production.up.railway.app/api/seo/robots.txt"
     },
     {
-      "src": "/api/(.*)",
-      "dest": "https://shopzen-production.up.railway.app/api/$1"
+      "source": "/api/:path*",
+      "destination": "https://shopzen-production.up.railway.app/api/:path*"
     },
     {
-      "handle": "filesystem"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/index.html"
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ],
   "headers": [
@@ -27,6 +24,15 @@
         {
           "key": "Cache-Control",
           "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
         }
       ]
     },
