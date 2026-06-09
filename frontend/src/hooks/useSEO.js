@@ -132,6 +132,7 @@ export default function useSEO({
   url,
   type = 'website',
   product,
+  reviews,
   breadcrumbs,
   noindex = false,
   keywords,
@@ -248,37 +249,104 @@ export default function useSEO({
       });
     }
 
-    // JSON-LD: Product
+    // JSON-LD: Product (full Google Rich Results schema)
     if (product) {
       const price = product.salePrice || product.price;
       const availability = product.stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock';
+
+      // Build image array — Google requires at least one image
+      const imageArr = (product.images?.length ? product.images : [product.thumbnail]).filter(Boolean);
+
       const productSchema = {
         '@context': 'https://schema.org',
         '@type': 'Product',
         name: product.name,
-        description: product.shortDescription || product.description,
-        image: product.images?.length ? product.images : [product.thumbnail],
+        description: String(product.shortDescription || product.description || '')
+                       .replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() || product.name,
+        image: imageArr.length > 0 ? imageArr : undefined,
         sku: product.sku || product._id,
-        brand: product.brand ? { '@type': 'Brand', name: product.brand } : undefined,
+        mpn: product.sku || undefined,
+        brand: product.brand
+          ? { '@type': 'Brand', name: product.brand }
+          : { '@type': 'Brand', name: siteName },
         offers: {
           '@type': 'Offer',
           url: finalUrl,
           priceCurrency: cfg.currencyCode || 'LKR',
-          price,
+          price: price != null ? String(price) : '0',
           availability,
-          priceValidUntil: product.saleEndsAt ? new Date(product.saleEndsAt).toISOString().split('T')[0] : undefined,
+          itemCondition: 'https://schema.org/NewCondition',
+          priceValidUntil: product.saleEndsAt
+            ? new Date(product.saleEndsAt).toISOString().split('T')[0]
+            : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
           seller: { '@type': 'Organization', name: siteName },
+          shippingDetails: {
+            '@type': 'OfferShippingDetails',
+            shippingRate: {
+              '@type': 'MonetaryAmount',
+              value: '0',
+              currency: cfg.currencyCode || 'LKR',
+            },
+            deliveryTime: {
+              '@type': 'ShippingDeliveryTime',
+              handlingTime: { '@type': 'QuantitativeValue', minValue: 0, maxValue: 1, unitCode: 'DAY' },
+              transitTime: { '@type': 'QuantitativeValue', minValue: 1, maxValue: 5, unitCode: 'DAY' },
+            },
+            shippingDestination: {
+              '@type': 'DefinedRegion',
+              addressCountry: cfg.countryCode || 'LK',
+            },
+          },
+          hasMerchantReturnPolicy: {
+            '@type': 'MerchantReturnPolicy',
+            applicableCountry: cfg.countryCode || 'LK',
+            returnPolicyCategory: 'https://schema.org/MerchantReturnFiniteReturnWindow',
+            merchantReturnDays: 14,
+            returnMethod: 'https://schema.org/ReturnByMail',
+            returnFees: 'https://schema.org/FreeReturn',
+          },
         },
       };
-      if (product.ratings?.count > 0) {
+
+      // AggregateRating — required for review stars in Google results
+      if (product.ratings?.count >= 1) {
         productSchema.aggregateRating = {
           '@type': 'AggregateRating',
-          ratingValue: product.ratings.average.toFixed(1),
+          ratingValue: Number(product.ratings.average).toFixed(1),
           reviewCount: product.ratings.count,
           bestRating: '5',
           worstRating: '1',
         };
       }
+
+      // Individual Review items — Google uses these to verify star snippets
+      if (reviews?.length > 0) {
+        productSchema.review = reviews.slice(0, 10).map(r => {
+          const schema = {
+            '@type': 'Review',
+            reviewRating: {
+              '@type': 'Rating',
+              ratingValue: String(r.rating),
+              bestRating: '5',
+              worstRating: '1',
+            },
+            author: {
+              '@type': 'Person',
+              name: r.user
+                ? `${r.user.firstName || ''}${r.user.lastName ? ' ' + r.user.lastName : ''}`.trim() || 'Customer'
+                : 'Customer',
+            },
+            datePublished: r.createdAt
+              ? new Date(r.createdAt).toISOString().split('T')[0]
+              : new Date().toISOString().split('T')[0],
+          };
+          if (r.title)   schema.name = r.title;
+          if (r.comment) schema.reviewBody = r.comment;
+          if (r.isVerifiedPurchase) schema.reviewAspect = 'Verified Purchase';
+          return schema;
+        });
+      }
+
       setJsonLd('ld-product', productSchema);
     } else {
       removeJsonLd('ld-product');
@@ -310,5 +378,5 @@ export default function useSEO({
       window.dataLayer.push({ event: 'pageview', page: { url: finalUrl, title: finalTitle } });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [finalTitle, finalDesc, finalImage, finalUrl, type, noindex, keywords, location.pathname]);
+  }, [finalTitle, finalDesc, finalImage, finalUrl, type, noindex, keywords, location.pathname, reviews]);
 }

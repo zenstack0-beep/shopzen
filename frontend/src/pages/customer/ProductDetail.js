@@ -143,6 +143,7 @@ export default function ProductDetail() {
     image:       product?.images?.[0] || product?.thumbnail,
     type:        'product',
     product,
+    reviews,
     keywords:    seoKeywords,
     breadcrumbs: product ? [
       { name: 'Shop', url: '/shop' },
