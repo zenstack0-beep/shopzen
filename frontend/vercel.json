@@ -13,6 +13,18 @@
       "dest": "https://shopzen-production.up.railway.app/product/$1"
     },
     {
+      "src": "/shop",
+      "dest": "https://shopzen-production.up.railway.app/shop"
+    },
+    {
+      "src": "/shop/?(.*)",
+      "dest": "https://shopzen-production.up.railway.app/shop?$1"
+    },
+    {
+      "src": "/",
+      "dest": "https://shopzen-production.up.railway.app/"
+    },
+    {
       "handle": "filesystem"
     },
     {
