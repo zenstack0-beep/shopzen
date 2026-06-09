@@ -213,13 +213,8 @@ router.get('/product-meta/:slug', async (req, res) => {
     const productUrl = `${siteUrl}/product/${product.slug}`;
     const storeName  = 'ShopZen';
 
-    // ── Build meta title (50–60 chars ideal) ──────────────────────────────────
-    // Format: "Product Name - Brand | ShopZen"  OR  "Product Name | ShopZen"
-    const brandPart   = product.brand ? ` - ${product.brand}` : '';
-    const rawTitle    = `${product.name}${brandPart} | ${storeName}`;
-    const metaTitle   = rawTitle.length > 65
-      ? `${product.name.slice(0, 50)} | ${storeName}`
-      : rawTitle;
+    // ── Build meta title
+    const metaTitle = buildProductTitle(product, storeName);
 
     // ── Build meta description (140–160 chars ideal) ───────────────────────────
     const plainDesc  = String(product.shortDescription || product.description || '')
@@ -461,6 +456,59 @@ async function getSeoMeta() {
   } catch { return null; }
 }
 
+
+// ── Build SEO-optimised product title ────────────────────────────────────────
+// Format: "Brand ModelNumber ProductName Price in Sri Lanka | ShopZen"
+// Rules:
+//  1. Detect model number in product.name or product.sku (e.g. HT-S100F, HP8142)
+//  2. Ensure model number appears right after brand name
+//  3. Strip old " - Brand" suffix
+//  4. Always append " Price in Sri Lanka | ShopZen"
+//  5. Hard cap at 65 chars
+function buildProductTitle(product, storeName) {
+  const name  = (product.name  || '').trim();
+  const brand = (product.brand || '').trim();
+  const sku   = (product.sku   || '').trim();
+
+  // Detect model numbers: e.g. HT-S100F, HP8142, SRS-ULT900, XV800
+  const modelRe = /\b([A-Z]{1,5}-?[A-Z0-9]{2,}(?:-[A-Z0-9]+)*)\b/g;
+  const nameModels = [...name.matchAll(modelRe)].map(m => m[1]);
+
+  // Best model to surface: use first model found in name (already there),
+  // or inject full SKU if the SKU brings new info not already in the name.
+  let model = nameModels.length ? nameModels[0] : null;
+  if (sku && !name.includes(sku) && !nameModels.some(m => sku.includes(m) || m.includes(sku))) {
+    model = sku; // SKU adds genuinely new model info e.g. "SRS-ULT900" when name only says "ULT Tower 9"
+  }
+
+  const suffix = ' Price in Sri Lanka | ' + storeName;
+
+  // Clean up name: strip trailing " - Brand" or " - Spec" artifacts (e.g. "HP8142 - 1000W")
+  let core = name;
+  if (brand) {
+    const eb = brand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    core = core.replace(new RegExp('\\s*-\\s*' + eb + '(\\s+\\S+)*\\s*$', 'i'), '').trim();
+  }
+  // Strip any remaining trailing " - <spec>" like " - 1000W", " - Black" etc.
+  core = core.replace(/\s+-\s+\S+\s*$/, '').trim();
+
+  // If model isn't already present in core, inject it right after the brand
+  if (model && !core.includes(model)) {
+    if (brand && core.toLowerCase().startsWith(brand.toLowerCase())) {
+      // "Sony 2ch Soundbar" → "Sony HT-S100F 2ch Soundbar"
+      core = core.slice(0, brand.length) + ' ' + model + core.slice(brand.length);
+    } else {
+      core = model + ' ' + core;
+    }
+  }
+
+  // Cap at 75 chars total (Google truncates display at ~60 but indexes full title)
+  const maxCore = 75 - suffix.length;
+  if (core.length > maxCore) core = core.slice(0, maxCore - 1).trim();
+
+  return core + suffix;
+}
+
 const seoRenderMiddleware = async (req, res) => {
   if (req.path.startsWith('/api/') || req.path.match(/\.(js|css|png|jpg|ico|svg|json|xml|txt|woff2?)$/))
     return res.status(404).send('Not found');
@@ -485,9 +533,7 @@ const seoRenderMiddleware = async (req, res) => {
         const siteUrl    = (process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
         const productUrl = `${siteUrl}/product/${product.slug}`;
         const storeName  = 'ShopZen';
-        const brandPart  = product.brand ? ` - ${product.brand}` : '';
-        const rawTitle   = `${product.name}${brandPart} | ${storeName}`;
-        const metaTitle  = rawTitle.length > 65 ? `${product.name.slice(0, 50)} | ${storeName}` : rawTitle;
+        const metaTitle  = buildProductTitle(product, storeName);
         const plainDesc  = String(product.shortDescription || product.description || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
         const priceText  = product.salePrice ? `Rs.${product.salePrice.toLocaleString()} (was Rs.${product.price.toLocaleString()})` : `Rs.${product.price.toLocaleString()}`;
         const metaDesc   = `${(plainDesc.slice(0,100) || product.name)}. Buy for ${priceText}. Fast delivery across Sri Lanka. Shop at ${storeName}.`.slice(0, 165);
