@@ -43,4 +43,35 @@ router.delete('/:id', adminAuth, async (req, res) => {
   }
 });
 
+// Get sibling categories (same parent) — used for "Related Categories" on product pages
+router.get('/siblings/:categoryId', async (req, res) => {
+  try {
+    const current = await Category.findById(req.params.categoryId).lean();
+    if (!current) return res.json([]);
+
+    // Find all active categories that share the same parent (or are all top-level)
+    const siblings = await Category.find({
+      isActive: true,
+      parent: current.parent || null,   // null means top-level categories
+      _id: { $ne: current._id },        // exclude the current one
+    })
+      .sort({ sortOrder: 1, name: 1 })
+      .limit(8)
+      .lean();
+
+    // If there's a parent, populate its name so the frontend can render "← All [ParentName]"
+    if (current.parent) {
+      const parent = await Category.findById(current.parent).lean();
+      siblings.forEach(s => {
+        s.parent = current.parent;
+        s.parentName = parent?.name || '';
+      });
+    }
+
+    res.json(siblings);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 module.exports = router;

@@ -87,6 +87,9 @@ export default function ProductDetail() {
   const [qty, setQty] = useState(1);
   const [reviews, setReviews] = useState([]);
   const [related, setRelated] = useState([]);
+  const [brandProducts, setBrandProducts] = useState([]);
+  const [siblingCategories, setSiblingCategories] = useState([]);
+  const [recentlyViewed, setRecentlyViewed] = useState([]);
   const [tab, setTab] = useState('description');
   const [wishlist, setWishlist] = useState([]);
   const [submittingReview, setSubmittingReview] = useState(false);
@@ -143,7 +146,6 @@ export default function ProductDetail() {
     image:       product?.images?.[0] || product?.thumbnail,
     type:        'product',
     product,
-    reviews,
     keywords:    seoKeywords,
     breadcrumbs: product ? [
       { name: 'Shop', url: '/shop' },
@@ -167,6 +169,37 @@ export default function ProductDetail() {
           setRelated(all.filter(p => p._id !== r.data._id).slice(0, 4));
         })
         .catch(() => {});
+
+      // ── Brand products — "More from [Brand]"
+      if (r.data.brand) {
+        API.get(`/products?brand=${encodeURIComponent(r.data.brand)}&limit=9`)
+          .then(rr => {
+            const all = rr.data?.products || rr.data || [];
+            setBrandProducts(all.filter(p => p._id !== r.data._id).slice(0, 4));
+          })
+          .catch(() => {});
+      }
+
+      // ── Sibling categories — "Related Categories"
+      if (cat?._id) {
+        API.get(`/categories/siblings/${cat._id}`)
+          .then(rr => setSiblingCategories(rr.data || []))
+          .catch(() => {});
+      }
+
+      // ── Recently Viewed — track this product in localStorage
+      try {
+        const key = 'sz_recently_viewed';
+        const existing = JSON.parse(localStorage.getItem(key) || '[]');
+        const updated = [
+          { _id: r.data._id, name: r.data.name, slug: r.data.slug,
+            thumbnail: r.data.thumbnail || r.data.images?.[0],
+            price: r.data.price, salePrice: r.data.salePrice, brand: r.data.brand },
+          ...existing.filter(p => p._id !== r.data._id),
+        ].slice(0, 10);
+        localStorage.setItem(key, JSON.stringify(updated));
+        setRecentlyViewed(updated.filter(p => p._id !== r.data._id).slice(0, 4));
+      } catch (_) {}
     }).catch(() => toast.error('Product not found')).finally(() => setLoading(false));
     if (user) API.get('/auth/wishlist').then(r => setWishlist(r.data.map(p => p._id))).catch(() => {});
     API.get('/whatsapp/config').then(r => setWaConfig(r.data)).catch(() => {});
@@ -564,13 +597,21 @@ export default function ProductDetail() {
         )}
       </div>
 
-      {/* ── Similar Products ── */}
+      {/* ── Similar Products — "Customers Also Viewed" ── */}
       <div className="mt-16">
-        <h2 className="text-2xl sm:text-3xl font-black mb-6" style={{ fontFamily: 'var(--font-display)', color: 'var(--color-dark)', letterSpacing: '-0.025em' }}>
-          Similar Products
-        </h2>
+        <div className="flex items-center justify-between mb-6 gap-4">
+          <h2 className="text-2xl sm:text-3xl font-black" style={{ fontFamily: 'var(--font-display)', color: 'var(--color-dark)', letterSpacing: '-0.025em' }}>
+            Customers Also Viewed
+          </h2>
+          {product?.category?.slug && (
+            <Link to={`/shop?category=${product.category._id}`}
+              className="text-sm font-bold shrink-0 hover:underline"
+              style={{ color: 'var(--color-primary)' }}>
+              View all in {product.category.name} →
+            </Link>
+          )}
+        </div>
         {related.length === 0 ? (
-          /* Skeleton while loading */
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
             {[1,2,3,4].map(i => (
               <div key={i} className="rounded-2xl overflow-hidden border" style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)' }}>
@@ -599,13 +640,114 @@ export default function ProductDetail() {
                   {p.isOnSale && p.salePrice && (
                     <p className="text-xs text-gray-400 line-through">{sym} {p.price?.toLocaleString()}</p>
                   )}
-                  {p.variants?.length > 0 && <p className="text-xs text-gray-400 mt-0.5">{p.variants.map(v => v.name).join(' · ')}</p>}
                 </div>
               </div>
             ))}
           </div>
         )}
       </div>
+
+      {/* ── More from Brand ── */}
+      {product?.brand && brandProducts.length > 0 && (
+        <div className="mt-16">
+          <div className="flex items-center justify-between mb-6 gap-4">
+            <h2 className="text-2xl sm:text-3xl font-black" style={{ fontFamily: 'var(--font-display)', color: 'var(--color-dark)', letterSpacing: '-0.025em' }}>
+              More from {product.brand}
+            </h2>
+            <Link
+              to={`/shop?brand=${encodeURIComponent(product.brand)}`}
+              className="text-sm font-bold shrink-0 hover:underline"
+              style={{ color: 'var(--color-primary)' }}>
+              All {product.brand} Products →
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+            {brandProducts.map(p => (
+              <div key={p._id} className="product-card" style={{ transformStyle: 'preserve-3d' }}>
+                <Link to={`/product/${p.slug}`} className="block overflow-hidden bg-gray-50" style={{ aspectRatio: '1' }}>
+                  <img src={p.thumbnail || p.images?.[0]} alt={`${product.brand} — ${p.name}`} className="card-img w-full h-full object-cover" />
+                </Link>
+                <div className="p-3.5" style={{ background: 'var(--card-bg)' }}>
+                  <Link to={`/product/${p.slug}`}>
+                    <p className="text-sm font-bold line-clamp-2 hover:opacity-60 transition-opacity" style={{ color: 'var(--color-dark)', fontFamily: 'var(--font-display)' }}>{p.name}</p>
+                  </Link>
+                  <p className="font-black mt-1.5 text-base" style={{ color: 'var(--color-primary)', fontFamily: 'var(--font-display)' }}>
+                    {sym} {(p.salePrice || p.price)?.toLocaleString()}
+                  </p>
+                  {p.isOnSale && p.salePrice && (
+                    <p className="text-xs text-gray-400 line-through">{sym} {p.price?.toLocaleString()}</p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Related Categories ── */}
+      {siblingCategories.length > 0 && (
+        <div className="mt-16">
+          <h2 className="text-xl sm:text-2xl font-black mb-5" style={{ fontFamily: 'var(--font-display)', color: 'var(--color-dark)', letterSpacing: '-0.025em' }}>
+            Related Categories
+          </h2>
+          <div className="flex flex-wrap gap-3">
+            {/* Current category — highlighted */}
+            {product?.category && (
+              <Link
+                to={`/shop?category=${product.category._id}`}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-2xl text-sm font-black border-2 transition-all"
+                style={{ background: 'var(--theme-gradient)', color: '#fff', borderColor: 'transparent', boxShadow: '0 4px 16px var(--glow-primary)' }}>
+                ★ {product.category.name}
+              </Link>
+            )}
+            {siblingCategories.filter(c => c._id !== product?.category?._id).map(cat => (
+              <Link
+                key={cat._id}
+                to={`/shop?category=${cat._id}`}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-2xl text-sm font-bold border-2 hover:scale-105 transition-all"
+                style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--color-dark)' }}>
+                {cat.name}
+              </Link>
+            ))}
+            {/* Link to parent category if exists */}
+            {siblingCategories[0]?.parent && (
+              <Link
+                to={`/shop?category=${siblingCategories[0].parent._id || siblingCategories[0].parent}`}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-2xl text-sm font-bold border-2 hover:scale-105 transition-all"
+                style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--color-primary)' }}>
+                ← All {siblingCategories[0]?.parentName || 'Categories'}
+              </Link>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Recently Viewed ── */}
+      {recentlyViewed.length > 0 && (
+        <div className="mt-16">
+          <h2 className="text-xl sm:text-2xl font-black mb-5" style={{ fontFamily: 'var(--font-display)', color: 'var(--color-dark)', letterSpacing: '-0.025em' }}>
+            Recently Viewed
+          </h2>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+            {recentlyViewed.map(p => (
+              <div key={p._id} className="product-card" style={{ transformStyle: 'preserve-3d' }}>
+                <Link to={`/product/${p.slug}`} className="block overflow-hidden bg-gray-50" style={{ aspectRatio: '1' }}>
+                  <img src={p.thumbnail} alt={p.name} className="card-img w-full h-full object-cover" loading="lazy" />
+                </Link>
+                <div className="p-3.5" style={{ background: 'var(--card-bg)' }}>
+                  <Link to={`/product/${p.slug}`}>
+                    <p className="text-sm font-bold line-clamp-2 hover:opacity-60 transition-opacity" style={{ color: 'var(--color-dark)', fontFamily: 'var(--font-display)' }}>{p.name}</p>
+                  </Link>
+                  {p.brand && <p className="text-xs text-gray-400 mt-0.5 font-semibold">{p.brand}</p>}
+                  <p className="font-black mt-1.5 text-base" style={{ color: 'var(--color-primary)', fontFamily: 'var(--font-display)' }}>
+                    {sym} {(p.salePrice || p.price)?.toLocaleString()}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Image Zoom Modal ── */}
       {zoomed && images[selImg] && (
