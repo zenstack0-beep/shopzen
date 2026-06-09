@@ -295,16 +295,39 @@ export default function AdminProducts() {
   }, []);
 
   /* ── AI Autofill helpers (calls own backend → Anthropic) ── */
+  // Track whether shortDescription was manually edited by the user.
+  // If it hasn't been touched, always overwrite with fresh AI output when name changes.
+  const shortDescManuallyEdited = useRef(false);
+
   const autofillFromName = async (name) => {
     if (!name || name.length < 3) return;
     setAiFillingBrand(true);
     setAiFillingShort(true);
     try {
-      const { data } = await API.post('/ai/autofill', { name });
+      // Send all available context so the AI can write a better description
+      const current = formRef.current;
+      const categoryName = (() => {
+        // categories is a list of { _id, name } objects in scope
+        try {
+          const catObj = categories.find(c => c._id === current.category);
+          return catObj?.name || '';
+        } catch { return ''; }
+      })();
+      const { data } = await API.post('/ai/autofill', {
+        name,
+        category:  categoryName,
+        brand:     current.brand     || '',
+        price:     current.price     || '',
+        salePrice: current.salePrice || '',
+      });
       updateForm(p => ({
         ...p,
-        brand:            (!p.brand            && data.brand)            ? data.brand            : p.brand,
-        shortDescription: (!p.shortDescription && data.shortDescription) ? data.shortDescription : p.shortDescription,
+        // Brand: only fill if empty
+        brand: (!p.brand && data.brand) ? data.brand : p.brand,
+        // shortDescription: fill if empty OR if the user hasn't manually edited it
+        shortDescription: (data.shortDescription && (!p.shortDescription || !shortDescManuallyEdited.current))
+          ? data.shortDescription
+          : p.shortDescription,
       }));
     } catch (err) {
       console.error('[AI autofill]', err?.response?.data?.message || err.message);
@@ -444,7 +467,7 @@ export default function AdminProducts() {
   };
   
 
-  const closeModal = () => { setModal(null); setTagSuggestions([]); };
+  const closeModal = () => { setModal(null); setTagSuggestions([]); shortDescManuallyEdited.current = false; };
 
   /* ── Save ── */
   const handleSave = async () => {
@@ -760,7 +783,7 @@ export default function AdminProducts() {
                     Short Description
                     {aiFillingShort && <span style={{fontSize:11,color:'var(--color-primary)',fontWeight:600,display:'flex',alignItems:'center',gap:3}}><span style={{display:'inline-block',width:10,height:10,border:'2px solid var(--color-primary)',borderTopColor:'transparent',borderRadius:'50%',animation:'spin 0.7s linear infinite'}}></span>AI filling…</span>}
                   </label>
-                  <input value={form.shortDescription} onChange={e=>updateForm(p=>({...p,shortDescription:e.target.value}))} className="form-input" placeholder="Brief product summary"/>
+                  <input value={form.shortDescription} onChange={e=>{shortDescManuallyEdited.current=true; updateForm(p=>({...p,shortDescription:e.target.value}));}} className="form-input" placeholder="Brief product summary (50–160 chars recommended for SEO)"/>
                 </div>
                 <div className="sm:col-span-2">
                   <label className="form-label">Full Description *</label>

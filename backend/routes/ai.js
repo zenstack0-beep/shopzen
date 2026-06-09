@@ -86,25 +86,66 @@ function extractJSON(raw, type = 'object') {
 
 /* ══════════════════════════════════════════════════════════════════
    POST /api/ai/autofill  →  { brand, shortDescription }
+   shortDescription is SEO-optimised: 110-155 chars, buying-intent,
+   Sri Lanka market signals, Google-ready.
 ══════════════════════════════════════════════════════════════════ */
 router.post('/autofill', async (req, res) => {
-  const { name } = req.body;
+  const { name, category, brand: existingBrand, price, salePrice } = req.body;
   if (!name || name.trim().length < 3)
     return res.status(400).json({ message: 'Product name too short' });
 
   const n = name.trim();
-  const systemMsg = 'You output ONLY valid JSON. No markdown. No explanation.';
-  const userMsg = `For the product "${n}", reply with this JSON and nothing else:
-{"brand":"BRAND_HERE","shortDescription":"DESCRIPTION_HERE"}
-- BRAND_HERE: the brand/manufacturer name (empty string if unknown)
-- DESCRIPTION_HERE: a compelling product description under 12 words`;
+
+  const ctxLines = [
+    existingBrand && `Brand: ${existingBrand}`,
+    category      && `Category: ${category}`,
+    price         && `Price: Rs.${price}${salePrice ? ` (sale Rs.${salePrice})` : ''}`,
+  ].filter(Boolean).join('\n');
+
+  const systemMsg = 'You are an expert e-commerce SEO copywriter for a Sri Lankan online store. You output ONLY valid JSON. No markdown. No explanation.';
+
+  const userMsg = [
+    `Generate autofill fields for this product on shopzen.lk (Sri Lanka e-commerce).`,
+    ``,
+    `Product name: "${n}"`,
+    ctxLines ? `Context:\n${ctxLines}` : '',
+    ``,
+    `Reply ONLY with this JSON, nothing else:`,
+    `{"brand":"BRAND_HERE","shortDescription":"DESC_HERE"}`,
+    ``,
+    `BRAND_HERE rules:`,
+    `- The manufacturer/brand name (extract from product name or context)`,
+    `- Empty string "" if genuinely unknown`,
+    ``,
+    `DESC_HERE rules — this appears directly in Google search results:`,
+    `- Length: 110-155 characters EXACTLY`,
+    `- Open with the key feature or benefit — NOT the product name`,
+    `- Include ONE buying-intent phrase: "buy online in Sri Lanka", "best price in Sri Lanka", or "fast delivery across Sri Lanka"`,
+    `- Mention a real spec or use-case that differentiates this product`,
+    `- End with: "Fast delivery across Sri Lanka." or "Order now at ShopZen."`,
+    `- Plain English only — no markdown, no asterisks, no ALL CAPS, no emoji`,
+    `- Do NOT open with the brand name or product name`,
+    `- Do NOT use vague filler like "high quality", "perfect for everyone"`,
+    ``,
+    `GOOD example for "Sony XV800 X-Series Wireless Party Speaker":`,
+    `"Powerful 360-degree party sound with built-in mic input, LED lighting and IPX4 splash-proof body. Buy the Sony XV800 online with fast delivery across Sri Lanka."`,
+    ``,
+    `BAD example (too short, generic, no Sri Lanka signal):`,
+    `"Wireless party speaker with great sound quality."`,
+  ].filter(s => s !== undefined).join('\n');
 
   try {
-    const raw    = await callAI(systemMsg, userMsg, 300);
+    const raw    = await callAI(systemMsg, userMsg, 500);
     const parsed = extractJSON(raw, 'object');
+
+    const shortDescription = (parsed.shortDescription || '').trim();
+    if (shortDescription.length < 50) {
+      console.warn('[AI /autofill] shortDescription too short (' + shortDescription.length + ' chars):', shortDescription);
+    }
+
     res.json({
       brand:            (parsed.brand            || '').trim(),
-      shortDescription: (parsed.shortDescription || '').trim(),
+      shortDescription: shortDescription,
     });
   } catch (err) {
     console.error('[AI /autofill]', err.message);

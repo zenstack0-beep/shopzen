@@ -241,10 +241,31 @@ router.get('/product-meta/:slug', async (req, res) => {
       '@type':           'Offer',
       url:               productUrl,
       priceCurrency:     'LKR',
-      price:             product.salePrice || product.price,
-      priceValidUntil:   new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      price:             String(product.salePrice || product.price),
+      priceValidUntil:   product.saleEndsAt
+        ? new Date(product.saleEndsAt).toISOString().split('T')[0]
+        : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       availability,
+      itemCondition: 'https://schema.org/NewCondition',
       seller: { '@type': 'Organization', name: storeName },
+      shippingDetails: {
+        '@type': 'OfferShippingDetails',
+        shippingRate: { '@type': 'MonetaryAmount', value: '0', currency: 'LKR' },
+        deliveryTime: {
+          '@type': 'ShippingDeliveryTime',
+          handlingTime: { '@type': 'QuantitativeValue', minValue: 0, maxValue: 1, unitCode: 'DAY' },
+          transitTime:  { '@type': 'QuantitativeValue', minValue: 1, maxValue: 5, unitCode: 'DAY' },
+        },
+        shippingDestination: { '@type': 'DefinedRegion', addressCountry: 'LK' },
+      },
+      hasMerchantReturnPolicy: {
+        '@type': 'MerchantReturnPolicy',
+        applicableCountry: 'LK',
+        returnPolicyCategory: 'https://schema.org/MerchantReturnFiniteReturnWindow',
+        merchantReturnDays: 14,
+        returnMethod: 'https://schema.org/ReturnByMail',
+        returnFees: 'https://schema.org/FreeReturn',
+      },
     };
 
     if (product.salePrice) {
@@ -259,9 +280,10 @@ router.get('/product-meta/:slug', async (req, res) => {
       '@context':   'https://schema.org',
       '@type':      'Product',
       name:         product.name,
-      description:  plainDesc.slice(0, 500) || product.name,
+      description:  plainDesc.slice(0, 500) || (product.brand ? `${product.brand} ${product.name}` : product.name),
       image:        [ogImage, ...(product.images || [])].filter(Boolean).slice(0, 5),
       sku:          product.sku || product._id.toString(),
+      mpn:          product.sku || undefined,
       brand:        product.brand ? { '@type': 'Brand', name: product.brand } : undefined,
       category:     catName,
       url:          productUrl,
@@ -609,17 +631,45 @@ const seoRenderMiddleware = async (req, res) => {
         const ogImage    = product.thumbnail || product.images?.[0] || defaultOgImage;
         const keywords   = [product.name, product.brand, product.category?.name, ...(product.tags||[]), 'sri lanka'].filter(Boolean).join(', ');
 
+        // Build a meaningful description: shortDescription → first 200 chars of full desc → brand+name fallback
+        const schemaDesc = plainDesc.slice(0, 500) ||
+          (product.brand ? `${product.brand} ${product.name}` : product.name);
+
         const schema = {
           '@context': 'https://schema.org', '@type': 'Product',
-          name: product.name, description: plainDesc.slice(0,500) || product.name,
+          name: product.name,
+          description: schemaDesc,
           image: [ogImage, ...(product.images||[])].filter(Boolean).slice(0,5),
           sku: product.sku || product._id.toString(),
+          mpn: product.sku || undefined,
           ...(product.brand ? { brand: { '@type': 'Brand', name: product.brand } } : {}),
           offers: {
             '@type': 'Offer', url: productUrl, priceCurrency: 'LKR',
-            price: product.salePrice || product.price,
+            price: String(product.salePrice || product.price),
+            priceValidUntil: product.saleEndsAt
+              ? new Date(product.saleEndsAt).toISOString().split('T')[0]
+              : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
             availability: product.stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+            itemCondition: 'https://schema.org/NewCondition',
             seller: { '@type': 'Organization', name: storeName },
+            shippingDetails: {
+              '@type': 'OfferShippingDetails',
+              shippingRate: { '@type': 'MonetaryAmount', value: '0', currency: 'LKR' },
+              deliveryTime: {
+                '@type': 'ShippingDeliveryTime',
+                handlingTime: { '@type': 'QuantitativeValue', minValue: 0, maxValue: 1, unitCode: 'DAY' },
+                transitTime:  { '@type': 'QuantitativeValue', minValue: 1, maxValue: 5, unitCode: 'DAY' },
+              },
+              shippingDestination: { '@type': 'DefinedRegion', addressCountry: 'LK' },
+            },
+            hasMerchantReturnPolicy: {
+              '@type': 'MerchantReturnPolicy',
+              applicableCountry: 'LK',
+              returnPolicyCategory: 'https://schema.org/MerchantReturnFiniteReturnWindow',
+              merchantReturnDays: 14,
+              returnMethod: 'https://schema.org/ReturnByMail',
+              returnFees: 'https://schema.org/FreeReturn',
+            },
           },
           ...(product.ratings?.count > 0 ? { aggregateRating: { '@type': 'AggregateRating', ratingValue: product.ratings.average.toFixed(1), reviewCount: product.ratings.count, bestRating: '5', worstRating: '1' } } : {}),
         };
