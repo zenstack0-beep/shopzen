@@ -9,6 +9,25 @@ const app = express();
 if (!process.env.MONGODB_URI) { console.error('❌ MONGODB_URI not defined'); process.exit(1); }
 console.log('🔗 MongoDB:', process.env.MONGODB_URI.replace(/\/\/(.*?):(.*)@/, '//***:***@'));
 
+// ─── Allow Vercel SSR proxy (server-to-server, no Origin header) ──────────────
+// When Vercel proxies /product/:slug to Railway for SSR, there is no Origin
+// header — it's a server-to-server request. We detect it via x-forwarded-host
+// or x-vercel-id and set CORS headers before the cors() middleware runs.
+app.use((req, res, next) => {
+  const fwdHost = req.headers['x-forwarded-host'] || '';
+  const vercelId = req.headers['x-vercel-id'] || '';
+  const isVercelProxy = !req.headers.origin && (
+    vercelId ||
+    fwdHost.includes('shopzen.lk') ||
+    fwdHost.includes('vercel.app')
+  );
+  if (isVercelProxy) {
+    res.setHeader('Access-Control-Allow-Origin', process.env.FRONTEND_URL || 'https://shopzen.lk');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+  next();
+});
+
 // ─── CORS ─────────────────────────────────────────────────────────────────────
 const allowedOrigins = [
   /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/,

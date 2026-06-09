@@ -237,25 +237,15 @@ router.get('/product-meta/:slug', async (req, res) => {
     // ── Canonical URL ─────────────────────────────────────────────────────────
     const canonical = productUrl;
 
-    // ── Rich buying-intent keywords (matches useSEO.js client-side logic) ──────
-    const pName    = product.name;
-    const brandName = product.brand || '';
-    const pSlug    = product.slug || '';
-    const baseKws  = [pName, brandName, catName, product.sku, ...(product.tags||[])].filter(Boolean);
-    const intentKws = [
-      `${brandName} ${catName}`.trim(),
-      `buy ${pName} in sri lanka`,
-      `${pName} price in colombo`,
-      `${pName} online`,
-      `${brandName ? brandName + ' ' : ''}${pSlug.replace(/-/g,' ')}`,
-      `${pName} price`,
-      `${pName} delivery in colombo`,
-      `best ${catName ? catName.toLowerCase() + ' ' : ''}in sri lanka`,
-      `${pName} ${catName}`.trim(),
-      catName ? `${catName.toLowerCase()} for sale in sri lanka` : '',
-      'sri lanka',
-    ].filter(Boolean);
-    const keywords = [...baseKws, ...intentKws].filter((v,i,a) => v && a.indexOf(v)===i).join(', ');
+    // ── Breadcrumb keywords ───────────────────────────────────────────────────
+    const keywords = [
+      product.name,
+      product.brand,
+      catName,
+      ...(product.tags || []),
+      'buy in sri lanka',
+      'online shopping sri lanka',
+    ].filter(Boolean).join(', ');
 
     // ── JSON-LD Product Schema (Google Rich Results) ──────────────────────────
     const availability = product.stock > 0
@@ -475,11 +465,10 @@ const seoRenderMiddleware = async (req, res) => {
   if (req.path.startsWith('/api/') || req.path.match(/\.(js|css|png|jpg|ico|svg|json|xml|txt|woff2?)$/))
     return res.status(404).send('Not found');
 
-  // Allow Vercel proxy to forward SSR responses
-  const origin = req.headers.origin || req.headers.referer || '';
-  if (origin.includes('shopzen.lk') || origin.includes('vercel.app') || !origin) {
-    res.setHeader('Access-Control-Allow-Origin', process.env.FRONTEND_URL || 'https://shopzen.lk');
-  }
+  // Always set CORS header — Vercel proxies product pages here server-to-server
+  // (no Origin header on those requests), so we must not gate this on origin.
+  res.setHeader('Access-Control-Allow-Origin', process.env.FRONTEND_URL || 'https://shopzen.lk');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
 
   const html = await getHtmlTemplate();
   if (!html) return res.status(500).send('Frontend build not found.');
@@ -503,28 +492,7 @@ const seoRenderMiddleware = async (req, res) => {
         const priceText  = product.salePrice ? `Rs.${product.salePrice.toLocaleString()} (was Rs.${product.price.toLocaleString()})` : `Rs.${product.price.toLocaleString()}`;
         const metaDesc   = `${(plainDesc.slice(0,100) || product.name)}. Buy for ${priceText}. Fast delivery across Sri Lanka. Shop at ${storeName}.`.slice(0, 165);
         const ogImage    = product.thumbnail || product.images?.[0] || `${siteUrl}/og-default.png`;
-
-        // Rich buying-intent keywords — matches useSEO.js client-side logic
-        const catName    = product.category?.name || '';
-        const brandName  = product.brand || '';
-        const pName      = product.name;
-        const pSlug      = product.slug || '';
-        const cityHints  = ['colombo', 'kandy', 'galle'];
-        const baseKws    = [pName, brandName, catName, product.sku, ...(product.tags||[])].filter(Boolean);
-        const intentKws  = [
-          `${brandName} ${catName}`.trim(),
-          `buy ${pName} in sri lanka`,
-          `${pName} price in colombo`,
-          `${pName} online`,
-          `${brandName ? brandName + ' ' : ''}${pSlug.replace(/-/g,' ')}`,
-          `${pName} price`,
-          `${pName} delivery in colombo`,
-          `best ${catName ? catName.toLowerCase() + ' ' : ''}in sri lanka`,
-          `${pName} ${catName}`.trim(),
-          `${catName ? catName.toLowerCase() + ' for sale in sri lanka' : ''}`,
-          'sri lanka',
-        ].filter(Boolean);
-        const keywords   = [...baseKws, ...intentKws].filter((v,i,a)=>v && a.indexOf(v)===i).join(', ');
+        const keywords   = [product.name, product.brand, product.category?.name, ...(product.tags||[]), 'sri lanka'].filter(Boolean).join(', ');
 
         // Build JSON-LD
         const schema = {
@@ -555,31 +523,24 @@ const seoRenderMiddleware = async (req, res) => {
         // Replace __META_INJECT__ placeholder if using minimal shell fallback
         let out = (html.includes('__META_INJECT__') ? html.replace('__META_INJECT__', '') : html)
           .replace(/<title>[^<]*<\/title>/, `<title>${xe(metaTitle)}</title>`)
-          .replace(/(<meta name="description" content=")[^"]*(")/,          `$1${xe(metaDesc)}$2`)
-          .replace(/(<meta name="robots" content=")[^"]*(")/,               `$1index,follow,max-image-preview:large$2`)
-          .replace(/(<link rel="canonical" href=")[^"]*(")/,                `$1${xe(productUrl)}$2`)
-          .replace(/(<meta property="og:type" content=")[^"]*(")/,          `$1product$2`)
-          .replace(/(<meta property="og:title" content=")[^"]*(")/,         `$1${xe(metaTitle)}$2`)
-          .replace(/(<meta property="og:description" content=")[^"]*(")/,   `$1${xe(metaDesc)}$2`)
-          .replace(/(<meta property="og:image" content=")[^"]*(")/,         `$1${xe(ogImage)}$2`)
-          .replace(/(<meta property="og:url" content=")[^"]*(")/,           `$1${xe(productUrl)}$2`)
-          .replace(/(<meta name="twitter:card" content=")[^"]*(")/,         `$1summary_large_image$2`)
-          .replace(/(<meta name="twitter:title" content=")[^"]*(")/,        `$1${xe(metaTitle)}$2`)
-          .replace(/(<meta name="twitter:description" content=")[^"]*(")/,  `$1${xe(metaDesc)}$2`)
-          .replace(/(<meta name="twitter:image" content=")[^"]*(")/,        `$1${xe(ogImage)}$2`)
+          .replace(/(<meta name="description" content=")[^"]*(")/, `$1${xe(metaDesc)}$2`)
+          .replace(/(<link rel="canonical" href=")[^"]*(")/, `$1${xe(productUrl)}$2`)
+          .replace(/(<meta property="og:title" content=")[^"]*(")/, `$1${xe(metaTitle)}$2`)
+          .replace(/(<meta property="og:description" content=")[^"]*(")/, `$1${xe(metaDesc)}$2`)
+          .replace(/(<meta property="og:image" content=")[^"]*(")/, `$1${xe(ogImage)}$2`)
+          .replace(/(<meta property="og:url" content=")[^"]*(")/, `$1${xe(productUrl)}$2`)
+          .replace(/(<meta property="og:type" content=")[^"]*(")/, `$1product$2`)
+          .replace(/(<meta name="twitter:title" content=")[^"]*(")/, `$1${xe(metaTitle)}$2`)
+          .replace(/(<meta name="twitter:description" content=")[^"]*(")/, `$1${xe(metaDesc)}$2`)
+          .replace(/(<meta name="twitter:image" content=")[^"]*(")/, `$1${xe(ogImage)}$2`)
           .replace(/yourstore\.com/g, 'shopzen.lk');
 
-        // Always replace keywords — even if the tag already exists (stale from another product)
-        if (out.includes('name="keywords"')) {
-          out = out.replace(/(<meta name="keywords" content=")[^"]*(")/,    `$1${xe(keywords)}$2`);
-        } else {
+        // Inject keywords meta
+        if (!out.includes('name="keywords"')) {
           out = out.replace('</head>', `<meta name="keywords" content="${xe(keywords)}"/>\n</head>`);
         }
 
-        // Strip any stale JSON-LD from cached Vercel template or previous product
-        out = out.replace(/<script type="application\/ld\+json">[\s\S]*?<\/script>\s*/g, '');
-
-        // Inject fresh product JSON-LD just before </head>
+        // Inject JSON-LD schemas
         const schemaBlock = `<script type="application/ld+json">${JSON.stringify(schema)}</script>\n<script type="application/ld+json">${JSON.stringify(breadcrumb)}</script>\n</head>`;
         out = out.replace('</head>', schemaBlock);
 
