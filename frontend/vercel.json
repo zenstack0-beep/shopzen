@@ -9,6 +9,10 @@
       "dest": "https://shopzen-production.up.railway.app/api/seo/robots.txt"
     },
     {
+      "src": "/product/([^/]+)",
+      "dest": "https://shopzen-production.up.railway.app/product/$1"
+    },
+    {
       "handle": "filesystem"
     },
     {
