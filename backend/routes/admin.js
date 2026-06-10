@@ -1,43 +1,72 @@
 const express = require('express');
-const router = express.Router();
-const Order = require('../models/Order');
+const router  = express.Router();
+const Order   = require('../models/Order');
 const Product = require('../models/Product');
-const User = require('../models/User');
+const User    = require('../models/User');
+const { ReturnRequest } = require('../models/index');
 const { adminAuth } = require('../middleware/auth');
 
-// Dashboard stats
+// ── Dashboard stats ───────────────────────────────────────────────────────────
+// Revenue figures EXCLUDE refunded orders so the financial data is accurate.
+// We also surface return statistics for the dashboard.
 router.get('/dashboard', adminAuth, async (req, res) => {
   try {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const thisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-    const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const thisMonth   = new Date(today.getFullYear(), today.getMonth(), 1);
+    const lastMonth   = new Date(today.getFullYear(), today.getMonth() - 1, 1);
     const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
+
+    // Paid & NOT refunded = real revenue
+    const revenueFilter = { paymentStatus: 'paid', orderStatus: { $ne: 'refunded' } };
 
     const [
       totalOrders, pendingOrders, todayOrders,
       totalRevenue, monthRevenue, lastMonthRevenue,
       totalProducts, lowStockProducts,
-      totalCustomers, newCustomersMonth, unreadOrders
+      totalCustomers, newCustomersMonth, unreadOrders,
+      // Return stats
+      totalReturns, pendingReturns, totalRefundedAmount,
     ] = await Promise.all([
       Order.countDocuments(),
       Order.countDocuments({ orderStatus: 'pending' }),
       Order.countDocuments({ createdAt: { $gte: today } }),
-      Order.aggregate([{ $match: { paymentStatus: 'paid' } }, { $group: { _id: null, total: { $sum: '$total' } } }]),
-      Order.aggregate([{ $match: { createdAt: { $gte: thisMonth }, paymentStatus: 'paid' } }, { $group: { _id: null, total: { $sum: '$total' } } }]),
-      Order.aggregate([{ $match: { createdAt: { $gte: lastMonth, $lte: lastMonthEnd }, paymentStatus: 'paid' } }, { $group: { _id: null, total: { $sum: '$total' } } }]),
+
+      // Revenue: paid orders that have NOT been refunded
+      Order.aggregate([
+        { $match: revenueFilter },
+        { $group: { _id: null, total: { $sum: '$total' } } }
+      ]),
+      Order.aggregate([
+        { $match: { ...revenueFilter, createdAt: { $gte: thisMonth } } },
+        { $group: { _id: null, total: { $sum: '$total' } } }
+      ]),
+      Order.aggregate([
+        { $match: { ...revenueFilter, createdAt: { $gte: lastMonth, $lte: lastMonthEnd } } },
+        { $group: { _id: null, total: { $sum: '$total' } } }
+      ]),
+
       Product.countDocuments({ isActive: true }),
       Product.countDocuments({ isActive: true, $expr: { $lte: ['$stock', '$lowStockThreshold'] } }),
       User.countDocuments({ role: 'customer' }),
       User.countDocuments({ role: 'customer', createdAt: { $gte: thisMonth } }),
-      Order.countDocuments({ isRead: false })
+      Order.countDocuments({ isRead: false }),
+
+      // Return KPIs
+      ReturnRequest.countDocuments(),
+      ReturnRequest.countDocuments({ status: 'pending' }),
+      ReturnRequest.aggregate([
+        { $match: { status: 'refunded' } },
+        { $group: { _id: null, total: { $sum: '$netRefundAmount' } } }
+      ]),
     ]);
 
     const thirtyDaysAgo = new Date(today);
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
+    // Revenue chart — exclude refunded orders
     const revenueChart = await Order.aggregate([
-      { $match: { createdAt: { $gte: thirtyDaysAgo } } },
+      { $match: { createdAt: { $gte: thirtyDaysAgo }, ...revenueFilter } },
       { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, revenue: { $sum: '$total' }, orders: { $sum: 1 } } },
       { $sort: { _id: 1 } }
     ]);
@@ -59,11 +88,15 @@ router.get('/dashboard', adminAuth, async (req, res) => {
     res.json({
       stats: {
         totalOrders, pendingOrders, todayOrders,
-        totalRevenue: totalRevenue[0]?.total || 0,
-        monthRevenue: monthRevenue[0]?.total || 0,
-        lastMonthRevenue: lastMonthRevenue[0]?.total || 0,
+        totalRevenue:      totalRevenue[0]?.total      || 0,
+        monthRevenue:      monthRevenue[0]?.total      || 0,
+        lastMonthRevenue:  lastMonthRevenue[0]?.total  || 0,
         totalProducts, lowStockProducts,
-        totalCustomers, newCustomersMonth, unreadOrders
+        totalCustomers, newCustomersMonth, unreadOrders,
+        // Return stats exposed to dashboard
+        totalReturns,
+        pendingReturns,
+        totalRefundedAmount: totalRefundedAmount[0]?.total || 0,
       },
       revenueChart, topProducts, ordersByStatus, recentOrders
     });
@@ -72,7 +105,7 @@ router.get('/dashboard', adminAuth, async (req, res) => {
   }
 });
 
-// All customers
+// ── All customers ─────────────────────────────────────────────────────────────
 router.get('/customers', adminAuth, async (req, res) => {
   try {
     const { search, page = 1, limit = 20 } = req.query;
@@ -93,7 +126,7 @@ router.get('/customers', adminAuth, async (req, res) => {
   }
 });
 
-// Toggle customer active status
+// ── Toggle customer active status ─────────────────────────────────────────────
 router.put('/customers/:id/status', adminAuth, async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
@@ -106,7 +139,7 @@ router.put('/customers/:id/status', adminAuth, async (req, res) => {
   }
 });
 
-// Create admin user
+// ── Create admin user ─────────────────────────────────────────────────────────
 router.post('/create-admin', adminAuth, async (req, res) => {
   try {
     const user = await User.create({ ...req.body, role: 'admin' });
@@ -118,24 +151,22 @@ router.post('/create-admin', adminAuth, async (req, res) => {
 
 module.exports = router;
 
-// Extended analytics endpoint
+// ── Extended analytics ────────────────────────────────────────────────────────
 router.get('/analytics', adminAuth, async (req, res) => {
   try {
     const { period = '30d' } = req.query;
-    const days = period === '7d' ? 7 : period === '90d' ? 90 : 30;
+    const days  = period === '7d' ? 7 : period === '90d' ? 90 : 30;
     const since = new Date();
     since.setDate(since.getDate() - days);
 
+    const revenueFilter = { paymentStatus: 'paid', orderStatus: { $ne: 'refunded' } };
+
     const [
-      revenueByDay,
-      ordersByStatus,
-      topProducts,
-      customerGrowth,
-      revenueByHour,
-      conversionData
+      revenueByDay, ordersByStatus, topProducts,
+      customerGrowth, revenueByHour, conversionData
     ] = await Promise.all([
       Order.aggregate([
-        { $match: { createdAt: { $gte: since } } },
+        { $match: { createdAt: { $gte: since }, ...revenueFilter } },
         { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, revenue: { $sum: '$total' }, orders: { $sum: 1 } } },
         { $sort: { _id: 1 } }
       ]),
@@ -147,12 +178,12 @@ router.get('/analytics', adminAuth, async (req, res) => {
         { $sort: { _id: 1 } }
       ]),
       Order.aggregate([
-        { $match: { createdAt: { $gte: since } } },
+        { $match: { createdAt: { $gte: since }, ...revenueFilter } },
         { $group: { _id: { $hour: '$createdAt' }, revenue: { $sum: '$total' }, orders: { $sum: 1 } } },
         { $sort: { _id: 1 } }
       ]),
       Order.aggregate([
-        { $match: { createdAt: { $gte: since }, paymentStatus: 'paid' } },
+        { $match: { createdAt: { $gte: since }, ...revenueFilter } },
         { $group: { _id: null, totalRevenue: { $sum: '$total' }, totalOrders: { $sum: 1 }, avgOrder: { $avg: '$total' } } }
       ])
     ]);
@@ -163,40 +194,42 @@ router.get('/analytics', adminAuth, async (req, res) => {
   }
 });
 
-// Cart abandonment (simulated - would need a Cart model in production)
+// ── Cart abandonment ──────────────────────────────────────────────────────────
 router.get('/cart-abandonment', adminAuth, async (req, res) => {
   try {
-    const totalOrders = await Order.countDocuments({ paymentStatus: 'paid' });
-    const totalRevenue = await Order.aggregate([
-      { $match: { paymentStatus: 'paid' } },
+    const revenueFilter = { paymentStatus: 'paid', orderStatus: { $ne: 'refunded' } };
+    const totalOrders   = await Order.countDocuments(revenueFilter);
+    const totalRevenue  = await Order.aggregate([
+      { $match: revenueFilter },
       { $group: { _id: null, total: { $sum: '$total' } } }
     ]);
-    const avgOrder = totalOrders > 0 ? (totalRevenue[0]?.total || 0) / totalOrders : 0;
+    const avgOrder         = totalOrders > 0 ? (totalRevenue[0]?.total || 0) / totalOrders : 0;
     const estimatedAbandoned = Math.round(totalOrders * 2.8);
-    const recoverable = Math.round(estimatedAbandoned * avgOrder * 0.35);
+    const recoverable        = Math.round(estimatedAbandoned * avgOrder * 0.35);
     res.json({ estimatedAbandoned, recoverable, abandonRate: 68.4, highValueCarts: Math.round(estimatedAbandoned * 0.4) });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// Sales forecast
+// ── Sales forecast ────────────────────────────────────────────────────────────
 router.get('/forecast', adminAuth, async (req, res) => {
   try {
-    const today = new Date();
-    const thisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-    const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const today        = new Date();
+    const thisMonth    = new Date(today.getFullYear(), today.getMonth(), 1);
+    const lastMonth    = new Date(today.getFullYear(), today.getMonth() - 1, 1);
     const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
+    const revenueFilter = { paymentStatus: 'paid', orderStatus: { $ne: 'refunded' } };
 
     const [monthRev, lastMonthRev, monthOrders] = await Promise.all([
-      Order.aggregate([{ $match: { createdAt: { $gte: thisMonth }, paymentStatus: 'paid' } }, { $group: { _id: null, total: { $sum: '$total' } } }]),
-      Order.aggregate([{ $match: { createdAt: { $gte: lastMonth, $lte: lastMonthEnd }, paymentStatus: 'paid' } }, { $group: { _id: null, total: { $sum: '$total' } } }]),
-      Order.countDocuments({ createdAt: { $gte: thisMonth } })
+      Order.aggregate([{ $match: { ...revenueFilter, createdAt: { $gte: thisMonth } } }, { $group: { _id: null, total: { $sum: '$total' } } }]),
+      Order.aggregate([{ $match: { ...revenueFilter, createdAt: { $gte: lastMonth, $lte: lastMonthEnd } } }, { $group: { _id: null, total: { $sum: '$total' } } }]),
+      Order.countDocuments({ ...revenueFilter, createdAt: { $gte: thisMonth } })
     ]);
 
-    const currentRev = monthRev[0]?.total || 0;
-    const prevRev = lastMonthRev[0]?.total || 0;
-    const growthRate = prevRev > 0 ? (currentRev - prevRev) / prevRev : 0.15;
+    const currentRev  = monthRev[0]?.total    || 0;
+    const prevRev     = lastMonthRev[0]?.total || 0;
+    const growthRate  = prevRev > 0 ? (currentRev - prevRev) / prevRev : 0.15;
     const forecastRev = Math.round(currentRev * (1 + Math.max(0.05, growthRate)));
     const forecastOrders = Math.round(monthOrders * (1 + Math.max(0.05, growthRate)));
 

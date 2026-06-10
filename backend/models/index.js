@@ -49,31 +49,25 @@ const bannerSchema = new mongoose.Schema({
   buttonText: { type: String, default: 'Shop Now' },
   buttonColor: { type: String, default: '#ffffff' },
   buttonBgColor: { type: String, default: '#3b82f6' },
-  // Position/type - extended
   position: {
     type: String,
     enum: ['hero', 'promo', 'sidebar', 'running_top', 'popup', 'flash_sale', 'product_page', 'category_page', 'global'],
     default: 'hero'
   },
-  // Running banner (marquee/ticker) fields
   runningText: String,
   runningSpeed: { type: Number, default: 30 },
   runningBgColor: { type: String, default: '#1e293b' },
   runningTextColor: { type: String, default: '#ffffff' },
   runningIcon: { type: String, default: '🔥' },
-  // Popup banner fields
   popupDelay: { type: Number, default: 3 },
   popupFrequency: { type: String, enum: ['always', 'once_per_session', 'once_per_day'], default: 'once_per_session' },
   popupWidth: { type: String, default: 'md' },
-  // Flash sale fields
   flashSaleEndTime: Date,
   flashSaleText: String,
-  // Targeting
   targetCategories: [String],
   targetProducts: [String],
   showOnMobile: { type: Boolean, default: true },
   showOnDesktop: { type: Boolean, default: true },
-  // Scheduling
   isActive: { type: Boolean, default: true },
   sortOrder: { type: Number, default: 0 },
   startDate: Date,
@@ -99,16 +93,11 @@ const notificationSchema = new mongoose.Schema({
   type: {
     type: String,
     enum: [
-      // Order lifecycle
       'new_order', 'order_status',
-      // Payment
       'payment_slip', 'payment_confirmed',
-      // Cancellations
       'cancel_request', 'cancel_approved', 'cancel_rejected', 'cancel_auto_decision',
-      // Follow-up & SLA (auto-monitoring)
       'follow_up', 'sla_breach', 'order_stuck', 'followup_reminder',
-      // Other
-      'low_stock', 'new_review', 'new_user', 'return_request', 'gift_card', 'system',
+      'low_stock', 'new_review', 'new_user', 'return_request', 'return_status', 'gift_card', 'system',
     ],
     required: true,
   },
@@ -119,7 +108,7 @@ const notificationSchema = new mongoose.Schema({
 });
 const Notification = mongoose.model('Notification', notificationSchema);
 
-// Settings — extended for full customization
+// Settings
 const settingsSchema = new mongoose.Schema({
   key: { type: String, unique: true, required: true },
   value: mongoose.Schema.Types.Mixed,
@@ -133,25 +122,19 @@ const giftCardSchema = new mongoose.Schema({
   code: { type: String, unique: true, uppercase: true, required: true },
   initialValue: { type: Number, required: true },
   balance: { type: Number, required: true },
-  // Who purchased it
   purchasedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   purchaserEmail: String,
   purchaserName: String,
-  // Who receives it
   recipientEmail: String,
   recipientName: String,
   recipientPhone: String,
   message: String,
-  // Card design/theme
-  design: { type: String, default: 'default' }, // 'birthday','christmas','anniversary','default'
-  // Payment details
+  design: { type: String, default: 'default' },
   paymentMethod: { type: String, default: 'bank_transfer' },
   paymentStatus: { type: String, enum: ['pending','paid','failed'], default: 'pending' },
-  // Activation
   isActive: { type: Boolean, default: false },
   activatedAt: Date,
   expiresAt: Date,
-  // Usage tracking
   usageHistory: [{
     orderId: { type: mongoose.Schema.Types.ObjectId, ref: 'Order' },
     orderNumber: String,
@@ -160,31 +143,66 @@ const giftCardSchema = new mongoose.Schema({
     balanceAfter: Number,
     date: { type: Date, default: Date.now }
   }],
-  // Payment slip upload
-  paymentSlip: String,                    // URL or relative path to uploaded slip
-  paymentSlipUploadedAt: Date,            // when the slip was uploaded
-  slipDeadlineAt: Date,                   // deadline by which slip must be uploaded (set on purchase)
-  paymentExpired: { type: Boolean, default: false }, // true when deadline passed without slip
-  // Admin review
+  paymentSlip: String,
+  paymentSlipUploadedAt: Date,
+  slipDeadlineAt: Date,
+  paymentExpired: { type: Boolean, default: false },
   adminNote: String,
-  rejectionNote: String,                  // reason sent to purchaser on reject
+  rejectionNote: String,
   rejectedAt: Date,
   createdAt: { type: Date, default: Date.now }
 });
 const GiftCard = mongoose.model('GiftCard', giftCardSchema);
 
-// ReturnRequest
+// ── ReturnRequest ─────────────────────────────────────────────────────────────
+// ENHANCED: item condition tracking, courier charge deduction, order integration
 const returnRequestSchema = new mongoose.Schema({
   order: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', required: true },
   customer: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   customerEmail: String,
-  items: [{ product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' }, name: String, quantity: Number, reason: String, condition: { type: String, enum: ['unopened','opened','damaged'], default: 'opened' } }],
-  reason: { type: String, required: true },
+
+  items: [{
+    product:   { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+    name:      String,
+    quantity:  Number,
+    price:     Number,     // unit price at time of order (for refund calculation)
+    reason:    String,
+    condition: { type: String, enum: ['unopened','opened','damaged'], default: 'opened' },
+
+    // ── Admin sets this when item is physically received ──
+    // Drives stock adjustment logic:
+    //   restockable  → add qty back to product.stock
+    //   refurbishable → do NOT touch stock (will be refurbished before relisting)
+    //   damaged       → do NOT touch stock (written off)
+    itemConditionOnReturn: {
+      type: String,
+      enum: ['restockable', 'refurbishable', 'damaged'],
+      default: null,
+    },
+    stockAdjusted: { type: Boolean, default: false }, // prevent double-adjustment
+  }],
+
+  reason:      { type: String, required: true },
   description: String,
-  status: { type: String, enum: ['pending','approved','rejected','received','refunded'], default: 'pending' },
-  adminNote: String, refundAmount: Number,
-  refundMethod: { type: String, enum: ['original','store_credit','gift_card'] },
-  images: [String],
+  images:      [String],
+
+  status: {
+    type: String,
+    enum: ['pending','approved','rejected','received','refunded'],
+    default: 'pending',
+  },
+  adminNote:    String,
+
+  // ── Refund financials ────────────────────────────────────────────────────
+  refundAmount:   Number,   // gross refund (usually order total or partial)
+  courierCharge:  { type: Number, default: 0 }, // amount admin deducts for return courier
+  netRefundAmount: Number,  // refundAmount - courierCharge  (what customer actually receives)
+  refundMethod:   { type: String, enum: ['original','store_credit','gift_card'] },
+
+  // ── Order integration flags ──────────────────────────────────────────────
+  orderStatusUpdated: { type: Boolean, default: false }, // did we flip the order to refunded?
+  stockProcessed:     { type: Boolean, default: false }, // did we run stock adjustment?
+
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
 });
@@ -206,13 +224,11 @@ const seasonalCampaignSchema = new mongoose.Schema({
   type: { type: String, enum: ['new_year','christmas','black_friday','valentines','easter','halloween','eid','flash_sale','coupon','custom'], default: 'custom' },
   isActive: { type: Boolean, default: false },
   startDate: Date, endDate: Date,
-  // Campaign page
   pageSlug: String,
   pageTitle: String,
   pageDescription: String,
   pageBannerImage: String,
   pageContent: String,
-  // Theme
   theme: {
     primaryColor: { type: String, default: '#b5451b' },
     secondaryColor: { type: String, default: '#f0a500' },
@@ -229,21 +245,17 @@ const seasonalCampaignSchema = new mongoose.Schema({
   announcementEnabled: { type: Boolean, default: true },
   discountPercent: { type: Number, default: 0 },
   couponCode: String,
-  // Flash sale
   isFlashSale: { type: Boolean, default: false },
   flashSaleEndTime: Date,
   flashSaleTitle: String,
   flashSaleSubtitle: String,
-  // Coupon campaign
   isCouponCampaign: { type: Boolean, default: false },
   couponDescription: String,
   couponMinOrder: { type: Number, default: 0 },
   couponType: { type: String, enum: ['percentage','fixed'], default: 'percentage' },
   couponValue: { type: Number, default: 0 },
   couponAutoCreate: { type: Boolean, default: false },
-  // Scheduled
   isScheduled: { type: Boolean, default: false },
-  // Banner override
   featuredBannerTitle: String,
   featuredBannerSubtitle: String,
   createdAt: { type: Date, default: Date.now }
@@ -252,13 +264,13 @@ const SeasonalCampaign = mongoose.model('SeasonalCampaign', seasonalCampaignSche
 
 // PaymentGateway config
 const paymentGatewaySchema = new mongoose.Schema({
-  gateway: { type: String, required: true, unique: true }, // 'payhere','stripe','paypal','razorpay','2checkout'
+  gateway: { type: String, required: true, unique: true },
   isEnabled: { type: Boolean, default: false },
   isLive: { type: Boolean, default: false },
   displayName: String,
   description: String,
   logo: String,
-  config: { type: mongoose.Schema.Types.Mixed, default: {} }, // merchant_id, api_key etc
+  config: { type: mongoose.Schema.Types.Mixed, default: {} },
   supportedCurrencies: [String],
   updatedAt: { type: Date, default: Date.now }
 });
@@ -274,34 +286,19 @@ const deliveryServiceSchema = new mongoose.Schema({
   description: String,
   trackingUrl: String,
   estimatedDays: String,
-  // Base rates (flat)
-  rates: [{
-    name: String,
-    price: Number,
-    freeAbove: Number,
-    estimatedDays: String
-  }],
-  // Zone-based rates (override base rates for specific areas)
-  zoneRates: [{
-    zoneName: String,       // e.g. "Colombo City", "Northern Province"
-    zones: [String],        // list of city/area names that match this zone
-    price: Number,
-    freeAbove: Number,
-    estimatedDays: String
-  }],
-  // Dynamic shipping rules (applied on top of base rate)
+  rates: [{ name: String, price: Number, freeAbove: Number, estimatedDays: String }],
+  zoneRates: [{ zoneName: String, zones: [String], price: Number, freeAbove: Number, estimatedDays: String }],
   shippingRules: [{
-    name: String,           // e.g. "Heavy Item Surcharge"
+    name: String,
     condition: { type: String, enum: ['weight_above','order_below','order_above','always'] },
     conditionValue: Number,
-    adjustment: Number,     // +/- amount added to base rate
+    adjustment: Number,
     adjustmentType: { type: String, enum: ['fixed','percentage'], default: 'fixed' }
   }],
-  // General settings
-  freeShippingThreshold: Number,  // global free shipping override for this service
-  deliveryNote: String,           // shown to customer at checkout
-  coverageAreas: String,          // human-readable coverage description
-  areas: [String],                // legacy
+  freeShippingThreshold: Number,
+  deliveryNote: String,
+  coverageAreas: String,
+  areas: [String],
   apiKey: String,
   apiSecret: String,
   updatedAt: Date,
@@ -309,11 +306,11 @@ const deliveryServiceSchema = new mongoose.Schema({
 });
 const DeliveryService = mongoose.model('DeliveryService', deliveryServiceSchema);
 
-// BusinessPage (About, Contact, Terms, Privacy, FAQ etc)
+// BusinessPage
 const businessPageSchema = new mongoose.Schema({
   slug: { type: String, required: true, unique: true },
   title: { type: String, required: true },
-  content: String, // HTML content
+  content: String,
   metaTitle: String,
   metaDescription: String,
   isActive: { type: Boolean, default: true },
@@ -334,4 +331,8 @@ const subscriberSchema = new mongoose.Schema({
 });
 const Subscriber = mongoose.model('Subscriber', subscriberSchema);
 
-module.exports = { Category, Coupon, Banner, Review, Notification, Settings, GiftCard, ReturnRequest, OTP, SeasonalCampaign, PaymentGateway, DeliveryService, BusinessPage, Subscriber };
+module.exports = {
+  Category, Coupon, Banner, Review, Notification, Settings, GiftCard,
+  ReturnRequest, OTP, SeasonalCampaign, PaymentGateway, DeliveryService,
+  BusinessPage, Subscriber
+};

@@ -1,17 +1,14 @@
 const express = require('express');
-const router = express.Router();
+const router  = express.Router();
 const { ReturnRequest, Notification } = require('../models/index');
+const Order   = require('../models/Order');
+const Product = require('../models/Product');
 const { auth, adminAuth } = require('../middleware/auth');
 const {
-  sendMail,
-  getAdminEmail,
-  isEmailEnabled,
-  returnRequestCustomerHtml,
-  returnRequestAdminHtml,
-  returnApprovedCustomerHtml,
-  returnRejectedCustomerHtml,
-  returnReceivedCustomerHtml,
-  returnRefundedCustomerHtml,
+  sendMail, getAdminEmail, isEmailEnabled,
+  returnRequestCustomerHtml, returnRequestAdminHtml,
+  returnApprovedCustomerHtml, returnRejectedCustomerHtml,
+  returnReceivedCustomerHtml, returnRefundedCustomerHtml,
   returnStatusAdminHtml,
 } = require('../utils/mailer');
 
@@ -24,15 +21,40 @@ const STATUS_LABELS = {
   refunded: 'Refunded 💰',
 };
 
+// ── Stock adjustment helper ───────────────────────────────────────────────────
+// Called once when return reaches 'refunded' status.
+// Only items marked 'restockable' get stock added back; others are written off.
+async function adjustStockForReturn(returnReq) {
+  if (returnReq.stockProcessed) return; // idempotent guard
+
+  for (const item of returnReq.items) {
+    if (!item.product) continue;
+
+    if (item.itemConditionOnReturn === 'restockable' && !item.stockAdjusted) {
+      // Add the returned quantity back to product stock
+      await Product.findByIdAndUpdate(item.product, {
+        $inc: { stock: item.quantity || 1 }
+      });
+      item.stockAdjusted = true;
+    }
+    // 'damaged' and 'refurbishable' → no stock change
+  }
+
+  returnReq.stockProcessed = true;
+}
+
 // ── Customer — Submit return request ──────────────────────────────────────────
 router.post('/', auth, async (req, res) => {
   try {
     const { order, items, reason, description, images } = req.body;
 
-    // ── Guard: block duplicate / active return requests ──────────────────────
-    // Check if there is already a non-rejected return request for this order by this customer.
-    // Statuses that block a new request: pending, approved, received, refunded.
-    // Only 'rejected' allows the customer to re-submit.
+    // Validate order belongs to this customer
+    const orderDoc = await Order.findOne({ _id: order, customer: req.user._id });
+    if (!orderDoc) {
+      return res.status(404).json({ message: 'Order not found or does not belong to you.' });
+    }
+
+    // Block duplicate / active return requests
     const existingReturn = await ReturnRequest.findOne({
       order,
       customer: req.user._id,
@@ -41,7 +63,7 @@ router.post('/', auth, async (req, res) => {
 
     if (existingReturn) {
       const statusMessages = {
-        pending:  'You already have a pending return request for this order. Please wait for it to be reviewed.',
+        pending:  'You already have a pending return request for this order.',
         approved: 'Your return request for this order has already been approved.',
         received: 'Your return item has already been received and is being processed.',
         refunded: 'This order has already been refunded.',
@@ -51,24 +73,31 @@ router.post('/', auth, async (req, res) => {
       });
     }
 
+    // Enrich items with price from order for refund calculation
+    const enrichedItems = (items || []).map(item => {
+      const orderItem = orderDoc.items.find(
+        oi => (oi.product?._id || oi.product)?.toString() === item.product?.toString()
+      );
+      return { ...item, price: orderItem?.price || 0 };
+    });
+
     const returnReq = await ReturnRequest.create({
       order,
       customer:      req.user._id,
       customerEmail: req.user.email,
-      items,
+      items:         enrichedItems,
       reason,
       description,
       images: images || [],
     });
 
-    // Populate order for email data
     await returnReq.populate('order', 'orderNumber total');
 
-    const returnId    = returnReq._id.toString().slice(-8).toUpperCase();
-    const orderNumber = returnReq.order?.orderNumber || 'N/A';
+    const returnId     = returnReq._id.toString().slice(-8).toUpperCase();
+    const orderNumber  = returnReq.order?.orderNumber || 'N/A';
     const customerName = `${req.user.firstName} ${req.user.lastName}`;
 
-    // ── In-app notification (admin) ──
+    // In-app notification (admin)
     await Notification.create({
       type:    'return_request',
       title:   '🔄 New Return Request',
@@ -77,25 +106,16 @@ router.post('/', auth, async (req, res) => {
       data:    { returnId: returnReq._id, orderNumber },
     }).catch(() => {});
 
-    // ── Email customer: return request received ──
-    if (req.user.email) {
-      if (await isEmailEnabled('return_request_customer')) {
-        sendMail({
-          to:      req.user.email,
-          subject: `Return Request Received — Order ${orderNumber} | ShopZen`,
-          html:    await returnRequestCustomerHtml({
-            customerName,
-            orderNumber,
-            returnId,
-            reason,
-            description,
-            items,
-          }),
-        }).catch(err => console.error('[RETURN REQUEST CUSTOMER EMAIL]', err.message));
-      }
+    // Email customer
+    if (req.user.email && await isEmailEnabled('return_request_customer')) {
+      sendMail({
+        to:      req.user.email,
+        subject: `Return Request Received — Order ${orderNumber} | ShopZen`,
+        html:    await returnRequestCustomerHtml({ customerName, orderNumber, returnId, reason, description, items }),
+      }).catch(err => console.error('[RETURN REQUEST CUSTOMER EMAIL]', err.message));
     }
 
-    // ── Email admin: new return alert ──
+    // Email admin
     if (await isEmailEnabled('return_request_admin')) {
       const adminEmail = await getAdminEmail();
       if (adminEmail) {
@@ -103,15 +123,9 @@ router.post('/', auth, async (req, res) => {
           to:      adminEmail,
           subject: `[Admin] 🔄 New Return Request — Order ${orderNumber}`,
           html:    await returnRequestAdminHtml({
-            customerName,
-            customerEmail: req.user.email,
-            customerPhone: req.user.phone || '',
-            orderNumber,
-            orderId:   returnReq.order?._id,
-            returnId,
-            reason,
-            description,
-            items,
+            customerName, customerEmail: req.user.email,
+            customerPhone: req.user.phone || '', orderNumber,
+            orderId: returnReq.order?._id, returnId, reason, description, items,
           }),
         }).catch(err => console.error('[RETURN REQUEST ADMIN EMAIL]', err.message));
       }
@@ -127,7 +141,7 @@ router.post('/', auth, async (req, res) => {
 router.get('/my-returns', auth, async (req, res) => {
   try {
     const returns = await ReturnRequest.find({ customer: req.user._id })
-      .populate('order', 'orderNumber total')
+      .populate('order', 'orderNumber total orderStatus')
       .sort({ createdAt: -1 });
     res.json(returns);
   } catch (err) {
@@ -143,7 +157,7 @@ router.get('/admin/all', adminAuth, async (req, res) => {
     if (status && status !== 'all') filter.status = status;
     const total   = await ReturnRequest.countDocuments(filter);
     const returns = await ReturnRequest.find(filter)
-      .populate('order', 'orderNumber total createdAt')
+      .populate('order', 'orderNumber total createdAt orderStatus paymentStatus')
       .populate('customer', 'firstName lastName email')
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
@@ -158,7 +172,10 @@ router.get('/admin/all', adminAuth, async (req, res) => {
 router.get('/admin/:id', adminAuth, async (req, res) => {
   try {
     const ret = await ReturnRequest.findById(req.params.id)
-      .populate('order')
+      .populate({
+        path: 'order',
+        populate: { path: 'items.product', select: 'name stock thumbnail' }
+      })
       .populate('customer', 'firstName lastName email phone');
     if (!ret) return res.status(404).json({ message: 'Return request not found' });
     res.json(ret);
@@ -170,24 +187,76 @@ router.get('/admin/:id', adminAuth, async (req, res) => {
 // ── Admin — Update return status ──────────────────────────────────────────────
 router.put('/admin/:id', adminAuth, async (req, res) => {
   try {
-    const { status, adminNote, refundAmount, refundMethod } = req.body;
+    const {
+      status, adminNote,
+      refundAmount, courierCharge, refundMethod,
+      itemConditions, // { [itemIndex]: 'restockable' | 'refurbishable' | 'damaged' }
+    } = req.body;
 
-    const ret = await ReturnRequest.findByIdAndUpdate(
-      req.params.id,
-      { status, adminNote, refundAmount, refundMethod, updatedAt: Date.now() },
-      { new: true }
-    )
-      .populate('order', 'orderNumber total')
+    // Load the full return doc (not lean — we need .save() for nested updates)
+    const ret = await ReturnRequest.findById(req.params.id)
+      .populate('order', 'orderNumber total orderStatus paymentStatus')
       .populate('customer', 'firstName lastName email phone');
 
     if (!ret) return res.status(404).json({ message: 'Return request not found' });
+
+    // ── Apply item condition markings ────────────────────────────────────────
+    if (itemConditions && typeof itemConditions === 'object') {
+      Object.entries(itemConditions).forEach(([idx, cond]) => {
+        if (ret.items[idx]) {
+          ret.items[idx].itemConditionOnReturn = cond;
+        }
+      });
+    }
+
+    // ── Compute net refund amount ─────────────────────────────────────────────
+    const grossRefund  = Number(refundAmount) || 0;
+    const courier      = Number(courierCharge) || 0;
+    const netRefund    = Math.max(0, grossRefund - courier);
+
+    ret.status         = status;
+    ret.adminNote      = adminNote;
+    ret.refundAmount   = grossRefund;
+    ret.courierCharge  = courier;
+    ret.netRefundAmount = netRefund;
+    if (refundMethod) ret.refundMethod = refundMethod;
+    ret.updatedAt      = Date.now();
+
+    // ── When status becomes 'refunded': adjust stock + update order ──────────
+    if (status === 'refunded') {
+      // 1. Adjust stock per item condition
+      await adjustStockForReturn(ret);
+
+      // 2. Update the linked order → refunded
+      if (ret.order?._id && !ret.orderStatusUpdated) {
+        await Order.findByIdAndUpdate(ret.order._id, {
+          orderStatus:   'refunded',
+          paymentStatus: 'refunded',
+          updatedAt:     Date.now(),
+          $push: {
+            statusHistory: {
+              status:    'refunded',
+              note:      `Return processed. Refunded Rs. ${netRefund.toLocaleString()} to customer (courier deduction: Rs. ${courier.toLocaleString()}).`,
+              updatedBy: 'admin',
+              updatedAt: new Date(),
+            }
+          }
+        });
+        ret.orderStatusUpdated = true;
+      }
+    }
+
+    await ret.save();
+
+    // Re-populate for response
+    await ret.populate('order', 'orderNumber total orderStatus paymentStatus');
 
     const customerName  = `${ret.customer?.firstName || ''} ${ret.customer?.lastName || ''}`.trim();
     const customerEmail = ret.customerEmail || ret.customer?.email;
     const orderNumber   = ret.order?.orderNumber || 'N/A';
     const returnId      = ret._id.toString().slice(-8).toUpperCase();
 
-    // ── In-app notification (admin) ──
+    // In-app notification
     await Notification.create({
       type:    'return_status',
       title:   `Return ${STATUS_LABELS[status] || status}`,
@@ -196,7 +265,7 @@ router.put('/admin/:id', adminAuth, async (req, res) => {
       data:    { returnId: ret._id, status, orderNumber },
     }).catch(() => {});
 
-    // ── Email customer based on new status ──
+    // Customer emails
     if (customerEmail) {
       const basePayload = { customerName, orderNumber, returnId, adminNote };
 
@@ -204,7 +273,7 @@ router.put('/admin/:id', adminAuth, async (req, res) => {
         sendMail({
           to:      customerEmail,
           subject: `Return Approved — Order ${orderNumber} | ShopZen`,
-          html:    await returnApprovedCustomerHtml({ ...basePayload, refundAmount, refundMethod }),
+          html:    await returnApprovedCustomerHtml({ ...basePayload, refundAmount: netRefund, refundMethod }),
         }).catch(err => console.error('[RETURN APPROVED EMAIL]', err.message));
       }
 
@@ -228,12 +297,18 @@ router.put('/admin/:id', adminAuth, async (req, res) => {
         sendMail({
           to:      customerEmail,
           subject: `Refund Processed — Order ${orderNumber} | ShopZen`,
-          html:    await returnRefundedCustomerHtml({ ...basePayload, refundAmount, refundMethod }),
+          html:    await returnRefundedCustomerHtml({
+            ...basePayload,
+            refundAmount:   netRefund,
+            courierCharge:  courier,
+            grossRefund,
+            refundMethod,
+          }),
         }).catch(err => console.error('[RETURN REFUNDED EMAIL]', err.message));
       }
     }
 
-    // ── Email admin copy on every status change ──
+    // Admin copy
     if (await isEmailEnabled('return_status_admin')) {
       const adminEmail = await getAdminEmail();
       if (adminEmail) {
@@ -241,14 +316,10 @@ router.put('/admin/:id', adminAuth, async (req, res) => {
           to:      adminEmail,
           subject: `[Admin] Return ${status.toUpperCase()} — Order ${orderNumber}`,
           html:    await returnStatusAdminHtml({
-            customerName,
-            customerEmail,
-            orderNumber,
-            returnId,
+            customerName, customerEmail, orderNumber, returnId,
             newStatus: status,
-            refundAmount,
-            refundMethod,
-            adminNote,
+            refundAmount: netRefund, courierCharge: courier, grossRefund,
+            refundMethod, adminNote,
           }),
         }).catch(err => console.error('[RETURN STATUS ADMIN EMAIL]', err.message));
       }

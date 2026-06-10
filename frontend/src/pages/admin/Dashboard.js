@@ -131,6 +131,8 @@ export default function Dashboard() {
   );
   if (!data) return <div className="text-center py-20 text-gray-400">Failed to load dashboard</div>;
 
+  // CHANGE 1: stats now also includes: totalReturns, pendingReturns, totalRefundedAmount
+  // Revenue figures from the API already exclude refunded orders (handled server-side)
   const { stats, revenueChart = [], topProducts = [], ordersByStatus = [], recentOrders = [] } = data;
 
   /* ── Derived financial metrics ────────────────────────────────────────── */
@@ -400,18 +402,19 @@ export default function Dashboard() {
             </ResponsiveContainer>
           </div>
 
-          {/* P&L summary table */}
+          {/* CHANGE 2: P&L summary table — added Returns / Refunds Paid Out line */}
           <div className="bg-white rounded-2xl border border-gray-100 p-5">
             <SH title="Profit & Loss Summary" />
             <div className="space-y-2">
               {[
-                { label: 'Gross Revenue',       value: stats.totalRevenue,                  color: 'text-gray-900',   bold: true },
-                { label: 'Cost of Goods Sold',  value: -(stats.totalRevenue - grossProfit), color: 'text-red-500',    indent: true },
-                { label: 'Gross Profit',        value: grossProfit,                         color: 'text-emerald-600',bold: true, border: true },
-                { label: 'Delivery & Shipping', value: -estimatedDeliveryCostAllTime,       color: 'text-red-400',    indent: true },
-                { label: 'Operational Costs',   value: -Math.round(stats.totalRevenue*0.05),color: 'text-red-400',    indent: true },
-                { label: 'Net Profit',          value: netProfit,                           color: netProfit >= 0 ? 'text-emerald-700' : 'text-red-600', bold: true, border: true },
-                { label: 'Profit Margin',       value: null, display: `${Math.round((netProfit/Math.max(stats.totalRevenue,1))*100)}%`, color: 'text-purple-600', bold: true },
+                { label: 'Gross Revenue (excl. refunds)', value: stats.totalRevenue,                   color: 'text-gray-900',   bold: true },
+                { label: 'Cost of Goods Sold',            value: -(stats.totalRevenue - grossProfit),  color: 'text-red-500',    indent: true },
+                { label: 'Returns / Refunds Paid Out',    value: -(stats.totalRefundedAmount || 0),    color: 'text-orange-500', indent: true },
+                { label: 'Gross Profit',                  value: grossProfit,                          color: 'text-emerald-600',bold: true, border: true },
+                { label: 'Delivery & Shipping',           value: -estimatedDeliveryCostAllTime,        color: 'text-red-400',    indent: true },
+                { label: 'Operational Costs',             value: -Math.round(stats.totalRevenue*0.05), color: 'text-red-400',    indent: true },
+                { label: 'Net Profit',                    value: netProfit,                            color: netProfit >= 0 ? 'text-emerald-700' : 'text-red-600', bold: true, border: true },
+                { label: 'Profit Margin',                 value: null, display: `${Math.round((netProfit/Math.max(stats.totalRevenue,1))*100)}%`, color: 'text-purple-600', bold: true },
               ].map((row, i) => (
                 <div key={i} className={`flex items-center justify-between py-2 ${row.border ? 'border-t-2 border-gray-200 mt-1' : ''} ${row.indent ? 'pl-4' : ''}`}>
                   <span className={`text-sm ${row.bold ? 'font-bold text-gray-800' : 'text-gray-500'}`}>{row.label}</span>
@@ -426,6 +429,7 @@ export default function Dashboard() {
 
           {/* Avg order value + delivery breakdown */}
           <div className="grid lg:grid-cols-2 gap-6">
+            {/* CHANGE 3: Key Metrics — added Total Returns and Refunds Paid rows */}
             <div className="bg-white rounded-2xl border border-gray-100 p-5">
               <SH title="Key Metrics" />
               <div className="space-y-3">
@@ -436,6 +440,8 @@ export default function Dashboard() {
                   { label: 'Revenue per Customer', value: fmt(Math.round(stats.totalRevenue / Math.max(stats.totalCustomers, 1))), icon: '👤' },
                   { label: 'Margin %',             value: `${Math.round(avgMarginPct)}%`, icon: '📈' },
                   { label: 'Net Margin %',         value: `${Math.round((netProfit / Math.max(stats.totalRevenue, 1)) * 100)}%`, icon: '✅' },
+                  { label: 'Total Returns',        value: stats.totalReturns || 0,        icon: '🔄' },
+                  { label: 'Refunds Paid',         value: fmt(stats.totalRefundedAmount || 0), icon: '💸' },
                 ].map(m => (
                   <div key={m.label} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
                     <span className="text-sm text-gray-600 flex items-center gap-2"><span>{m.icon}</span>{m.label}</span>
