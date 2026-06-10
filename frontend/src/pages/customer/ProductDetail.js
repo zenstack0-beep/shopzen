@@ -166,34 +166,67 @@ export default function ProductDetail() {
       API.get(`/reviews/product/${r.data._id}`).then(rr => setReviews(rr.data || [])).catch(() => {});
 
       const cat = r.data.category;
-      const catQuery = cat?._id ? `category=${cat._id}` : cat?.slug ? `category=${cat.slug}` : '';
+      const catId = cat?._id;
 
-      // ── Similar Items — search by product name keywords (most precise match)
-      const nameWords = r.data.name
-        .replace(/[^a-zA-Z0-9\s]/g, ' ')
-        .split(/\s+/)
-        .filter(w => w.length > 3)
-        .slice(0, 3)
-        .join(' ');
-      const similarUrl = nameWords
-        ? `/products?search=${encodeURIComponent(nameWords)}&limit=9`
-        : catQuery ? `/products?${catQuery}&limit=9` : '/products?limit=9';
-      API.get(similarUrl)
-        .then(rr => {
-          const all = (rr.data?.products || rr.data || []).filter(p => p._id !== r.data._id);
-          setSimilarItems(all.slice(0, 4));
-        })
-        .catch(() => setSimilarItems([]))
-        .finally(() => setSimilarLoading(false));
+      // Fetch subcategory products once — split into two non-overlapping groups
+      const loadBothSections = async (productId, productName, categoryId) => {
+        const excludeSelf = p => p._id !== productId;
+        let subPool = [];
 
-      // ── Customers Also Viewed — same category
-      const relatedUrl = catQuery ? `/products?${catQuery}&limit=8` : '/products?limit=8';
-      API.get(relatedUrl)
-        .then(rr => {
-          const all = (rr.data?.products || rr.data || []).filter(p => p._id !== r.data._id);
-          setRelated(all.slice(0, 4));
-        })
-        .catch(() => setRelated([]));
+        // Step 1 — same subcategory, fetch enough for both sections
+        if (categoryId) {
+          try {
+            const res = await API.get(`/products?category=${categoryId}&limit=20`);
+            subPool = (res.data?.products || res.data || []).filter(excludeSelf);
+          } catch (_) {}
+        }
+
+        // Similar Items = first 4, Customers Also Viewed = next 4 (no overlap)
+        const group1 = subPool.slice(0, 4);
+        const group2 = subPool.slice(4, 8);
+
+        setSimilarItems(group1);
+
+        // Customers Also Viewed: top up from parent if needed
+        if (group2.length >= 4) {
+          setRelated(group2);
+          return;
+        }
+
+        const shownIds = new Set([productId, ...group1.map(p => p._id), ...group2.map(p => p._id)]);
+        let relatedFilled = false;
+        try {
+          const catRes = await API.get(`/categories`);
+          const allCats = catRes.data || [];
+          const thisCat = allCats.find(c => c._id?.toString() === categoryId?.toString());
+          if (thisCat?.parent) {
+            const res2 = await API.get(`/products?category=${thisCat.parent}&limit=12`);
+            const parentPool = (res2.data?.products || res2.data || []).filter(p => !shownIds.has(p._id));
+            setRelated([...group2, ...parentPool].slice(0, 4));
+            relatedFilled = true;
+          }
+        } catch (_) {}
+        if (!relatedFilled) setRelated(group2);
+
+        // Similar Items fallback — subcategory was empty, try name search
+        if (group1.length === 0) {
+          const nameWords = productName
+            .replace(/[^a-zA-Z0-9\s]/g, ' ')
+            .split(/\s+/)
+            .filter(w => w.length > 3)
+            .slice(0, 3)
+            .join(' ');
+          if (nameWords) {
+            try {
+              const res3 = await API.get(`/products?search=${encodeURIComponent(nameWords)}&limit=9`);
+              const pool3 = (res3.data?.products || res3.data || []).filter(excludeSelf);
+              setSimilarItems(pool3.slice(0, 4));
+            } catch (_) {}
+          }
+        }
+      };
+
+      loadBothSections(r.data._id, r.data.name, catId).finally(() => setSimilarLoading(false));
 
       // ── Brand products — "More from [Brand]"
       if (r.data.brand) {
@@ -623,8 +656,7 @@ export default function ProductDetail() {
       </div>
 
       {/* ── Similar Items ── */}
-      {(similarLoading || similarItems.length > 0) && (
-        <div className="mt-16">
+      <div className="mt-16">
           <div className="flex items-center justify-between mb-6 gap-4">
             <h2 className="text-2xl sm:text-3xl font-black" style={{ fontFamily: 'var(--font-display)', color: 'var(--color-dark)', letterSpacing: '-0.025em' }}>
               Similar Items
@@ -672,7 +704,6 @@ export default function ProductDetail() {
             </div>
           )}
         </div>
-      )}
 
       {/* ── Similar Products — "Customers Also Viewed" ── */}
       <div className="mt-16">
