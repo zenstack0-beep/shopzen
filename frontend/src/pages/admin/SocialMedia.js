@@ -103,12 +103,13 @@ const PLATFORMS = [
       </svg>
     ),
     fields: [
-      { key: 'accountId',    label: 'Bot Username / Channel ID', placeholder: '@mychannel or -1001234567890' },
-      { key: 'accountName',  label: 'Bot / Channel Name',        placeholder: 'My Store Bot' },
-      { key: 'accountHandle',label: 'Bot Username',              placeholder: 'MyStoreBot' },
-      { key: 'accessToken',  label: 'Bot Token',                 placeholder: '123456:ABCdef...', type: 'password', hint: 'Get from @BotFather on Telegram' },
+      { key: 'accountId',    label: 'Channel / Group Chat ID', placeholder: '-1001234567890 or @mypublicchannel',
+        hint: 'Where to post. Private channels & supergroups need the numeric ID with -100 prefix (e.g. -1001234567890). Public channels can use @handle. Get the numeric ID by forwarding a message from the channel to @userinfobot.' },
+      { key: 'accountName',  label: 'Channel / Bot Display Name', placeholder: 'My Store Channel' },
+      { key: 'accountHandle',label: 'Bot Username (from @BotFather)', placeholder: 'MyStoreBot' },
+      { key: 'accessToken',  label: 'Bot Token',                 placeholder: '123456789:ABCdefGHIjklMNO...', type: 'password', hint: 'Get from @BotFather on Telegram → /newbot. The bot must be added as Admin to your channel.' },
     ],
-    guide: 'Message @BotFather on Telegram → /newbot → copy the token. Add the bot as admin to your channel to send messages.',
+    guide: '1. Create bot via @BotFather → /newbot → copy the Bot Token. 2. Add the bot as Admin to your channel (Manage Channel → Administrators → Add Admin). 3. For the Chat ID: public channels use @handle; for private channels forward any message from your channel to @userinfobot to get the numeric ID (add -100 prefix, e.g. if ID is 1234567890 use -1001234567890).',
   },
 ];
 

@@ -82,13 +82,23 @@ function sanitizeDoc(doc) {
 }
 
 // ─── Encrypt sensitive fields in a platform object before save ────────────────
+function isAlreadyEncrypted(val) {
+  // Encrypted format is exactly: iv_hex:tag_hex:ciphertext_hex  (3 colon-separated parts).
+  // A Telegram bot token like "123456789:ABCdef..." has only 2 parts — it must NOT be
+  // treated as already-encrypted, otherwise decrypt() returns '' and the token is lost.
+  if (!val || typeof val !== 'string') return false;
+  const parts = val.split(':');
+  if (parts.length !== 3) return false;
+  // Each part must be a non-empty hex string
+  return parts.every(p => p.length > 0 && /^[0-9a-f]+$/i.test(p));
+}
+
 function encryptPlatformFields(platformData) {
   const result = { ...platformData };
   SENSITIVE_FIELDS.forEach(field => {
     if (result[field] !== undefined) {
-      // Only re-encrypt if the value looks like a real plaintext (not already encrypted)
       const val = result[field];
-      if (val && !val.includes(':')) {
+      if (val && !isAlreadyEncrypted(val)) {
         result[field] = encrypt(val);
       } else if (!val) {
         result[field] = '';
@@ -218,6 +228,10 @@ async function connectPlatform(platform, credentials) {
     tokenLastRefreshedAt,
     tokenRefreshError:    '',
     reconnectNeeded,
+    // Always clear stale test result when credentials are (re)connected
+    lastTested:           null,
+    lastTestStatus:       '',
+    lastTestMessage:      '',
   });
 
   doc[platform] = updated;
