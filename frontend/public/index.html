@@ -118,7 +118,11 @@
         if(mt)mt.content=pr;
       }
 
-      // 1. Apply from localStorage cache immediately (returning visitors get correct theme on first paint)
+      // 1a. Always apply default theme first — ensures new devices never flash orange/wrong colours
+      //     while waiting for localStorage cache or API response.
+      applySettings({});
+
+      // 1b. Override with localStorage cache if available (returning visitors get their saved theme)
       var cached=null;
       try{var raw=localStorage.getItem('shopzen_theme_v2');if(raw)cached=JSON.parse(raw);}catch(e){}
       if(cached) applySettings(cached);

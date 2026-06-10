@@ -56,6 +56,12 @@ export default function Shop() {
     setPage(1);
   }, [catParam]);
 
+  // Sync search state when the ?search= URL param changes (e.g. "See all results" from navbar)
+  useEffect(() => {
+    setSearch(searchParam);
+    setPage(1);
+  }, [searchParam]);
+
   const fetchProducts = useCallback(() => {
     setLoading(true);
     const q = new URLSearchParams({ page, limit:12, sort:sortBy });
