@@ -11,6 +11,52 @@ const { refreshPlatformNow } = require('../services/tokenRefreshScheduler');
 const { getOrCreate, decryptPlatformFields } = require('../services/socialMediaService');
 const { inspectToken } = require('../services/facebookTokenRefresh');
 
+// ─── PUBLIC: storefront footer social links (no secrets) ─────────────────────
+// Returns only connected+enabled platforms with safe display fields.
+router.get('/public', async (req, res) => {
+  try {
+    const SocialMedia = require('../models/SocialMedia');
+    const PLATFORM_META = {
+      facebook:  { label: 'Facebook',  color: '#1877f2', urlPrefix: 'https://facebook.com/' },
+      instagram: { label: 'Instagram', color: 'linear-gradient(45deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888)', urlPrefix: 'https://instagram.com/' },
+      tiktok:    { label: 'TikTok',    color: '#010101', urlPrefix: 'https://tiktok.com/@' },
+      whatsapp:  { label: 'WhatsApp',  color: '#25d366', urlPrefix: 'https://wa.me/' },
+      telegram:  { label: 'Telegram',  color: '#229ed9', urlPrefix: 'https://t.me/' },
+    };
+    const doc = await SocialMedia.findOne().lean();
+    if (!doc) return res.json([]);
+
+    const platforms = Object.keys(PLATFORM_META);
+    const result = platforms
+      .filter(p => doc[p]?.connected && doc[p]?.enabled)
+      .map(p => {
+        const { label, color, urlPrefix } = PLATFORM_META[p];
+        const acct = doc[p];
+        // Build profile URL from handle, or accountId as fallback
+        const handle = acct.accountHandle?.replace(/^@/, '') || acct.accountId || '';
+        const url = p === 'whatsapp'
+          ? `https://wa.me/${handle.replace(/[^0-9]/g, '')}`
+          : handle ? `${urlPrefix}${handle}` : null;
+        return {
+          platform:    p,
+          label,
+          color,
+          url,
+          accountName:   acct.accountName   || label,
+          accountHandle: acct.accountHandle  || '',
+          accountAvatar: acct.accountAvatar  || '',
+        };
+      })
+      .filter(p => p.url); // only include if we have a usable URL
+
+    res.json(result);
+  } catch (err) {
+    console.error('social-media/public error:', err);
+    res.json([]);
+  }
+});
+// ─────────────────────────────────────────────────────────────────────────────
+
 // ─── TEMP DEBUG — no auth, remove after fixing ───────────────────────────────
 router.get('/debug-whatsapp', async (req, res) => {
   const doc = await require('../models/SocialMedia').findOne();
