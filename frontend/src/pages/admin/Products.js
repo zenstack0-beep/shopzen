@@ -18,7 +18,7 @@ const DRAFT_KEY = 'shopzen_product_draft';
 
 const emptyProduct = {
   name:'', description:'', shortDescription:'', price:'', salePrice:'',
-  costPrice:'', sku:'', category:'', brand:'', stock:'5', lowStockThreshold:5,
+  costPrice:'', sku:'', category:'', subCategory:'', brand:'', stock:'5', lowStockThreshold:5,
   weight:'', thumbnail:'', images:[],
   tags:'', isFeatured:false, isActive:true, isOnSale:false,
   specifications:[], variants:[]
@@ -380,7 +380,7 @@ export default function AdminProducts() {
   }, [search, page]);
 
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
-  useEffect(() => { API.get('/categories').then(r=>setCategories(r.data)).catch(()=>{}); }, []);
+  useEffect(() => { API.get('/categories/all').then(r=>setCategories(r.data)).catch(()=>{ API.get('/categories').then(r=>setCategories(r.data)).catch(()=>{}); }); }, []);
 
   /* ── Check draft on mount ── */
   useEffect(() => {
@@ -452,6 +452,7 @@ export default function AdminProducts() {
     const ef = {
       ...emptyProduct, ...p,
       category: p.category?._id || p.category,
+      subCategory: p.subCategory || '',
       tags: Array.isArray(p.tags) ? p.tags.join(', ') : '',
       price:             p.price        != null ? String(p.price)             : '',
       salePrice:         p.salePrice    != null ? String(p.salePrice)         : '',
@@ -756,11 +757,21 @@ export default function AdminProducts() {
                 </div>
                 <div>
                   <label className="form-label">Category *</label>
-                  <select value={form.category} onChange={e=>updateForm(p=>({...p,category:e.target.value}))} className="form-input">
+                  <select value={form.category} onChange={e=>updateForm(p=>({...p,category:e.target.value,subCategory:''}))} className="form-input">
                     <option value="">Select category</option>
-                    {categories.map(c=><option key={c._id} value={c._id}>{c.name}</option>)}
+                    {categories.filter(c=>!c.parent).map(c=><option key={c._id} value={c._id}>{c.name}</option>)}
                   </select>
                 </div>
+                {/* Subcategory — shows only when selected category has subcategories */}
+                {form.category && categories.filter(c=>(c.parent?._id||c.parent)===form.category).length > 0 && (
+                  <div>
+                    <label className="form-label">Subcategory</label>
+                    <select value={form.subCategory||''} onChange={e=>updateForm(p=>({...p,subCategory:e.target.value}))} className="form-input">
+                      <option value="">— None (top-level category only) —</option>
+                      {categories.filter(c=>(c.parent?._id||c.parent)===form.category).map(c=><option key={c._id} value={c._id}>{c.name}</option>)}
+                    </select>
+                  </div>
+                )}
                 <div>
                   <label className="form-label" style={{display:'flex',alignItems:'center',gap:6}}>
                     Brand

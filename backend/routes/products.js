@@ -130,9 +130,10 @@ router.delete('/:id', adminAuth, async (req, res) => {
 // Public — list with filters
 router.get('/', async (req, res) => {
   try {
-    const { category, search, minPrice, maxPrice, sort, page = 1, limit = 12, featured, onSale, brand } = req.query;
+    const { category, subCategory, search, minPrice, maxPrice, sort, page = 1, limit = 12, featured, onSale, brand } = req.query;
     const filter = { isActive: true };
     if (category) filter.category  = category;
+    if (subCategory) filter.subCategory = subCategory;
     if (featured) filter.isFeatured = true;
     if (onSale)   filter.isOnSale   = true;
     if (brand)    filter.brand       = new RegExp(brand, 'i');
@@ -206,6 +207,9 @@ router.get('/:id/similar', async (req, res) => {
 
       // Same category → strong signal
       if (p.category?._id?.toString() === source.category?._id?.toString()) score += 40;
+
+      // Same subcategory → extra boost
+      if (source.subCategory && p.subCategory && source.subCategory.toString() === p.subCategory.toString()) score += 20;
 
       // Overlapping tags — weight by overlap ratio
       const srcTags  = new Set((source.tags || []).map(t => t.toLowerCase()));

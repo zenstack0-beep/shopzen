@@ -40,10 +40,15 @@ export default function Shop() {
   const [priceMax,   setPriceMax]   = useState('');
   const [inStock,    setInStock]    = useState(false);
   const [onSale,     setOnSale]     = useState(saleParam);
+  const [subCategory, setSubCategory] = useState('');
   const [filterOpen, setFilterOpen] = useState(false);
   const [addedId,    setAddedId]    = useState(null);
 
-  useEffect(() => { API.get('/categories').then(r=>setCategories(r.data||[])).catch(()=>{}); }, []);
+  useEffect(() => {
+    API.get('/categories/all')
+      .then(r => setCategories(r.data || []))
+      .catch(() => { API.get('/categories').then(r => setCategories(r.data || [])).catch(() => {}); });
+  }, []);
 
   // Sync category state when navigating via /shop/:category route or ?category= param
   useEffect(() => {
@@ -59,6 +64,7 @@ export default function Shop() {
       const matched = categories.find(c => c._id === category || c.slug === category);
       q.set('category', matched ? matched._id : category);
     }
+    if (subCategory) q.set('subCategory', subCategory);
     if (search)   q.set('search', search);
     if (onSale)   q.set('onSale', 'true');
     if (featParam) q.set('featured','true');
@@ -76,9 +82,9 @@ export default function Shop() {
         }
       }, 50);
     }).catch(()=>{}).finally(()=>setLoading(false));
-  }, [page, category, categories, search, sortBy, onSale, inStock, priceMin, priceMax, featParam]);
+  }, [page, category, subCategory, categories, search, sortBy, onSale, inStock, priceMin, priceMax, featParam]);
 
-  useEffect(() => { setPage(1); }, [category, search, sortBy, onSale, inStock, priceMin, priceMax]);
+  useEffect(() => { setPage(1); }, [category, subCategory, search, sortBy, onSale, inStock, priceMin, priceMax]);
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
 
   const handleAdd = (e, product) => {
@@ -149,14 +155,41 @@ export default function Shop() {
                   {search && <button onClick={()=>setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">✕</button>}
                 </div>
               </div>
-              {/* Category */}
+              {/* Category + Subcategory */}
               <div>
                 <p className="form-label mb-2">Category</p>
                 <div className="space-y-1">
-                  <button onClick={()=>setCategory('')} className={`w-full text-left text-sm px-3 py-1.5 rounded-xl transition-all font-medium ${!category?'text-white':'text-gray-600 hover:bg-gray-100'}`} style={!category?{background:'var(--theme-gradient)'}:{}}>All Products</button>
-                  {categories.map(c=>(
-                    <button key={c._id} onClick={()=>setCategory(c._id)} className={`w-full text-left text-sm px-3 py-1.5 rounded-xl transition-all font-medium ${category===c._id?'text-white':'text-gray-600 hover:bg-gray-100'}`} style={category===c._id?{background:'var(--theme-gradient)'}:{}}>{c.name}</button>
-                  ))}
+                  <button
+                    onClick={() => { setCategory(''); setSubCategory(''); }}
+                    className={`w-full text-left text-sm px-3 py-1.5 rounded-xl transition-all font-medium ${!category ? 'text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+                    style={!category ? { background: 'var(--theme-gradient)' } : {}}
+                  >All Products</button>
+                  {categories.filter(c => !c.parent).map(c => {
+                    const subs = categories.filter(s => (s.parent?._id || s.parent) === c._id);
+                    const isSelected = category === c._id;
+                    return (
+                      <div key={c._id}>
+                        <button
+                          onClick={() => { setCategory(c._id); setSubCategory(''); }}
+                          className={`w-full text-left text-sm px-3 py-1.5 rounded-xl transition-all font-medium ${isSelected && !subCategory ? 'text-white' : isSelected ? 'text-gray-800 bg-gray-100' : 'text-gray-600 hover:bg-gray-100'}`}
+                          style={isSelected && !subCategory ? { background: 'var(--theme-gradient)' } : {}}
+                        >{c.name}</button>
+                        {/* Subcategories indent */}
+                        {isSelected && subs.length > 0 && (
+                          <div className="ml-3 mt-0.5 space-y-0.5 border-l-2 border-gray-100 pl-2">
+                            {subs.map(s => (
+                              <button
+                                key={s._id}
+                                onClick={() => setSubCategory(s._id)}
+                                className={`w-full text-left text-xs px-2 py-1 rounded-lg transition-all font-medium ${subCategory === s._id ? 'text-white' : 'text-gray-500 hover:bg-gray-100'}`}
+                                style={subCategory === s._id ? { background: 'var(--theme-gradient)' } : {}}
+                              >{s.name}</button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
               {/* Price */}
@@ -178,8 +211,8 @@ export default function Shop() {
                   </label>
                 ))}
               </div>
-              {(category||search||onSale||inStock||priceMin||priceMax) && (
-                <button onClick={()=>{setCategory('');setSearch('');setOnSale(false);setInStock(false);setPriceMin('');setPriceMax('');}} className="text-xs font-bold w-full text-center py-2 rounded-xl transition-all" style={{color:'var(--color-primary)'}}>
+              {(category||subCategory||search||onSale||inStock||priceMin||priceMax) && (
+                <button onClick={()=>{setCategory('');setSubCategory('');setSearch('');setOnSale(false);setInStock(false);setPriceMin('');setPriceMax('');}} className="text-xs font-bold w-full text-center py-2 rounded-xl transition-all" style={{color:'var(--color-primary)'}}>
                   × Clear All Filters
                 </button>
               )}
@@ -195,9 +228,23 @@ export default function Shop() {
                   <div>
                     <p className="form-label">Category</p>
                     <div className="flex flex-wrap gap-2 mt-2">
-                      <button onClick={()=>setCategory('')} className={`text-sm px-3 py-1.5 rounded-xl font-semibold transition-all ${!category?'text-white':'bg-gray-100 text-gray-600'}`} style={!category?{background:'var(--theme-gradient)'}:{}}>All</button>
-                      {categories.map(c=><button key={c._id} onClick={()=>{setCategory(c._id);setFilterOpen(false);}} className={`text-sm px-3 py-1.5 rounded-xl font-semibold transition-all ${category===c._id?'text-white':'bg-gray-100 text-gray-600'}`} style={category===c._id?{background:'var(--theme-gradient)'}:{}}>{c.name}</button>)}
+                      <button onClick={() => { setCategory(''); setSubCategory(''); }} className={`text-sm px-3 py-1.5 rounded-xl font-semibold transition-all ${!category ? 'text-white' : 'bg-gray-100 text-gray-600'}`} style={!category ? { background: 'var(--theme-gradient)' } : {}}>All</button>
+                      {categories.filter(c => !c.parent).map(c => (
+                        <button key={c._id} onClick={() => { setCategory(c._id); setSubCategory(''); setFilterOpen(false); }} className={`text-sm px-3 py-1.5 rounded-xl font-semibold transition-all ${category === c._id ? 'text-white' : 'bg-gray-100 text-gray-600'}`} style={category === c._id ? { background: 'var(--theme-gradient)' } : {}}>{c.name}</button>
+                      ))}
                     </div>
+                    {/* Mobile subcategory row */}
+                    {category && categories.filter(c => (c.parent?._id || c.parent) === category).length > 0 && (
+                      <div className="mt-2">
+                        <p className="text-xs text-gray-400 mb-1 font-semibold uppercase tracking-wider">Subcategory</p>
+                        <div className="flex flex-wrap gap-2">
+                          <button onClick={() => setSubCategory('')} className={`text-xs px-2.5 py-1 rounded-lg font-semibold transition-all ${!subCategory ? 'text-white' : 'bg-gray-100 text-gray-500'}`} style={!subCategory ? { background: 'var(--theme-gradient)' } : {}}>All</button>
+                          {categories.filter(c => (c.parent?._id || c.parent) === category).map(s => (
+                            <button key={s._id} onClick={() => { setSubCategory(s._id); setFilterOpen(false); }} className={`text-xs px-2.5 py-1 rounded-lg font-semibold transition-all ${subCategory === s._id ? 'text-white' : 'bg-gray-100 text-gray-500'}`} style={subCategory === s._id ? { background: 'var(--theme-gradient)' } : {}}>{s.name}</button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <div className="flex gap-2">
                     <div className="flex-1"><label className="form-label">Min Price</label><input type="number" value={priceMin} onChange={e=>setPriceMin(e.target.value)} className="form-input"/></div>
@@ -239,7 +286,7 @@ export default function Shop() {
                 <div className="text-6xl mb-4">🔍</div>
                 <h3 className="text-xl font-bold text-gray-700 mb-2" style={{fontFamily:'var(--font-display)'}}>No products found</h3>
                 <p className="text-gray-400 text-sm mb-5">Try a different search or browse our categories</p>
-                <button onClick={()=>{setSearch('');setCategory('');setOnSale(false);setInStock(false);}} className="btn-primary text-sm">Clear Filters</button>
+                <button onClick={()=>{setSearch('');setCategory('');setSubCategory('');setOnSale(false);setInStock(false);}} className="btn-primary text-sm">Clear Filters</button>
               </div>
             ) : (
               <>

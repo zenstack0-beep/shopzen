@@ -3,17 +3,54 @@ const router = express.Router();
 const { Category } = require('../models/index');
 const { adminAuth } = require('../middleware/auth');
 
-// Get all active categories (public)
+// ── PUBLIC: Get all active parent categories (no parent) ────────────────────
 router.get('/', async (req, res) => {
   try {
-    const cats = await Category.find({ isActive: true }).sort({ sortOrder: 1, name: 1 });
+    const cats = await Category.find({ isActive: true, parent: null })
+      .sort({ sortOrder: 1, name: 1 });
     res.json(cats);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// Create category (admin)
+// ── PUBLIC: Get all categories flat (admin use & coupon selector) ───────────
+router.get('/all', async (req, res) => {
+  try {
+    const cats = await Category.find({ isActive: true })
+      .sort({ sortOrder: 1, name: 1 });
+    res.json(cats);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ── PUBLIC: Get subcategories for a parent category ─────────────────────────
+router.get('/sub/:parentId', async (req, res) => {
+  try {
+    const subs = await Category.find({
+      isActive: true,
+      parent: req.params.parentId,
+    }).sort({ sortOrder: 1, name: 1 });
+    res.json(subs);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ── ADMIN: Get ALL categories (including hidden) ─────────────────────────────
+router.get('/admin/all', adminAuth, async (req, res) => {
+  try {
+    const cats = await Category.find()
+      .populate('parent', 'name')
+      .sort({ sortOrder: 1, name: 1 });
+    res.json(cats);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ── ADMIN: Create category or subcategory ────────────────────────────────────
 router.post('/', adminAuth, async (req, res) => {
   try {
     const cat = await Category.create(req.body);
@@ -23,7 +60,7 @@ router.post('/', adminAuth, async (req, res) => {
   }
 });
 
-// Update category (admin)
+// ── ADMIN: Update category ───────────────────────────────────────────────────
 router.put('/:id', adminAuth, async (req, res) => {
   try {
     const cat = await Category.findByIdAndUpdate(req.params.id, req.body, { new: true });
@@ -33,33 +70,33 @@ router.put('/:id', adminAuth, async (req, res) => {
   }
 });
 
-// Delete category (admin)
+// ── ADMIN: Delete (soft-delete) category ────────────────────────────────────
 router.delete('/:id', adminAuth, async (req, res) => {
   try {
     await Category.findByIdAndUpdate(req.params.id, { isActive: false });
+    // Also deactivate all subcategories of this parent
+    await Category.updateMany({ parent: req.params.id }, { isActive: false });
     res.json({ message: 'Category deleted' });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// Get sibling categories (same parent) — used for "Related Categories" on product pages
+// ── PUBLIC: Get sibling categories (same parent) ─────────────────────────────
 router.get('/siblings/:categoryId', async (req, res) => {
   try {
     const current = await Category.findById(req.params.categoryId).lean();
     if (!current) return res.json([]);
 
-    // Find all active categories that share the same parent (or are all top-level)
     const siblings = await Category.find({
       isActive: true,
-      parent: current.parent || null,   // null means top-level categories
-      _id: { $ne: current._id },        // exclude the current one
+      parent: current.parent || null,
+      _id: { $ne: current._id },
     })
       .sort({ sortOrder: 1, name: 1 })
       .limit(8)
       .lean();
 
-    // If there's a parent, populate its name so the frontend can render "← All [ParentName]"
     if (current.parent) {
       const parent = await Category.findById(current.parent).lean();
       siblings.forEach(s => {

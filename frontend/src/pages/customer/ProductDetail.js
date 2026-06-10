@@ -87,7 +87,9 @@ export default function ProductDetail() {
   const [qty, setQty] = useState(1);
   const [reviews, setReviews] = useState([]);
   const [related, setRelated] = useState([]);
+
   const [similarItems, setSimilarItems] = useState([]);
+  const [similarLoading, setSimilarLoading] = useState(true);
   const [brandProducts, setBrandProducts] = useState([]);
   const [siblingCategories, setSiblingCategories] = useState([]);
   const [recentlyViewed, setRecentlyViewed] = useState([]);
@@ -157,25 +159,41 @@ export default function ProductDetail() {
   });
 
   useEffect(() => {
-    setLoading(true); setSelVars({});
+    setLoading(true); setSelVars({}); setSimilarLoading(true);
     API.get(`/products/${slug}`).then(r => {
       setProduct(r.data);
       trackViewItem(r.data);
       API.get(`/reviews/product/${r.data._id}`).then(rr => setReviews(rr.data || [])).catch(() => {});
 
-      // ── Similar Items — scored by tags, category, brand, price range
-      API.get(`/products/${r.data._id}/similar?limit=6`)
-        .then(rr => setSimilarItems(rr.data || []))
-        .catch(() => {});
       const cat = r.data.category;
       const catQuery = cat?._id ? `category=${cat._id}` : cat?.slug ? `category=${cat.slug}` : '';
+
+      // ── Similar Items — search by product name keywords (most precise match)
+      const nameWords = r.data.name
+        .replace(/[^a-zA-Z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter(w => w.length > 3)
+        .slice(0, 3)
+        .join(' ');
+      const similarUrl = nameWords
+        ? `/products?search=${encodeURIComponent(nameWords)}&limit=9`
+        : catQuery ? `/products?${catQuery}&limit=9` : '/products?limit=9';
+      API.get(similarUrl)
+        .then(rr => {
+          const all = (rr.data?.products || rr.data || []).filter(p => p._id !== r.data._id);
+          setSimilarItems(all.slice(0, 4));
+        })
+        .catch(() => setSimilarItems([]))
+        .finally(() => setSimilarLoading(false));
+
+      // ── Customers Also Viewed — same category
       const relatedUrl = catQuery ? `/products?${catQuery}&limit=8` : '/products?limit=8';
       API.get(relatedUrl)
         .then(rr => {
-          const all = rr.data?.products || rr.data || [];
-          setRelated(all.filter(p => p._id !== r.data._id).slice(0, 4));
+          const all = (rr.data?.products || rr.data || []).filter(p => p._id !== r.data._id);
+          setRelated(all.slice(0, 4));
         })
-        .catch(() => {});
+        .catch(() => setRelated([]));
 
       // ── Brand products — "More from [Brand]"
       if (r.data.brand) {
@@ -605,54 +623,56 @@ export default function ProductDetail() {
       </div>
 
       {/* ── Similar Items ── */}
-      <div className="mt-16">
-        <div className="flex items-center justify-between mb-6 gap-4">
-          <h2 className="text-2xl sm:text-3xl font-black" style={{ fontFamily: 'var(--font-display)', color: 'var(--color-dark)', letterSpacing: '-0.025em' }}>
-            Similar Items
-          </h2>
-          {product?.category?.slug && (
-            <Link to={`/shop?category=${product.category._id}`}
-              className="text-sm font-bold shrink-0 hover:underline"
-              style={{ color: 'var(--color-primary)' }}>
-              View all in {product.category.name} →
-            </Link>
+      {(similarLoading || similarItems.length > 0) && (
+        <div className="mt-16">
+          <div className="flex items-center justify-between mb-6 gap-4">
+            <h2 className="text-2xl sm:text-3xl font-black" style={{ fontFamily: 'var(--font-display)', color: 'var(--color-dark)', letterSpacing: '-0.025em' }}>
+              Similar Items
+            </h2>
+            {product?.category?._id && (
+              <Link to={`/shop?category=${product.category._id}`}
+                className="text-sm font-bold shrink-0 hover:underline"
+                style={{ color: 'var(--color-primary)' }}>
+                View all in {product.category.name} →
+              </Link>
+            )}
+          </div>
+          {similarLoading ? (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+              {[1,2,3,4].map(i => (
+                <div key={i} className="rounded-2xl overflow-hidden border" style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)' }}>
+                  <div className="skeleton-premium" style={{ aspectRatio: '1' }} />
+                  <div className="p-3.5 space-y-2">
+                    <div className="skeleton-premium skeleton-text-sm" style={{ width: '80%' }} />
+                    <div className="skeleton-premium skeleton-text-sm" style={{ width: '45%' }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+              {similarItems.map((p) => (
+                <div key={p._id} className="product-card" style={{ transformStyle: 'preserve-3d' }}>
+                  <Link to={`/product/${p.slug}`} className="block overflow-hidden bg-gray-50" style={{ aspectRatio: '1' }}>
+                    <img src={p.thumbnail || p.images?.[0]} alt={p.name} className="card-img w-full h-full object-cover" />
+                  </Link>
+                  <div className="p-3.5" style={{ background: 'var(--card-bg)' }}>
+                    <Link to={`/product/${p.slug}`}>
+                      <p className="text-sm font-bold line-clamp-2 hover:opacity-60 transition-opacity" style={{ color: 'var(--color-dark)', fontFamily: 'var(--font-display)' }}>{p.name}</p>
+                    </Link>
+                    <p className="font-black mt-1.5 text-base" style={{ color: 'var(--color-primary)', fontFamily: 'var(--font-display)' }}>
+                      {sym} {(p.isOnSale && p.salePrice ? p.salePrice : p.price)?.toLocaleString()}
+                    </p>
+                    {p.isOnSale && p.salePrice && (
+                      <p className="text-xs text-gray-400 line-through">{sym} {p.price?.toLocaleString()}</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </div>
-        {similarItems.length === 0 ? (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-            {[1,2,3,4].map(i => (
-              <div key={i} className="rounded-2xl overflow-hidden border" style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)' }}>
-                <div className="skeleton-premium" style={{ aspectRatio: '1' }} />
-                <div className="p-3.5 space-y-2">
-                  <div className="skeleton-premium skeleton-text-sm" style={{ width: '80%' }} />
-                  <div className="skeleton-premium skeleton-text-sm" style={{ width: '45%' }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-            {similarItems.map((p) => (
-              <div key={p._id} className="product-card" style={{ transformStyle: 'preserve-3d' }}>
-                <Link to={`/product/${p.slug}`} className="block overflow-hidden bg-gray-50" style={{ aspectRatio: '1' }}>
-                  <img src={p.thumbnail || p.images?.[0]} alt={p.name} className="card-img w-full h-full object-cover" />
-                </Link>
-                <div className="p-3.5" style={{ background: 'var(--card-bg)' }}>
-                  <Link to={`/product/${p.slug}`}>
-                    <p className="text-sm font-bold line-clamp-2 hover:opacity-60 transition-opacity" style={{ color: 'var(--color-dark)', fontFamily: 'var(--font-display)' }}>{p.name}</p>
-                  </Link>
-                  <p className="font-black mt-1.5 text-base" style={{ color: 'var(--color-primary)', fontFamily: 'var(--font-display)' }}>
-                    {sym} {(p.salePrice || p.price)?.toLocaleString()}
-                  </p>
-                  {p.isOnSale && p.salePrice && (
-                    <p className="text-xs text-gray-400 line-through">{sym} {p.price?.toLocaleString()}</p>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      )}
 
       {/* ── Similar Products — "Customers Also Viewed" ── */}
       <div className="mt-16">
