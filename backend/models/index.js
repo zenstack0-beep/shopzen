@@ -177,7 +177,7 @@ const returnRequestSchema = new mongoose.Schema({
     itemConditionOnReturn: {
       type: String,
       enum: ['restockable', 'refurbishable', 'damaged'],
-      default: null,
+      default: undefined,
     },
     stockAdjusted: { type: Boolean, default: false }, // prevent double-adjustment
   }],

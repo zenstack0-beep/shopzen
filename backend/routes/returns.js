@@ -74,11 +74,14 @@ router.post('/', auth, async (req, res) => {
     }
 
     // Enrich items with price from order for refund calculation
+    // Strip admin-only fields (itemConditionOnReturn, stockAdjusted) so they
+    // never arrive as null/invalid enum values from the customer request.
     const enrichedItems = (items || []).map(item => {
       const orderItem = orderDoc.items.find(
         oi => (oi.product?._id || oi.product)?.toString() === item.product?.toString()
       );
-      return { ...item, price: orderItem?.price || 0 };
+      const { itemConditionOnReturn, stockAdjusted, ...safeItem } = item;
+      return { ...safeItem, price: orderItem?.price || 0 };
     });
 
     const returnReq = await ReturnRequest.create({
