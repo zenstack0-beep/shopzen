@@ -204,7 +204,7 @@ export default function Checkout() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!agreedTerms) { toast.error('Please agree to terms and conditions'); return; }
-    if (!paymentMethod) { toast.error('Please select a payment method'); return; }
+    if (total > 0 && !paymentMethod) { toast.error('Please select a payment method'); return; }
 
     // Guest users must register before placing an order
     if (!user) {
@@ -230,11 +230,12 @@ export default function Checkout() {
 
     setLoading(true);
     try {
+      const effectivePaymentMethod = total === 0 ? 'free' : paymentMethod;
       const orderData = {
         items: items.map(i => ({ productId: i._id, name: i.name, quantity: i.quantity })),
         billing, shipping: shipDiff ? shipping : billing,
         shipToDifferentAddress: shipDiff,
-        paymentMethod,
+        paymentMethod: effectivePaymentMethod,
         couponCode: couponData ? couponCode : undefined,
         giftCard: giftCardData ? giftCardCode : undefined,
         notes,
@@ -249,7 +250,7 @@ export default function Checkout() {
       }
 
       // Handle PayHere
-      if (paymentMethod === 'payhere') {
+      if (effectivePaymentMethod === 'payhere') {
         const phData = await API.post('/payments/payhere/init', {
           orderId: data.orderId,
           amount: data.total,
@@ -270,7 +271,7 @@ export default function Checkout() {
       }
 
       // Handle Stripe / other gateways — go to My Orders with new order highlighted
-      if (paymentMethod === 'stripe') {
+      if (effectivePaymentMethod === 'stripe') {
         orderPlaced.current = true;
         clearCart();
         sessionStorage.removeItem('checkout_state');
@@ -283,7 +284,7 @@ export default function Checkout() {
       sessionStorage.removeItem('checkout_state');
 
       // Bank transfer — show inline slip upload step first
-      if (paymentMethod === 'bank_transfer') {
+      if (effectivePaymentMethod === 'bank_transfer') {
         setPendingBankOrder({ orderId: data.orderId, orderNumber: data.orderNumber, total: data.total });
         setLoading(false);
         return;
@@ -617,7 +618,8 @@ export default function Checkout() {
               )}
             </div>
 
-            {/* Payment Method */}
+            {/* Payment Method — hidden when gift card / coupon covers full amount */}
+            {total > 0 && (
             <div className="rounded-2xl border border-gray-100 p-5" style={{ background: 'var(--card-bg)' }}>
               <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">💳 Payment Method</h3>
               {!hasAnyPayment && (
@@ -682,6 +684,18 @@ export default function Checkout() {
                 ))}
               </div>
             </div>
+            )} {/* end total > 0 payment method block */}
+
+            {/* Free order notice — shown when gift card / coupon covers everything */}
+            {total === 0 && (
+              <div className="rounded-2xl border border-green-200 p-4 bg-green-50 flex items-center gap-3">
+                <span className="text-2xl">🎉</span>
+                <div>
+                  <p className="text-sm font-bold text-green-800">No payment needed!</p>
+                  <p className="text-xs text-green-600">Your gift card / coupon covers the full order amount.</p>
+                </div>
+              </div>
+            )}
 
             {/* Terms & Submit */}
             <div className="rounded-2xl border border-gray-100 p-5" style={{ background: 'var(--card-bg)' }}>
@@ -689,7 +703,7 @@ export default function Checkout() {
                 <input type="checkbox" checked={agreedTerms} onChange={e=>setAgreedTerms(e.target.checked)} className="mt-0.5 w-4 h-4 rounded flex-shrink-0" style={{accentColor:'var(--color-primary)'}}/>
                 <span className="text-sm text-gray-600">I agree to the <span className="underline cursor-pointer" style={{color:'var(--color-primary)'}}>terms and conditions</span> <span className="text-red-500">*</span></span>
               </label>
-              <button type="submit" disabled={loading || !agreedTerms || !paymentMethod}
+              <button type="submit" disabled={loading || !agreedTerms || (total > 0 && !paymentMethod)}
                 className="btn-primary w-full py-3.5 text-base flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed">
                 {loading ? (
                   <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Placing Order...</>
@@ -699,7 +713,7 @@ export default function Checkout() {
                   <>Create Account &amp; Place Order — {sym} {total.toLocaleString()}</>
                 )}
               </button>
-              {['payhere','stripe','paypal'].includes(paymentMethod) && (
+              {total > 0 && ['payhere','stripe','paypal'].includes(paymentMethod) && (
                 <p className="text-xs text-gray-400 text-center mt-2 flex items-center justify-center gap-1">
                   🔒 Secure payment via {gateways.find(g=>g.gateway===paymentMethod)?.displayName}
                 </p>
