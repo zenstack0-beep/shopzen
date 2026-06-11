@@ -24,6 +24,7 @@ export const config = {
   
   // Private/auth/internal paths — skip SSR, Vercel serves index.html directly
   const SKIP_SSR_PATH = /^\/(api|_vercel|static|favicon|apple-touch|manifest\.json|robots\.txt|sitemap\.xml|og-default\.png|googleee|login|register|forgot-password|account|my-orders|checkout|order-success|track-order|admin)(\/|$|\?|$)/;
+  const SITEMAP_PATH  = /^\/api\/seo\/.*-sitemap\.xml$/;
   
   // Public SEO paths that should be SSR-rendered with injected meta
   // /category/:slug and /brand/:slug are the new SEO-friendly routes
@@ -37,7 +38,7 @@ export const config = {
     if (STATIC_EXT.test(path)) return;
   
     // Pass through private/internal paths
-    if (SKIP_SSR_PATH.test(path)) return;
+    if (SKIP_SSR_PATH.test(path) || SITEMAP_PATH.test(path)) return;
   
     // Only proxy paths that benefit from SSR meta injection
     // (everything else falls through to Vercel's plain index.html)
