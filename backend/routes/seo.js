@@ -283,7 +283,7 @@ router.get('/robots.txt', async (req, res) => {
 User-agent: *
 Allow: /
 Disallow: /admin/
-Allow: /api/
+Disallow: /api/
 Allow: /api/seo/
 Disallow: /checkout/
 Disallow: /account/
