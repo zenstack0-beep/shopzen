@@ -48,20 +48,49 @@ import SocialMediaSettings from './pages/admin/SocialMedia';
 import AutomationRules from './pages/admin/AutomationRules';
 import AdminDeals from './pages/admin/Deals';
 
-// Scrolls to top on every route change — fires before browser restores position
+// Scrolls to top on every route change.
+// Must defeat two things that fight it:
+//   1. "scroll-behavior: smooth" on <html> causes an animated scroll from
+//      the bottom of the old page instead of an instant jump.
+//   2. GSAP ScrollTrigger.refresh() fires inside page components on mount
+//      and repositions the scroll AFTER our scrollTo(0,0) already ran.
+// Fix: override smooth-scroll, jump instantly, then re-enforce across two
+// animation frames so we always win after GSAP finishes its refresh cycle.
 function ScrollToTop() {
   const { pathname } = useLocation();
+
   useLayoutEffect(() => {
-    // Disable browser scroll restoration so it never fights us
     if ('scrollRestoration' in window.history) {
       window.history.scrollRestoration = 'manual';
     }
-    // Cover all possible scroll containers (window, html, body)
-    // overflow-x:hidden on html/body can shift the scroll context on Safari/mobile
-    window.scrollTo(0, 0);
-    document.documentElement.scrollTop = 0;
-    document.body.scrollTop = 0;
+
+    const forceTop = () => {
+      document.documentElement.style.scrollBehavior = 'auto';
+      document.body.style.scrollBehavior = 'auto';
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    };
+
+    // Immediate jump
+    forceTop();
+
+    // Re-enforce after frame 1 — React has painted the new page
+    const raf1 = requestAnimationFrame(() => {
+      forceTop();
+      // Re-enforce after frame 2 — GSAP ScrollTrigger.refresh() has run
+      const raf2 = requestAnimationFrame(() => {
+        forceTop();
+        // Restore smooth scrolling for normal in-page anchor behaviour
+        document.documentElement.style.scrollBehavior = '';
+        document.body.style.scrollBehavior = '';
+      });
+      return () => cancelAnimationFrame(raf2);
+    });
+
+    return () => cancelAnimationFrame(raf1);
   }, [pathname]);
+
   return null;
 }
 

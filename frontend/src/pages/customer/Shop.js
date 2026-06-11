@@ -93,6 +93,22 @@ export default function Shop() {
   useEffect(() => { setPage(1); }, [category, subCategory, search, sortBy, onSale, inStock, priceMin, priceMax]);
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
 
+  // Scroll to top of page whenever the page number changes (pagination)
+  useEffect(() => {
+    document.documentElement.style.scrollBehavior = 'auto';
+    document.body.style.scrollBehavior = 'auto';
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+    requestAnimationFrame(() => {
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+      document.documentElement.style.scrollBehavior = '';
+      document.body.style.scrollBehavior = '';
+    });
+  }, [page]);
+
   const handleAdd = (e, product) => {
     e.preventDefault();
     if (product.variants?.length > 0) { navigate(`/product/${product.slug}`); return; }

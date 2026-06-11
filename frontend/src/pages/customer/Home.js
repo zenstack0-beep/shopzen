@@ -699,10 +699,12 @@ export default function Home() {
     }).catch(()=>{}).finally(()=>setDbReady(true));
   },[]);
 
-  // Kill stale ScrollTriggers from previous page so GSAP recalculates from top
+  // Kill stale ScrollTriggers from previous page so GSAP recalculates from top.
+  // NOTE: do NOT call window.scrollTo here — ScrollToTop in App.js already
+  // handles the scroll reset. Calling it here races against ScrollToTop and
+  // causes the page to appear at the bottom on navigation.
   useEffect(() => {
     ScrollTrigger.getAll().forEach(t => t.kill());
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
     const raf = requestAnimationFrame(() => { ScrollTrigger.refresh(); });
     return () => {
       cancelAnimationFrame(raf);
