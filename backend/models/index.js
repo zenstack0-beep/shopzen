@@ -35,7 +35,18 @@ const couponSchema = new mongoose.Schema({
   applicableCategories: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Category' }],
   applicableProducts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
   applicableBrands: [{ type: String }],
+  // If true, this coupon cannot be applied when the cart contains any item
+  // that is already on sale (price < salePrice... i.e. hasDiscount === true).
+  // Prevents stacking a coupon on top of an existing promotional discount.
+  excludeSaleItems: { type: Boolean, default: false },
+  // Profit protection: cap the coupon discount so it never eats more than
+  // this % of the order's total profit margin (price - costPrice). e.g. 50
+  // means the coupon can discount at most 50% of the available margin.
+  // Leave unset/0 to disable this check (no profit-based cap).
+  maxDiscountPercentOfProfit: { type: Number, default: 0 },
   usedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  // Track guest usage by normalized email (guests have no userId)
+  usedByEmails: [{ type: String, lowercase: true, trim: true }],
   createdAt: { type: Date, default: Date.now }
 });
 const Coupon = mongoose.model('Coupon', couponSchema);

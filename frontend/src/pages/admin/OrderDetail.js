@@ -147,8 +147,14 @@ export default function AdminOrderDetail() {
             </div>
             <div className="border-t border-gray-100 mt-4 pt-4 space-y-2 text-sm">
               <div className="flex justify-between text-gray-600"><span>Subtotal</span><span>Rs. {order.subtotal?.toLocaleString()}</span></div>
-              {order.couponDiscount > 0 && <div className="flex justify-between text-green-600"><span>Coupon Discount ({order.couponCode})</span><span>−Rs. {order.couponDiscount?.toLocaleString()}</span></div>}
+              {order.couponDiscount > 0 && <div className="flex justify-between text-green-600"><span>🏷️ Coupon Discount ({order.couponCode})</span><span>−Rs. {order.couponDiscount?.toLocaleString()}</span></div>}
               <div className="flex justify-between text-gray-600"><span>Shipping</span><span>Rs. {order.shippingCost?.toLocaleString()}</span></div>
+              {(order.giftCardDeduction > 0 || order.giftCardDiscount > 0) && (
+                <div className="flex justify-between text-purple-600">
+                  <span>🎁 Gift Card Payment {order.giftCard ? `(${order.giftCard})` : ''}</span>
+                  <span>−Rs. {(order.giftCardDeduction || order.giftCardDiscount)?.toLocaleString()}</span>
+                </div>
+              )}
               <div className="flex justify-between font-bold text-base text-gray-900 pt-2 border-t border-gray-100">
                 <span>Total</span><span>Rs. {order.total?.toLocaleString()}</span>
               </div>

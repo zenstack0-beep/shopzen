@@ -92,6 +92,26 @@ const TABS_FORM = [
   { id:'schedule', label:'📅 Schedule' },
 ];
 
+const Toggle = ({ label, desc, value, onChange }) => (
+  <div className="flex items-center justify-between py-2.5 border-b border-gray-50 last:border-0">
+    <div>
+      <p className="text-sm font-medium text-gray-800">{label}</p>
+      {desc && <p className="text-xs text-gray-400 mt-0.5">{desc}</p>}
+    </div>
+    <div onClick={onChange} className={`w-11 h-6 rounded-full cursor-pointer relative flex-shrink-0 transition-all ${value ? 'bg-primary' : 'bg-gray-200'}`} style={{background: value ? 'var(--color-primary)' : undefined}}>
+      <div className={`w-4.5 h-4.5 bg-white rounded-full absolute top-0.5 shadow-sm transition-all`} style={{width:18,height:18,left:value?22:2}}/>
+    </div>
+  </div>
+);
+
+const F = ({ label, value, onChange, type='text', placeholder, hint, col2 }) => (
+  <div className={col2 ? 'sm:col-span-2' : ''}>
+    <label className="form-label">{label}</label>
+    <input type={type} value={value||''} onChange={onChange} placeholder={placeholder} className="form-input"/>
+    {hint && <p className="text-xs text-gray-400 mt-1">{hint}</p>}
+  </div>
+);
+
 export default function AdminSeasonal() {
   const [campaigns, setCampaigns] = useState([]);
   const [modal, setModal] = useState(false);
@@ -171,26 +191,6 @@ export default function AdminSeasonal() {
   };
 
   const openNew = () => { setForm(emptyForm); setEditingId(null); setActiveTab('basic'); setModal(true); };
-
-  const Toggle = ({ label, desc, value, onChange }) => (
-    <div className="flex items-center justify-between py-2.5 border-b border-gray-50 last:border-0">
-      <div>
-        <p className="text-sm font-medium text-gray-800">{label}</p>
-        {desc && <p className="text-xs text-gray-400 mt-0.5">{desc}</p>}
-      </div>
-      <div onClick={onChange} className={`w-11 h-6 rounded-full cursor-pointer relative flex-shrink-0 transition-all ${value ? 'bg-primary' : 'bg-gray-200'}`} style={{background: value ? 'var(--color-primary)' : undefined}}>
-        <div className={`w-4.5 h-4.5 bg-white rounded-full absolute top-0.5 shadow-sm transition-all`} style={{width:18,height:18,left:value?22:2}}/>
-      </div>
-    </div>
-  );
-
-  const F = ({ label, value, onChange, type='text', placeholder, hint, col2 }) => (
-    <div className={col2 ? 'sm:col-span-2' : ''}>
-      <label className="form-label">{label}</label>
-      <input type={type} value={value||''} onChange={onChange} placeholder={placeholder} className="form-input"/>
-      {hint && <p className="text-xs text-gray-400 mt-1">{hint}</p>}
-    </div>
-  );
 
   // Stats
   const live = campaigns.filter(c => c.isActive).length;

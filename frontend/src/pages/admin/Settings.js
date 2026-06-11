@@ -19,6 +19,7 @@ const TABS = [
   { id:'banners_link', label:'🖼️ Banners & Popups', group:'design' },
   { id:'content', label:'✏️ Content', group:'design' },
   { id:'seo', label:'🔍 SEO', group:'marketing' },
+  { id:'discounts', label:'🏷️ Discounts', group:'marketing' },
   { id:'features', label:'⚙️ Features', group:'advanced' },
   { id:'advanced', label:'🔧 Advanced', group:'advanced' },
   { id:'admins', label:'👑 Admins', group:'advanced' },
@@ -134,6 +135,12 @@ export default function AdminSettings() {
     panelNotif_new_order:true, panelNotif_new_user:true,
     panelNotif_payment_slip:true, panelNotif_payment_confirmed:true,
     panelNotif_cancel_request:true, panelNotif_return_request:true,
+    // Discount Engine global settings
+    discountPriority:'best',       // 'best' = highest saving wins
+    allowCouponOnSaleItems:false,   // false = block coupons on already-discounted items
+    globalMaxDiscountPct:0,         // 0 = disabled; otherwise cap all coupon discounts at N% of subtotal
+    globalMinProfitMarginPct:0,     // 0 = disabled; minimum profit margin % to preserve
+    giftCardCoversDelivery:true,    // true = gift card balance can absorb delivery fee
     heroStyle:'gradient', headerStyle:'default', footerStyle:'default',
     customHeaderCode:'', customFooterCode:'',
     termsUrl:'', privacyUrl:'',
@@ -1172,6 +1179,129 @@ export default function AdminSettings() {
             )}
 
             {/* ── FEATURES ── */}
+            {/* ── DISCOUNTS ── */}
+            {tab === 'discounts' && (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="font-semibold text-gray-900">Discount Engine Settings</h3>
+                  <p className="text-xs text-gray-400 mt-0.5">Global rules enforced by the centralized Discount Engine across all coupons, gift cards, and promotions</p>
+                </div>
+
+                {/* How it works strip */}
+                <div className="grid sm:grid-cols-2 gap-3">
+                  {[
+                    { icon:'🏆', title:'Best Benefit Wins', body:'Coupon vs gift card — whichever saves the customer more is applied automatically. They never stack.' },
+                    { icon:'🚫', title:'No Stacking', body:'Only one customer benefit (coupon or gift card) applies per order. Multiple promotions cannot combine.' },
+                    { icon:'💰', title:'Gift Card = Payment', body:'Gift cards apply after discounts and can cover delivery fees. They act as a payment method, not a discount.' },
+                    { icon:'🔒', title:'Server Revalidation', body:'All coupon rules are rechecked at order creation time on the server — a pre-check passing does not guarantee final approval.' },
+                  ].map(({ icon, title, body }) => (
+                    <div key={title} className="bg-blue-50 rounded-xl p-4 border border-blue-100">
+                      <div className="text-2xl mb-2">{icon}</div>
+                      <p className="font-semibold text-blue-900 text-sm">{title}</p>
+                      <p className="text-xs text-blue-600 mt-1">{body}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Priority rule */}
+                <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
+                  <h4 className="font-semibold text-gray-800 text-sm">Discount Priority Rule</h4>
+                  <div className="space-y-2">
+                    {[
+                      { value:'best',   label:'Best Saving Wins (Recommended)', desc:'The engine automatically picks whichever benefit — coupon or gift card — gives the customer the larger discount.' },
+                      { value:'coupon', label:'Coupon First',                   desc:'If a valid coupon is applied, it always takes priority over a gift card, even if the gift card would save more.' },
+                      { value:'giftcard', label:'Gift Card First',              desc:'If a gift card has balance, it always takes priority over a coupon.' },
+                    ].map(opt => (
+                      <label key={opt.value} className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${settings.discountPriority===opt.value ? 'border-blue-500 bg-blue-50' : 'border-gray-100 hover:border-gray-200'}`}>
+                        <input type="radio" name="discountPriority" value={opt.value}
+                          checked={settings.discountPriority===opt.value}
+                          onChange={() => setSettings(p => ({ ...p, discountPriority: opt.value }))}
+                          className="mt-0.5 accent-blue-500" />
+                        <div>
+                          <p className="font-semibold text-sm text-gray-800">{opt.label}</p>
+                          <p className="text-xs text-gray-500 mt-0.5">{opt.desc}</p>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Coupon on sale items */}
+                <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
+                  <h4 className="font-semibold text-gray-800 text-sm">Coupon on Sale Items — Global Default</h4>
+                  <p className="text-xs text-gray-400">This sets the default for all new coupons. Individual coupons can override this setting.</p>
+                  <div className="flex items-center justify-between py-1">
+                    <div>
+                      <p className="text-sm font-medium text-gray-700">Block Coupons on Already-Discounted Products</p>
+                      <p className="text-xs text-gray-400 mt-0.5">When enabled, coupons cannot be applied to carts containing any product with an active sale price. Prevents discount stacking.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSettings(p => ({ ...p, allowCouponOnSaleItems: !p.allowCouponOnSaleItems }))}
+                      className={`relative flex-shrink-0 w-11 h-6 rounded-full transition-colors ${!settings.allowCouponOnSaleItems ? 'bg-orange-500' : 'bg-gray-200'}`}
+                    >
+                      <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${!settings.allowCouponOnSaleItems ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                    </button>
+                  </div>
+                  {!settings.allowCouponOnSaleItems && (
+                    <div className="bg-orange-50 rounded-xl px-4 py-3 text-xs text-orange-700 border border-orange-100">
+                      ⚠️ Coupons blocked on sale items globally. Individual coupons can still override this by disabling their own "Block on Sale Items" flag.
+                    </div>
+                  )}
+                </div>
+
+                {/* Maximum discount cap */}
+                <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
+                  <h4 className="font-semibold text-gray-800 text-sm">Maximum Discount Cap (Global)</h4>
+                  <F label="Maximum Discount % of Subtotal" type="number" min="0" max="100"
+                    value={settings.globalMaxDiscountPct || 0}
+                    onChange={e => setSettings(p => ({ ...p, globalMaxDiscountPct: Number(e.target.value) }))}
+                    hint="Cap any coupon discount so it never exceeds this % of the order subtotal. Set 0 to disable this global cap (individual coupon maxDiscount caps still apply)."
+                  />
+                  {settings.globalMaxDiscountPct > 0 && (
+                    <div className="bg-yellow-50 border border-yellow-100 rounded-xl px-4 py-3 text-xs text-yellow-700">
+                      Global cap active — no coupon can discount more than <strong>{settings.globalMaxDiscountPct}%</strong> of the subtotal, regardless of its own settings.
+                    </div>
+                  )}
+                </div>
+
+                {/* Minimum profit margin */}
+                <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
+                  <h4 className="font-semibold text-gray-800 text-sm">Minimum Profit Margin Protection</h4>
+                  <F label="Minimum Profit Margin % to Preserve" type="number" min="0" max="100"
+                    value={settings.globalMinProfitMarginPct || 0}
+                    onChange={e => setSettings(p => ({ ...p, globalMinProfitMarginPct: Number(e.target.value) }))}
+                    hint="Prevent any coupon from reducing margin below this %. Requires Cost Price to be set on products. Set 0 to disable."
+                  />
+                  {settings.globalMinProfitMarginPct > 0 && (
+                    <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3 text-xs text-red-700">
+                      ⚠️ Profit protection active — discounts that would push order margin below <strong>{settings.globalMinProfitMarginPct}%</strong> will be reduced automatically. Requires <strong>Cost Price</strong> on all products.
+                    </div>
+                  )}
+                </div>
+
+                {/* Gift card covers delivery */}
+                <div className="bg-white rounded-2xl border border-gray-100 p-5">
+                  <h4 className="font-semibold text-gray-800 text-sm mb-3">Gift Card Behaviour</h4>
+                  <div className="flex items-center justify-between py-1">
+                    <div>
+                      <p className="text-sm font-medium text-gray-700">Gift Card Covers Delivery Fee</p>
+                      <p className="text-xs text-gray-400 mt-0.5">When enabled, a gift card with sufficient balance will also cover the delivery fee (total goes to Rs. 0). This is the recommended setting.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSettings(p => ({ ...p, giftCardCoversDelivery: !p.giftCardCoversDelivery }))}
+                      className={`relative flex-shrink-0 w-11 h-6 rounded-full transition-colors ${settings.giftCardCoversDelivery ? 'bg-blue-500' : 'bg-gray-200'}`}
+                    >
+                      <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${settings.giftCardCoversDelivery ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                    </button>
+                  </div>
+                </div>
+
+                <SaveBar onSave={save} saving={saving}/>
+              </div>
+            )}
+
             {tab === 'features' && (
               <div className="space-y-2">
                 <h3 className="font-semibold text-gray-900 mb-4">Store Features</h3>

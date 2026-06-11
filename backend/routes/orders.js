@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Order = require('../models/Order');
 const Product = require('../models/Product');
+const { DiscountEngine } = require('../services/discountEngine');
 const { Coupon, GiftCard, Notification, Settings, DeliveryService } = require('../models/index');
 const { auth, adminAuth } = require('../middleware/auth');
 const {
@@ -455,6 +456,7 @@ router.get('/my-orders', auth, async (req, res) => {
   }
 });
 
+
 // ── Place order (public — guest + logged in) ──────────────────────────────────
 router.post('/', async (req, res) => {
   try {
@@ -466,97 +468,40 @@ router.post('/', async (req, res) => {
     if (!items || items.length === 0)
       return res.status(400).json({ message: 'No items in order' });
 
-    let subtotal = 0;
+    // ── 1. Build line items (single effectivePrice call per product) ──────────
     const orderItems = [];
-
     for (const item of items) {
       const product = await Product.findById(item.productId);
       if (!product || !product.isActive)
         return res.status(400).json({ message: `Product not available: ${item.name}` });
       if (product.stock < item.quantity)
         return res.status(400).json({ message: `Insufficient stock for ${product.name}` });
-      const price = product.salePrice || product.price;
-      const itemSubtotal = price * item.quantity;
-      subtotal += itemSubtotal;
-      orderItems.push({
-        product: product._id, name: product.name, image: product.thumbnail,
-        price, quantity: item.quantity, subtotal: itemSubtotal,
-      });
+
+      orderItems.push(DiscountEngine.buildLineItem(product, item.quantity));
+
       await Product.findByIdAndUpdate(product._id, {
         $inc: { stock: -item.quantity, soldCount: item.quantity },
       });
     }
 
-    let couponDiscount = 0;
-    if (couponCode) {
-      const coupon = await Coupon.findOne({
-        code: couponCode.toUpperCase(), isActive: true,
-        validUntil: { $gte: new Date() },
-      });
-      if (coupon && subtotal >= (coupon.minOrderAmount || 0)) {
-        couponDiscount = coupon.type === 'percentage'
-          ? Math.min((subtotal * coupon.value) / 100, coupon.maxDiscount || Infinity)
-          : coupon.value;
-        coupon.usedCount += 1;
-        await coupon.save();
-      }
-    }
+    const subtotal = DiscountEngine.computeSubtotal(orderItems);
 
-    let giftCardDiscount = 0;
-    let giftCardDoc = null;
-    if (giftCard) {
-      giftCardDoc = await GiftCard.findOne({
-        code: giftCard.toUpperCase(), isActive: true,
-        expiresAt: { $gte: new Date() },
-      });
-      if (giftCardDoc && giftCardDoc.balance > 0) {
-        giftCardDiscount = Math.min(giftCardDoc.balance, subtotal - couponDiscount);
-      }
-    }
+    // ── 2. Resolve delivery fee ───────────────────────────────────────────────
+    const { fee: shippingCost, serviceName: deliveryServiceName } =
+      await DiscountEngine.resolveDeliveryFee(
+        deliveryService || null,
+        billing?.city || '',
+        subtotal,
+        {}  // will fetch Settings internally
+      );
 
-    let shippingCost = 0;
-    let deliveryServiceName = 'Standard Delivery';
-    if (deliveryService) {
-      const svc = await DeliveryService.findOne({ code: deliveryService, isEnabled: true });
-      if (svc) {
-        const city = (billing?.city || '').toLowerCase();
-        let rate = null;
-        if (city && svc.zoneRates?.length > 0) {
-          rate = svc.zoneRates.find(zr =>
-            zr.zones?.some(z => z.toLowerCase() === city || city.includes(z.toLowerCase()))
-          );
-        }
-        if (!rate && svc.rates?.length > 0) rate = svc.rates[0];
-        if (rate) {
-          shippingCost = rate.freeAbove && subtotal >= rate.freeAbove ? 0 : rate.price;
-        }
-        deliveryServiceName = svc.name;
-      }
-    } else {
-      const settingsMap = {};
-      const allSettings = await Settings.find({
-        key: { $in: ['standardDelivery', 'freeDeliveryThreshold'] },
-      });
-      allSettings.forEach((s) => (settingsMap[s.key] = s.value));
-      const freeThreshold = settingsMap.freeDeliveryThreshold || 5000;
-      shippingCost = subtotal >= freeThreshold ? 0 : (settingsMap.standardDelivery || 600);
-    }
+    // ── 3. Resolve best customer benefit (coupon OR gift card) ────────────────
+    //    Collect cart scope data for coupon eligibility checks
+    const categoryIds = [...new Set(orderItems.map(i => i.category?.toString()).filter(Boolean))];
+    const productIds  = orderItems.map(i => i.product.toString());
+    const brands      = [...new Set(orderItems.map(i => i.brand).filter(Boolean))];
 
-    const total = Math.max(0, subtotal - couponDiscount - giftCardDiscount + shippingCost);
-
-    const orderData = {
-      items: orderItems, billing,
-      shipping: shipToDifferentAddress ? shipping : billing,
-      shipToDifferentAddress, paymentMethod,
-      paymentStatus: 'pending', orderStatus: 'pending',
-      couponCode, couponDiscount, giftCard, giftCardDiscount,
-      subtotal, shippingCost,
-      discount: couponDiscount + giftCardDiscount,
-      total, notes,
-      deliveryService: deliveryService || 'standard', deliveryServiceName,
-      statusHistory: [{ status: 'pending', note: 'Order placed', updatedBy: billing.email }],
-    };
-
+    let userId;
     if (req.headers.authorization) {
       try {
         const jwt = require('jsonwebtoken');
@@ -564,49 +509,136 @@ router.post('/', async (req, res) => {
           req.headers.authorization.replace('Bearer ', ''),
           process.env.JWT_SECRET
         );
-        orderData.customer = decoded.id;
+        userId = decoded.id;
       } catch {}
     }
 
-    const order = await Order.create(orderData);
+    const billingEmail = billing?.email || null;
 
-    if (giftCardDoc && giftCardDiscount > 0) {
-      giftCardDoc.balance -= giftCardDiscount;
-      giftCardDoc.usageHistory.push({ orderId: order._id, amount: giftCardDiscount });
-      if (giftCardDoc.balance <= 0) giftCardDoc.isActive = false;
-      await giftCardDoc.save();
-    }
-
-    // ── Admin in-app notification ──
-    await Notification.create({
-      type: 'new_order',
-      title: '🛒 New Order Received!',
-      message: `Order ${order.orderNumber} from ${billing.firstName} ${billing.lastName} — Rs. ${total.toLocaleString()}`,
-      link: `/admin/orders/${order._id}`,
-      data: { orderId: order._id, total, paymentMethod },
+    // SECURITY: this is the AUTHORITATIVE coupon/gift-card check. It is run
+    // again here regardless of any earlier /validate call, because the cart
+    // contents, user identity, and the coupon's own usage counters can all
+    // have changed since then. Never trust a client-supplied "discount"
+    // value — only what resolveBenefit computes here is used.
+    //
+    // NEW: coupon and gift card can both be applied together.
+    //   - Coupon → discount on subtotal (product discount → coupon/benefit → gift card → final total)
+    //   - Gift card → payment method applied after coupon against remaining total
+    const benefit = await DiscountEngine.resolveBenefit({
+      couponCode:   couponCode || null,
+      giftCardCode: giftCard   || null,
+      subtotal,
+      deliveryFee:  shippingCost,
+      userId,
+      email: billingEmail,
+      categoryIds,
+      productIds,
+      brands,
     });
 
-    // ── Email customer: order confirmation ──
+    // If the customer explicitly supplied a coupon code but it failed
+    // re-validation at order time, reject the order rather than silently
+    // dropping the discount — otherwise stock was already decremented for
+    // an order at a price the customer didn't agree to.
+    if (couponCode && benefit.couponDiscount === 0 && benefit.errorCoupon) {
+      // Restore stock we already decremented in step 1
+      for (const item of orderItems) {
+        await Product.findByIdAndUpdate(item.product, {
+          $inc: { stock: item.quantity, soldCount: -item.quantity },
+        });
+      }
+      return res.status(400).json({ message: benefit.errorCoupon });
+    }
+
+    // ── 4. Compute canonical totals ───────────────────────────────────────────
+    const totals = DiscountEngine.computeTotals({ subtotal, deliveryFee: shippingCost, benefit });
+
+    // ── 5. Persist order ──────────────────────────────────────────────────────
+    const hasCoupon   = benefit.couponDiscount > 0;
+    const hasGiftCard = totals.giftCardDeduction > 0;
+
+    const orderData = {
+      items:    orderItems,
+      billing,
+      shipping: shipToDifferentAddress ? shipping : billing,
+      shipToDifferentAddress,
+      paymentMethod,
+      paymentStatus: 'pending',
+      orderStatus:   'pending',
+      // Coupon — discount applied to subtotal
+      couponCode:      hasCoupon   ? couponCode : undefined,
+      couponDiscount:  hasCoupon   ? totals.couponDiscount : 0,
+      // Gift card — payment method applied after coupon
+      giftCard:        hasGiftCard ? giftCard   : undefined,
+      giftCardDeduction: hasGiftCard ? totals.giftCardDeduction : 0,
+      // Legacy field kept for backward compat (coupon portion only)
+      giftCardDiscount: hasGiftCard ? totals.giftCardDeduction : 0,
+      subtotal:      totals.subtotal,
+      shippingCost:  totals.deliveryFee,
+      discount:      totals.couponDiscount,    // legacy: coupon discount only
+      total:         totals.total,
+      notes,
+      deliveryService:     deliveryService || 'standard',
+      deliveryServiceName,
+      statusHistory: [{ status: 'pending', note: 'Order placed', updatedBy: billing.email }],
+    };
+
+    if (userId) orderData.customer = userId;
+
+    const order = await Order.create(orderData);
+
+    // ── 6. Apply benefit side-effects (atomic, race-safe) ──────────────────────
+    const applied = await DiscountEngine.applyBenefit(benefit, order._id, userId, billingEmail);
+
+    if (!applied.ok) {
+      // The coupon/gift card was consumed by a concurrent request between our
+      // validation and this point. Roll back the order and restore stock so
+      // the customer isn't charged a price based on a benefit they didn't get.
+      await Order.findByIdAndDelete(order._id);
+      for (const item of orderItems) {
+        await Product.findByIdAndUpdate(item.product, {
+          $inc: { stock: item.quantity, soldCount: -item.quantity },
+        });
+      }
+      const msg = applied.reason === 'giftcard_conflict'
+        ? 'This gift card no longer has sufficient balance. Please try again.'
+        : 'This coupon is no longer available. Please remove it and try again.';
+      return res.status(409).json({ message: msg });
+    }
+
+    // ── Admin in-app notification ──────────────────────────────────────────────
+    await Notification.create({
+      type:    'new_order',
+      title:   '🛒 New Order Received!',
+      message: `Order ${order.orderNumber} from ${billing.firstName} ${billing.lastName} — Rs. ${totals.total.toLocaleString()}`,
+      link:    `/admin/orders/${order._id}`,
+      data:    { orderId: order._id, total: totals.total, paymentMethod },
+    });
+
+    // ── Email customer: order confirmation ─────────────────────────────────────
     if (billing?.email) {
       if (await isEmailEnabled('order_placed_customer')) sendMail({
-        to: billing.email,
+        to:      billing.email,
         subject: `Order Confirmed — ${order.orderNumber} | ShopZen`,
-        html: await orderConfirmHtml(order),
+        html:    await orderConfirmHtml(order),
       }).catch(err => console.error('[ORDER CONFIRM EMAIL]', err.message));
     }
 
-    // ── Email admin: new order alert ──
+    // ── Email admin: new order alert ───────────────────────────────────────────
     const adminEmail = await getAdminEmail();
     if (adminEmail) {
       if (await isEmailEnabled('order_placed_admin')) sendMail({
-        to: adminEmail,
-        subject: `🛒 New Order ${order.orderNumber} — Rs. ${total.toLocaleString()} | ShopZen`,
-        html: await newOrderAdminHtml(order),
+        to:      adminEmail,
+        subject: `🛒 New Order ${order.orderNumber} — Rs. ${totals.total.toLocaleString()} | ShopZen`,
+        html:    await newOrderAdminHtml(order),
       }).catch(err => console.error('[NEW ORDER ADMIN EMAIL]', err.message));
     }
 
     res.status(201).json({
-      orderId: order._id, orderNumber: order.orderNumber, total, paymentMethod,
+      orderId:     order._id,
+      orderNumber: order.orderNumber,
+      total:       totals.total,
+      paymentMethod,
     });
   } catch (err) {
     console.error('Order error:', err);

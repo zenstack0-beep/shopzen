@@ -1,42 +1,68 @@
 const express = require('express');
-const router = express.Router();
+const router  = express.Router();
 const { Coupon } = require('../models/index');
-const { adminAuth, auth } = require('../middleware/auth');
+const Product = require('../models/Product');
+const { adminAuth } = require('../middleware/auth');
+const { DiscountEngine } = require('../services/discountEngine');
 
-// Validate coupon (public)
+// ── Validate coupon (public) ──────────────────────────────────────────────────
+// Single source of truth: delegates entirely to DiscountEngine.validateCoupon.
+// NOTE: this is a PRE-CHECK only for UI feedback. The coupon is validated
+// AGAIN, authoritatively, at order-creation time in routes/orders.js — a
+// passing result here does not guarantee the order will succeed (e.g. if
+// the usage limit is hit by another customer in between, or the cart
+// contents change before checkout).
 router.post('/validate', async (req, res) => {
   try {
-    const { code, orderAmount, userId, categoryIds, productIds, brands } = req.body;
-    const coupon = await Coupon.findOne({ code: code.toUpperCase(), isActive: true, validUntil: { $gte: new Date() } });
-    if (!coupon) return res.status(404).json({ message: 'Invalid or expired coupon code' });
-    if (coupon.usageLimit && coupon.usedCount >= coupon.usageLimit) return res.status(400).json({ message: 'Coupon usage limit reached' });
-    if (orderAmount < coupon.minOrderAmount) return res.status(400).json({ message: `Minimum order Rs. ${coupon.minOrderAmount} required` });
-    if (coupon.isNewUserOnly && userId) {
-      const Order = require('../models/Order');
-      const prevOrders = await Order.countDocuments({ customer: userId });
-      if (prevOrders > 0) return res.status(400).json({ message: 'This coupon is for new customers only' });
+    const { code, orderAmount, userId, email, categoryIds, productIds, brands, items } = req.body;
+
+    if (!code) return res.status(400).json({ message: 'Coupon code is required' });
+
+    // Build authoritative line items server-side from the DB (never trust
+    // client-supplied prices/costPrice) so excludeSaleItems and profit-
+    // protection checks reflect real, current product data.
+    let lineItems = [];
+    if (Array.isArray(items) && items.length > 0) {
+      const ids = items.map(i => i.productId || i._id).filter(Boolean);
+      const products = await Product.find({ _id: { $in: ids } });
+      const productMap = new Map(products.map(p => [p._id.toString(), p]));
+
+      lineItems = items
+        .map(i => {
+          const pid = String(i.productId || i._id);
+          const product = productMap.get(pid);
+          if (!product) return null;
+          const quantity = Number(i.quantity) || 1;
+          return DiscountEngine.buildLineItem(product, quantity);
+        })
+        .filter(Boolean);
     }
-    // Check if user already used this coupon
-    if (userId && coupon.usedBy.includes(userId)) return res.status(400).json({ message: 'You have already used this coupon' });
-    // Check eligibility restrictions
-    const hasCategRestriction = coupon.applicableCategories?.length > 0;
-    const hasProdRestriction = coupon.applicableProducts?.length > 0;
-    const hasBrandRestriction = coupon.applicableBrands?.length > 0;
-    if (hasCategRestriction || hasProdRestriction || hasBrandRestriction) {
-      const catMatch = !hasCategRestriction || (categoryIds || []).some(id => coupon.applicableCategories.map(c=>c.toString()).includes(id));
-      const prodMatch = !hasProdRestriction || (productIds || []).some(id => coupon.applicableProducts.map(p=>p.toString()).includes(id));
-      const brandMatch = !hasBrandRestriction || (brands || []).some(b => coupon.applicableBrands.includes(b));
-      if (!catMatch && !prodMatch && !brandMatch) return res.status(400).json({ message: 'This coupon is not applicable to your cart items' });
-    }
-    let discount = coupon.type === 'percentage'
-      ? Math.min((orderAmount * coupon.value) / 100, coupon.maxDiscount || Infinity)
-      : coupon.value;
-    discount = Math.round(discount);
-    res.json({ valid: true, discount, coupon: { code: coupon.code, type: coupon.type, value: coupon.value, description: coupon.description } });
-  } catch (err) { res.status(500).json({ message: err.message }); }
+
+    const result = await DiscountEngine.validateCoupon(
+      code,
+      Number(orderAmount) || 0,
+      { userId, email, categoryIds, productIds, brands, lineItems }
+    );
+
+    if (result.error) return res.status(400).json({ message: result.error });
+
+    const { coupon, discount } = result;
+    res.json({
+      valid: true,
+      discount,
+      coupon: {
+        code:        coupon.code,
+        type:        coupon.type,
+        value:       coupon.value,
+        description: coupon.description,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 });
 
-// Admin - Get all coupons
+// ── Admin — Get all coupons ───────────────────────────────────────────────────
 router.get('/admin/all', adminAuth, async (req, res) => {
   try {
     const coupons = await Coupon.find()
@@ -47,7 +73,7 @@ router.get('/admin/all', adminAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
-// Get all active coupons (for display)
+// ── Get all coupons (admin list view) ────────────────────────────────────────
 router.get('/', adminAuth, async (req, res) => {
   try {
     const coupons = await Coupon.find().sort({ createdAt: -1 });
@@ -55,7 +81,7 @@ router.get('/', adminAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
-// Admin - Create coupon
+// ── Admin — Create coupon ─────────────────────────────────────────────────────
 router.post('/', adminAuth, async (req, res) => {
   try {
     const coupon = await Coupon.create(req.body);
@@ -63,7 +89,7 @@ router.post('/', adminAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
-// Admin - Update coupon
+// ── Admin — Update coupon ─────────────────────────────────────────────────────
 router.put('/:id', adminAuth, async (req, res) => {
   try {
     const coupon = await Coupon.findByIdAndUpdate(req.params.id, req.body, { new: true });
@@ -71,7 +97,7 @@ router.put('/:id', adminAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
-// Admin - Delete coupon
+// ── Admin — Delete coupon ─────────────────────────────────────────────────────
 router.delete('/:id', adminAuth, async (req, res) => {
   try {
     await Coupon.findByIdAndDelete(req.params.id);

@@ -485,7 +485,19 @@ export function AdminCoupons() {
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [saving, setSaving] = useState(false);
-  const emptyForm = { code: '', description: '', type: 'percentage', value: '', minOrderAmount: '', maxDiscount: '', usageLimit: '', validUntil: '', isActive: true, isNewUserOnly: false, applicableCategories: [], applicableBrands: [] };
+  const [simPanel, setSimPanel] = useState(null); // coupon being simulated
+  const [simAmount, setSimAmount] = useState('');
+  const [simResult, setSimResult] = useState(null);
+
+  const emptyForm = {
+    code: '', description: '', type: 'percentage', value: '',
+    minOrderAmount: '', maxDiscount: '', usageLimit: '', userLimit: 1,
+    validFrom: new Date().toISOString().slice(0, 10),
+    validUntil: '',
+    isActive: true, isNewUserOnly: false, excludeSaleItems: false,
+    applicableCategories: [], applicableBrands: [],
+    maxDiscountPercentOfProfit: 0,
+  };
   const [form, setForm] = useState(emptyForm);
   const [brandInput, setBrandInput] = useState('');
 
@@ -502,9 +514,18 @@ export function AdminCoupons() {
 
   const openAdd = () => { setForm(emptyForm); setEditing(null); setBrandInput(''); setModal(true); };
   const openEdit = (c) => {
-    setForm({ ...emptyForm, ...c, validUntil: c.validUntil ? new Date(c.validUntil).toISOString().slice(0,10) : '', applicableCategories: (c.applicableCategories || []).map(x => x._id || x), applicableBrands: c.applicableBrands || [] });
+    setForm({
+      ...emptyForm, ...c,
+      validFrom: c.validFrom ? new Date(c.validFrom).toISOString().slice(0, 10) : emptyForm.validFrom,
+      validUntil: c.validUntil ? new Date(c.validUntil).toISOString().slice(0, 10) : '',
+      applicableCategories: (c.applicableCategories || []).map(x => x._id || x),
+      applicableBrands: c.applicableBrands || [],
+      maxDiscountPercentOfProfit: c.maxDiscountPercentOfProfit || 0,
+      userLimit: c.userLimit || 1,
+    });
     setEditing(c); setBrandInput(''); setModal(true);
   };
+
   const save = async () => {
     if (!form.code || !form.value || !form.validUntil) { toast.error('Fill required fields'); return; }
     setSaving(true);
@@ -515,75 +536,383 @@ export function AdminCoupons() {
     } catch (err) { toast.error(err.response?.data?.message || 'Failed'); }
     finally { setSaving(false); }
   };
-  const del = async (id) => { if (!window.confirm('Delete?')) return; await API.delete(`/coupons/${id}`); fetchCoupons(); };
+  const del = async (id) => { if (!window.confirm('Delete this coupon?')) return; await API.delete(`/coupons/${id}`); fetchCoupons(); };
 
-  const toggleCategory = (id) => setForm(p => ({ ...p, applicableCategories: p.applicableCategories.includes(id) ? p.applicableCategories.filter(c => c !== id) : [...p.applicableCategories, id] }));
+  const toggleCategory = (id) => setForm(p => ({
+    ...p,
+    applicableCategories: p.applicableCategories.includes(id)
+      ? p.applicableCategories.filter(c => c !== id)
+      : [...p.applicableCategories, id],
+  }));
   const addBrand = () => { if (brandInput.trim()) { setForm(p => ({ ...p, applicableBrands: [...p.applicableBrands, brandInput.trim()] })); setBrandInput(''); } };
   const removeBrand = (b) => setForm(p => ({ ...p, applicableBrands: p.applicableBrands.filter(x => x !== b) }));
+
+  // ── Discount Simulator ───────────────────────────────────────────────────────
+  const openSim = (c) => { setSimPanel(c); setSimAmount(''); setSimResult(null); };
+  const runSim = () => {
+    const amount = parseFloat(simAmount);
+    if (!amount || amount <= 0) { toast.error('Enter a valid order amount'); return; }
+    const c = simPanel;
+    const lines = [];
+    let finalDiscount = 0;
+    let blocked = null;
+
+    // Step 1: Minimum order check
+    if (amount < (c.minOrderAmount || 0)) {
+      blocked = `Minimum order Rs. ${c.minOrderAmount} required (order is Rs. ${amount})`;
+    }
+
+    if (!blocked) {
+      // Step 2: Raw discount
+      let rawDiscount = 0;
+      if (c.type === 'percentage') {
+        rawDiscount = (amount * c.value) / 100;
+        lines.push({ label: `${c.value}% of Rs. ${amount.toLocaleString()}`, value: rawDiscount, sign: '−' });
+        // Step 3: Max discount cap
+        if (c.maxDiscount && rawDiscount > c.maxDiscount) {
+          lines.push({ label: `Capped at max discount`, value: c.maxDiscount, sign: '→', note: `(was Rs. ${rawDiscount.toFixed(2)})` });
+          rawDiscount = c.maxDiscount;
+        }
+      } else {
+        rawDiscount = c.value;
+        lines.push({ label: 'Fixed discount', value: rawDiscount, sign: '−' });
+      }
+      finalDiscount = Math.round(rawDiscount);
+    }
+
+    const final = blocked ? null : {
+      subtotal: amount,
+      discount: finalDiscount,
+      total: Math.max(0, amount - finalDiscount),
+    };
+
+    setSimResult({ lines, blocked, final });
+  };
+
+  const now = new Date();
+  const getStatus = (c) => {
+    if (!c.isActive) return { label: 'Disabled', cls: 'bg-gray-100 text-gray-500' };
+    if (c.validUntil && new Date(c.validUntil) < now) return { label: 'Expired', cls: 'bg-red-100 text-red-600' };
+    if (c.validFrom && new Date(c.validFrom) > now) return { label: 'Scheduled', cls: 'bg-blue-100 text-blue-600' };
+    if (c.usageLimit && c.usedCount >= c.usageLimit) return { label: 'Exhausted', cls: 'bg-orange-100 text-orange-600' };
+    return { label: 'Active', cls: 'bg-green-100 text-green-700' };
+  };
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <div><h2 className="font-display text-xl font-bold text-gray-900">Coupons</h2><p className="text-sm text-gray-500">Manage discount codes</p></div>
+        <div>
+          <h2 className="font-display text-xl font-bold text-gray-900">Coupons</h2>
+          <p className="text-sm text-gray-500">Manage discount codes and simulate outcomes</p>
+        </div>
         <button onClick={openAdd} className="btn-primary text-sm">+ Add Coupon</button>
       </div>
-      <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-        {coupons.length === 0 ? <div className="p-12 text-center text-gray-400">No coupons yet</div> : (
+
+      {/* Coupons Table */}
+      <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden mb-6">
+        {coupons.length === 0 ? (
+          <div className="p-12 text-center text-gray-400">No coupons yet. Create one to get started.</div>
+        ) : (
           <div className="overflow-x-auto">
             <table className="data-table">
-              <thead><tr><th>Code</th><th>Type</th><th>Value</th><th>Eligibility</th><th>Usage</th><th>Expires</th><th>Status</th><th>Actions</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>Code</th>
+                  <th>Discount</th>
+                  <th>Conditions</th>
+                  <th>Usage</th>
+                  <th>Validity</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
               <tbody>
-                {coupons.map(c => (
-                  <tr key={c._id}>
-                    <td>
-                      <div>
-                        <code className="font-mono font-bold text-sm text-primary bg-primary/10 px-2 py-0.5 rounded">{c.code}</code>
-                        {c.isNewUserOnly && <span className="badge badge-featured text-xs ml-1">New Users</span>}
-                      </div>
-                    </td>
-                    <td><span className="badge badge-sale capitalize text-xs">{c.type}</span></td>
-                    <td><span className="font-semibold text-sm">{c.type === 'percentage' ? `${c.value}%` : `Rs. ${c.value}`}</span></td>
-                    <td>
-                      <div className="text-xs text-gray-500 space-y-0.5">
-                        {c.applicableCategories?.length > 0 && <p>📂 {c.applicableCategories.map(x => x.name || x).join(', ')}</p>}
-                        {c.applicableBrands?.length > 0 && <p>🏷️ {c.applicableBrands.join(', ')}</p>}
-                        {!c.applicableCategories?.length && !c.applicableBrands?.length && <p className="text-gray-400">All products</p>}
-                      </div>
-                    </td>
-                    <td><span className="text-sm">{c.usedCount}/{c.usageLimit || '∞'}</span></td>
-                    <td><span className="text-xs text-gray-500">{new Date(c.validUntil).toLocaleDateString()}</span></td>
-                    <td><span className={`badge text-xs ${c.isActive && new Date(c.validUntil) > new Date() ? 'badge-new' : 'bg-gray-100 text-gray-500'}`}>{!c.isActive ? 'Off' : new Date(c.validUntil) < new Date() ? 'Expired' : 'Active'}</span></td>
-                    <td>
-                      <div className="flex gap-1.5">
-                        <button onClick={() => openEdit(c)} className="p-1.5 rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600">✏️</button>
-                        <button onClick={() => del(c._id)} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500">🗑️</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {coupons.map(c => {
+                  const status = getStatus(c);
+                  const usagePct = c.usageLimit ? Math.round((c.usedCount / c.usageLimit) * 100) : null;
+                  return (
+                    <tr key={c._id}>
+                      <td>
+                        <div className="space-y-1">
+                          <code className="font-mono font-bold text-sm text-primary bg-primary/10 px-2 py-0.5 rounded">{c.code}</code>
+                          {c.description && <p className="text-xs text-gray-400 max-w-[160px] truncate">{c.description}</p>}
+                          <div className="flex flex-wrap gap-1">
+                            {c.isNewUserOnly && <span className="badge badge-featured text-xs">New Users</span>}
+                            {c.excludeSaleItems && <span className="text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">No Sale Items</span>}
+                          </div>
+                        </div>
+                      </td>
+                      <td>
+                        <div className="space-y-0.5">
+                          <span className="font-bold text-sm text-gray-900">
+                            {c.type === 'percentage' ? `${c.value}% OFF` : `Rs. ${c.value} OFF`}
+                          </span>
+                          {c.type === 'percentage' && c.maxDiscount > 0 && (
+                            <p className="text-xs text-gray-400">Max: Rs. {c.maxDiscount}</p>
+                          )}
+                          {c.minOrderAmount > 0 && (
+                            <p className="text-xs text-gray-400">Min order: Rs. {c.minOrderAmount}</p>
+                          )}
+                          {c.maxDiscountPercentOfProfit > 0 && (
+                            <p className="text-xs text-amber-600">Profit cap: {c.maxDiscountPercentOfProfit}%</p>
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        <div className="text-xs text-gray-500 space-y-0.5">
+                          {c.applicableCategories?.length > 0 && (
+                            <p>📂 {c.applicableCategories.map(x => x.name || x).join(', ')}</p>
+                          )}
+                          {c.applicableBrands?.length > 0 && (
+                            <p>🏷️ {c.applicableBrands.join(', ')}</p>
+                          )}
+                          {!c.applicableCategories?.length && !c.applicableBrands?.length && (
+                            <p className="text-gray-400 italic">All products</p>
+                          )}
+                          <p>👤 Limit: {c.userLimit || 1}/user</p>
+                        </div>
+                      </td>
+                      <td>
+                        <div className="space-y-1">
+                          <span className="text-sm font-medium">{c.usedCount} / {c.usageLimit || '∞'}</span>
+                          {usagePct !== null && (
+                            <div className="w-24 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full rounded-full ${usagePct >= 90 ? 'bg-red-500' : usagePct >= 60 ? 'bg-amber-400' : 'bg-green-500'}`}
+                                style={{ width: `${Math.min(100, usagePct)}%` }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        <div className="text-xs text-gray-500 space-y-0.5">
+                          {c.validFrom && <p>From: {new Date(c.validFrom).toLocaleDateString()}</p>}
+                          <p>Until: {new Date(c.validUntil).toLocaleDateString()}</p>
+                        </div>
+                      </td>
+                      <td>
+                        <span className={`badge text-xs ${status.cls}`}>{status.label}</span>
+                      </td>
+                      <td>
+                        <div className="flex gap-1.5">
+                          <button
+                            onClick={() => openSim(c)}
+                            title="Simulate discount"
+                            className="p-1.5 rounded-lg hover:bg-green-50 text-gray-400 hover:text-green-600"
+                          >🧮</button>
+                          <button onClick={() => openEdit(c)} className="p-1.5 rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600">✏️</button>
+                          <button onClick={() => del(c._id)} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500">🗑️</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </div>
-      {modal && (
-        <Modal title={editing ? 'Edit Coupon' : 'Create Coupon'} onClose={() => setModal(false)}>
-          <div className="space-y-4">
-            <div><label className="form-label">Code * (auto-uppercase)</label><input value={form.code} onChange={e => setForm(p => ({...p, code: e.target.value.toUpperCase()}))} className="form-input font-mono" placeholder="SAVE50" /></div>
-            <div><label className="form-label">Description</label><input value={form.description} onChange={e => setForm(p => ({...p, description: e.target.value}))} className="form-input" /></div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><label className="form-label">Type *</label><select value={form.type} onChange={e => setForm(p => ({...p, type: e.target.value}))} className="form-input"><option value="percentage">Percentage %</option><option value="fixed">Fixed Rs.</option></select></div>
-              <div><label className="form-label">Value *</label><input type="number" min="0" value={form.value} onChange={e => setForm(p => ({...p, value: e.target.value}))} className="form-input" /></div>
-              <div><label className="form-label">Min Order (Rs.)</label><input type="number" min="0" value={form.minOrderAmount} onChange={e => setForm(p => ({...p, minOrderAmount: e.target.value}))} className="form-input" /></div>
-              <div><label className="form-label">Max Discount (Rs.)</label><input type="number" min="0" value={form.maxDiscount} onChange={e => setForm(p => ({...p, maxDiscount: e.target.value}))} className="form-input" /></div>
-              <div><label className="form-label">Usage Limit</label><input type="number" min="1" value={form.usageLimit} onChange={e => setForm(p => ({...p, usageLimit: e.target.value}))} className="form-input" placeholder="Unlimited" /></div>
-              <div><label className="form-label">Expires *</label><input type="date" value={form.validUntil} onChange={e => setForm(p => ({...p, validUntil: e.target.value}))} className="form-input" /></div>
+
+      {/* ── Discount Simulator Panel ──────────────────────────────────────────── */}
+      {simPanel && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setSimPanel(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-5 border-b border-gray-100">
+              <div>
+                <h2 className="font-display font-bold text-xl text-gray-900">
+                  🧮 Discount Simulator
+                </h2>
+                <p className="text-sm text-gray-500">
+                  <code className="font-mono bg-primary/10 text-primary px-1.5 rounded">{simPanel.code}</code>
+                  {' — '}
+                  {simPanel.type === 'percentage' ? `${simPanel.value}% off` : `Rs. ${simPanel.value} off`}
+                </p>
+              </div>
+              <button onClick={() => setSimPanel(null)} className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center hover:bg-gray-200">✕</button>
             </div>
+            <div className="p-5 space-y-4">
+              {/* Coupon Rules Summary */}
+              <div className="bg-gray-50 rounded-xl p-3 text-xs space-y-1 text-gray-600">
+                <p className="font-semibold text-gray-700 mb-1">📋 Coupon Rules</p>
+                <p>• Type: <strong>{simPanel.type === 'percentage' ? `${simPanel.value}% percentage` : `Rs. ${simPanel.value} fixed`}</strong></p>
+                {simPanel.minOrderAmount > 0 && <p>• Min order: <strong>Rs. {simPanel.minOrderAmount}</strong></p>}
+                {simPanel.maxDiscount > 0 && <p>• Max discount cap: <strong>Rs. {simPanel.maxDiscount}</strong></p>}
+                {simPanel.maxDiscountPercentOfProfit > 0 && <p>• Profit-based cap: <strong>{simPanel.maxDiscountPercentOfProfit}% of margin</strong></p>}
+                {simPanel.isNewUserOnly && <p>• <strong>New customers only</strong></p>}
+                {simPanel.excludeSaleItems && <p>• <strong>Cannot stack with sale prices</strong></p>}
+                {simPanel.usageLimit && <p>• Total uses: <strong>{simPanel.usedCount}/{simPanel.usageLimit}</strong></p>}
+                <p>• Per-user limit: <strong>{simPanel.userLimit || 1}</strong></p>
+              </div>
+
+              {/* Amount Input */}
+              <div>
+                <label className="form-label">Enter Order Amount (Rs.)</label>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    value={simAmount}
+                    onChange={e => { setSimAmount(e.target.value); setSimResult(null); }}
+                    onKeyDown={e => e.key === 'Enter' && runSim()}
+                    placeholder="e.g. 5000"
+                    className="form-input flex-1"
+                    min="0"
+                  />
+                  <button onClick={runSim} className="btn-primary px-4">Calculate</button>
+                </div>
+              </div>
+
+              {/* Quick Amount Buttons */}
+              <div className="flex flex-wrap gap-2">
+                {[1000, 2500, 5000, 10000, 25000].map(amt => (
+                  <button
+                    key={amt}
+                    onClick={() => { setSimAmount(String(amt)); setSimResult(null); }}
+                    className="text-xs px-2.5 py-1 rounded-lg border border-gray-200 hover:border-primary hover:text-primary transition-colors"
+                  >
+                    Rs. {amt.toLocaleString()}
+                  </button>
+                ))}
+              </div>
+
+              {/* Result */}
+              {simResult && (
+                <div className={`rounded-xl border-2 p-4 space-y-3 ${simResult.blocked ? 'border-red-200 bg-red-50' : 'border-green-200 bg-green-50'}`}>
+                  {simResult.blocked ? (
+                    <div className="flex items-start gap-2">
+                      <span className="text-lg">❌</span>
+                      <div>
+                        <p className="font-semibold text-red-700 text-sm">Coupon Not Applicable</p>
+                        <p className="text-xs text-red-600 mt-0.5">{simResult.blocked}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="font-semibold text-green-800 text-sm flex items-center gap-1.5">✅ Discount Breakdown</p>
+                      {/* Line-by-line breakdown */}
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">Order Subtotal</span>
+                          <span className="font-medium">Rs. {parseFloat(simAmount).toLocaleString()}</span>
+                        </div>
+                        {simResult.lines.map((l, i) => (
+                          <div key={i} className="flex justify-between text-sm">
+                            <span className="text-gray-600">
+                              {l.sign === '−' ? '🏷️' : '→'} {l.label}
+                              {l.note && <span className="text-gray-400 ml-1">{l.note}</span>}
+                            </span>
+                            <span className={`font-semibold ${l.sign === '−' ? 'text-red-600' : 'text-blue-600'}`}>
+                              {l.sign} Rs. {Math.round(l.value).toLocaleString()}
+                            </span>
+                          </div>
+                        ))}
+                        <div className="pt-2 border-t border-green-200 space-y-1">
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-600">Total Discount</span>
+                            <span className="font-bold text-red-600">− Rs. {simResult.final.discount.toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between text-base font-bold">
+                            <span className="text-gray-900">Final Price</span>
+                            <span className="text-green-700 text-lg">Rs. {simResult.final.total.toLocaleString()}</span>
+                          </div>
+                          <p className="text-xs text-green-600 text-right">
+                            Customer saves {simPanel.type === 'percentage'
+                              ? `${simPanel.value}%`
+                              : `${((simResult.final.discount / parseFloat(simAmount)) * 100).toFixed(1)}%`
+                            } on this order
+                          </p>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Create / Edit Modal ───────────────────────────────────────────────── */}
+      {modal && (
+        <Modal title={editing ? 'Edit Coupon' : 'Create Coupon'} onClose={() => setModal(false)} wide>
+          <div className="space-y-4">
+            {/* Basic Info */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <label className="form-label">Code * <span className="text-gray-400 font-normal text-xs">(auto-uppercase)</span></label>
+                <input
+                  value={form.code}
+                  onChange={e => setForm(p => ({ ...p, code: e.target.value.toUpperCase() }))}
+                  className="form-input font-mono"
+                  placeholder="SAVE50"
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="form-label">Description</label>
+                <input value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} className="form-input" placeholder="Shown to customers" />
+              </div>
+            </div>
+
+            {/* Discount Config */}
             <div className="border border-gray-100 rounded-xl p-4 space-y-3">
-              <p className="font-semibold text-sm text-gray-700">🎯 Eligibility (leave blank = all products)</p>
+              <p className="font-semibold text-sm text-gray-700">💸 Discount Configuration</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="form-label">Type *</label>
+                  <select value={form.type} onChange={e => setForm(p => ({ ...p, type: e.target.value }))} className="form-input">
+                    <option value="percentage">Percentage %</option>
+                    <option value="fixed">Fixed Rs.</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">Value *</label>
+                  <input type="number" min="0" value={form.value} onChange={e => setForm(p => ({ ...p, value: e.target.value }))} className="form-input" placeholder={form.type === 'percentage' ? '10' : '500'} />
+                </div>
+                <div>
+                  <label className="form-label">Min Order (Rs.)</label>
+                  <input type="number" min="0" value={form.minOrderAmount} onChange={e => setForm(p => ({ ...p, minOrderAmount: e.target.value }))} className="form-input" placeholder="0 = no minimum" />
+                </div>
+                <div>
+                  <label className="form-label">Max Discount Cap (Rs.)</label>
+                  <input type="number" min="0" value={form.maxDiscount} onChange={e => setForm(p => ({ ...p, maxDiscount: e.target.value }))} className="form-input" placeholder="Blank = unlimited" />
+                </div>
+                <div>
+                  <label className="form-label">Max Discount % of Profit</label>
+                  <input type="number" min="0" max="100" value={form.maxDiscountPercentOfProfit} onChange={e => setForm(p => ({ ...p, maxDiscountPercentOfProfit: e.target.value }))} className="form-input" placeholder="0 = disabled" />
+                  <p className="text-xs text-gray-400 mt-1">Caps discount to X% of order margin. 0 = off.</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Usage Limits */}
+            <div className="border border-gray-100 rounded-xl p-4 space-y-3">
+              <p className="font-semibold text-sm text-gray-700">🔢 Usage Limits</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="form-label">Total Usage Limit</label>
+                  <input type="number" min="1" value={form.usageLimit} onChange={e => setForm(p => ({ ...p, usageLimit: e.target.value }))} className="form-input" placeholder="Unlimited" />
+                </div>
+                <div>
+                  <label className="form-label">Uses Per Customer</label>
+                  <input type="number" min="1" value={form.userLimit} onChange={e => setForm(p => ({ ...p, userLimit: e.target.value }))} className="form-input" placeholder="1" />
+                </div>
+                <div>
+                  <label className="form-label">Valid From *</label>
+                  <input type="date" value={form.validFrom} onChange={e => setForm(p => ({ ...p, validFrom: e.target.value }))} className="form-input" />
+                </div>
+                <div>
+                  <label className="form-label">Valid Until *</label>
+                  <input type="date" value={form.validUntil} onChange={e => setForm(p => ({ ...p, validUntil: e.target.value }))} className="form-input" />
+                </div>
+              </div>
+            </div>
+
+            {/* Eligibility */}
+            <div className="border border-gray-100 rounded-xl p-4 space-y-3">
+              <p className="font-semibold text-sm text-gray-700">🎯 Eligibility <span className="text-gray-400 font-normal">(leave blank = all products)</span></p>
               <div>
                 <label className="form-label text-xs">Applicable Categories</label>
-                <div className="grid grid-cols-2 gap-1 mt-1">
+                <div className="grid grid-cols-2 gap-1 mt-1 max-h-32 overflow-y-auto">
                   {categories.map(cat => (
                     <label key={cat._id} className="flex items-center gap-1.5 cursor-pointer">
                       <input type="checkbox" checked={form.applicableCategories.includes(cat._id)} onChange={() => toggleCategory(cat._id)} className="accent-primary w-3.5 h-3.5" />
@@ -600,21 +929,53 @@ export function AdminCoupons() {
                 </div>
                 <div className="flex flex-wrap gap-1 mt-2">
                   {form.applicableBrands.map(b => (
-                    <span key={b} className="bg-primary/10 text-primary text-xs px-2 py-0.5 rounded-full flex items-center gap-1">{b}<button onClick={() => removeBrand(b)} className="text-primary/60 hover:text-primary">×</button></span>
+                    <span key={b} className="bg-primary/10 text-primary text-xs px-2 py-0.5 rounded-full flex items-center gap-1">
+                      {b}<button onClick={() => removeBrand(b)} className="text-primary/60 hover:text-primary">×</button>
+                    </span>
                   ))}
                 </div>
               </div>
             </div>
-            <div className="flex gap-4">
-              <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={form.isActive} onChange={e => setForm(p => ({...p, isActive: e.target.checked}))} className="accent-primary" /><span className="text-sm">Active</span></label>
-              <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={form.isNewUserOnly} onChange={e => setForm(p => ({...p, isNewUserOnly: e.target.checked}))} className="accent-primary" /><span className="text-sm">New users only</span></label>
+
+            {/* Flags */}
+            <div className="flex flex-wrap gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={form.isActive} onChange={e => setForm(p => ({ ...p, isActive: e.target.checked }))} className="accent-primary" />
+                <span className="text-sm">Active</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={form.isNewUserOnly} onChange={e => setForm(p => ({ ...p, isNewUserOnly: e.target.checked }))} className="accent-primary" />
+                <span className="text-sm">New customers only</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={form.excludeSaleItems} onChange={e => setForm(p => ({ ...p, excludeSaleItems: e.target.checked }))} className="accent-primary" />
+                <span className="text-sm">Exclude sale items</span>
+              </label>
             </div>
-            <div className="flex gap-3 pt-2 border-t"><button onClick={save} disabled={saving} className="btn-primary flex-1">{saving ? 'Saving...' : 'Save Coupon'}</button><button onClick={() => setModal(false)} className="btn-outline">Cancel</button></div>
+
+            {/* Live Preview */}
+            {form.value && (
+              <div className="bg-gray-50 rounded-xl p-3 text-xs text-gray-600 border border-gray-100">
+                <p className="font-semibold text-gray-700 mb-1">👁️ Preview</p>
+                <p>
+                  Code <code className="font-mono bg-white px-1 rounded border">{form.code || 'CODE'}</code> gives{' '}
+                  <strong>{form.type === 'percentage' ? `${form.value}%` : `Rs. ${form.value}`} off</strong>
+                  {form.minOrderAmount > 0 && ` on orders over Rs. ${form.minOrderAmount}`}
+                  {form.maxDiscount > 0 && form.type === 'percentage' && `, capped at Rs. ${form.maxDiscount}`}
+                  {form.isNewUserOnly ? ' (new customers only)' : ''}
+                  {form.excludeSaleItems ? ', cannot stack with sale prices' : ''}
+                  .
+                </p>
+              </div>
+            )}
+
+            <div className="flex gap-3 pt-2 border-t">
+              <button onClick={save} disabled={saving} className="btn-primary flex-1">{saving ? 'Saving...' : 'Save Coupon'}</button>
+              <button onClick={() => setModal(false)} className="btn-outline">Cancel</button>
+            </div>
           </div>
         </Modal>
       )}
     </div>
   );
 }
-
-export default AdminCategories;
