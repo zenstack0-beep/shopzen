@@ -36,7 +36,12 @@ function xe(str) {
 function urlEntry(loc, lastmod, changefreq = 'weekly', priority = '0.7', images = []) {
   const imgXml = images
     .filter(Boolean)
-    .map(img => `\n    <image:image><image:loc>${xe(img)}</image:loc></image:image>`)
+    .map(img => {
+      const src = typeof img === 'string' ? { loc: img } : img;
+      const titleXml   = src.title   ? `\n      <image:title>${xe(src.title)}</image:title>`     : '';
+      const captionXml = src.caption ? `\n      <image:caption>${xe(src.caption)}</image:caption>` : '';
+      return `\n    <image:image>\n      <image:loc>${xe(src.loc)}</image:loc>${titleXml}${captionXml}\n    </image:image>`;
+    })
     .join('');
   return `  <url>
     <loc>${xe(loc)}</loc>
@@ -82,6 +87,10 @@ router.get('/sitemap.xml', async (req, res) => {
     <lastmod>${today}</lastmod>
   </sitemap>
   <sitemap>
+    <loc>${siteUrl}/api/seo/brands-sitemap.xml</loc>
+    <lastmod>${today}</lastmod>
+  </sitemap>
+  <sitemap>
     <loc>${siteUrl}/api/seo/pages-sitemap.xml</loc>
     <lastmod>${today}</lastmod>
   </sitemap>
@@ -120,12 +129,19 @@ router.get('/products-sitemap.xml', async (req, res) => {
     const entries = products.map(p => {
       const allImages = [p.thumbnail, ...(p.images || [])].filter(Boolean);
       const uniqueImages = [...new Set(allImages)].slice(0, 10); // max 10 per Google spec
+      const imageObjs = uniqueImages.map((img, i) => ({
+        loc: img,
+        title: p.brand ? `${p.brand} ${p.name}` : p.name,
+        caption: i === 0
+          ? `${p.name} — buy online in Sri Lanka at ShopZen`
+          : `${p.name} — additional view ${i + 1}`,
+      }));
       return urlEntry(
         `${siteUrl}/product/${p.slug}`,
         p.updatedAt ? new Date(p.updatedAt).toISOString().split('T')[0] : today,
         'weekly',
         '0.9',
-        uniqueImages
+        imageObjs
       );
     });
 
@@ -145,7 +161,7 @@ ${entries.join('\n')}
   }
 });
 
-// ── GET /api/seo/categories-sitemap.xml — Categories + brand pages ────────────
+// ── GET /api/seo/categories-sitemap.xml — Category landing pages ─────────────
 router.get('/categories-sitemap.xml', async (req, res) => {
   try {
     const now = Date.now();
@@ -162,28 +178,15 @@ router.get('/categories-sitemap.xml', async (req, res) => {
 
     const today = new Date().toISOString().split('T')[0];
 
-    // Get unique brands from active products
-    const brands = await Product.distinct('brand', { isActive: true, brand: { $ne: '' } });
-    const brandSlugs = brands
-      .filter(Boolean)
-      .map(b => ({ name: b, slug: b.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') }));
-
     const catEntries = categories.map(c => urlEntry(
       `${siteUrl}/category/${c.slug}`,
       c.updatedAt ? new Date(c.updatedAt).toISOString().split('T')[0] : today,
       'weekly', '0.8'
     ));
 
-    const brandEntries = brandSlugs.map(b => urlEntry(
-      `${siteUrl}/brand/${b.slug}`,
-      today,
-      'weekly', '0.7'
-    ));
-
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${catEntries.join('\n')}
-${brandEntries.join('\n')}
 </urlset>`;
 
     cache.categoriesSitemap = { data: xml, at: now };
@@ -192,6 +195,47 @@ ${brandEntries.join('\n')}
     res.send(xml);
   } catch (err) {
     console.error('Categories sitemap error:', err);
+    res.status(500).send('<?xml version="1.0"?><error>Failed</error>');
+  }
+});
+
+// ── GET /api/seo/brands-sitemap.xml — Brand landing pages ─────────────────────
+router.get('/brands-sitemap.xml', async (req, res) => {
+  try {
+    const now = Date.now();
+    if (cache.brandsSitemap && now - cache.brandsSitemap.at < CACHE_TTL) {
+      res.setHeader('Content-Type', 'application/xml');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      return res.send(cache.brandsSitemap.data);
+    }
+
+    const siteUrl = await getSiteUrl();
+    const today   = new Date().toISOString().split('T')[0];
+
+    // Get unique brands from active products
+    const brands = await Product.distinct('brand', { isActive: true, brand: { $ne: '' } });
+    const brandSlugs = brands
+      .filter(Boolean)
+      .map(b => b.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''))
+      .filter(Boolean);
+
+    const brandEntries = brandSlugs.map(slug => urlEntry(
+      `${siteUrl}/brand/${slug}`,
+      today,
+      'weekly', '0.7'
+    ));
+
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${brandEntries.join('\n')}
+</urlset>`;
+
+    cache.brandsSitemap = { data: xml, at: now };
+    res.setHeader('Content-Type', 'application/xml');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(xml);
+  } catch (err) {
+    console.error('Brands sitemap error:', err);
     res.status(500).send('<?xml version="1.0"?><error>Failed</error>');
   }
 });

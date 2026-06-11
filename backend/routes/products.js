@@ -55,7 +55,7 @@ router.put('/:id', adminAuth, async (req, res) => {
   try {
     before  = await Product.findById(req.params.id).lean();
     product = await Product.findByIdAndUpdate(
-      req.params.id, { $set: req.body }, { new: true, runValidators: false }
+      req.params.id, { $set: { ...req.body, updatedAt: new Date() } }, { new: true, runValidators: false }
     );
     res.json(product);
   } catch (err) {

@@ -56,7 +56,16 @@ const productSchema = new mongoose.Schema({
 });
 
 productSchema.pre('save', function(next) {
-  if (!this.slug) this.slug = this.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+  if (!this.slug) {
+    let slug = this.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const MAX_SLUG_LEN = 75;
+    if (slug.length > MAX_SLUG_LEN) {
+      slug = slug.slice(0, MAX_SLUG_LEN);
+      slug = slug.slice(0, slug.lastIndexOf('-')) || slug.slice(0, MAX_SLUG_LEN);
+      slug = slug.replace(/-$/, '');
+    }
+    this.slug = slug;
+  }
   this.updatedAt = Date.now();
   next();
 });
