@@ -70,28 +70,38 @@ async function getSiteUrl() {
   return (s?.value?.siteUrl || process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
 }
 
+// Sub-sitemap <loc> tags must be directly reachable by Google without going
+// through Vercel rewrites. Point them straight at the Railway backend.
+function getBackendUrl() {
+  const raw = process.env.BACKEND_URL || 'https://shopzen-production.up.railway.app';
+  const url = raw.startsWith('http') ? raw : `https://${raw}`;
+  return url.replace(/\/$/, '');
+}
+
 // ── GET /api/seo/sitemap.xml  — Sitemap index ─────────────────────────────────
 router.get('/sitemap.xml', async (req, res) => {
   try {
-    const siteUrl = await getSiteUrl();
-    const today   = new Date().toISOString().split('T')[0];
+    const today      = new Date().toISOString().split('T')[0];
+    // Use the Railway backend URL directly so Google can fetch sub-sitemaps
+    // without going through Vercel rewrites (which caused "Couldn't fetch").
+    const backendUrl = getBackendUrl();
 
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <sitemap>
-    <loc>${siteUrl}/api/seo/products-sitemap.xml</loc>
+    <loc>${backendUrl}/api/seo/products-sitemap.xml</loc>
     <lastmod>${today}</lastmod>
   </sitemap>
   <sitemap>
-    <loc>${siteUrl}/api/seo/categories-sitemap.xml</loc>
+    <loc>${backendUrl}/api/seo/categories-sitemap.xml</loc>
     <lastmod>${today}</lastmod>
   </sitemap>
   <sitemap>
-    <loc>${siteUrl}/api/seo/brands-sitemap.xml</loc>
+    <loc>${backendUrl}/api/seo/brands-sitemap.xml</loc>
     <lastmod>${today}</lastmod>
   </sitemap>
   <sitemap>
-    <loc>${siteUrl}/api/seo/pages-sitemap.xml</loc>
+    <loc>${backendUrl}/api/seo/pages-sitemap.xml</loc>
     <lastmod>${today}</lastmod>
   </sitemap>
 </sitemapindex>`;
