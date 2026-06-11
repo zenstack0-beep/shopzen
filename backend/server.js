@@ -68,6 +68,11 @@ app.use('/api/delivery',      require('./routes/delivery'));
 app.use('/api/pages',         require('./routes/pages'));
 app.use('/api/subscribers',   require('./routes/subscribers'));
 app.use('/api/seo',           require('./routes/seo'));
+
+// ── Root-level SEO file aliases (so Sitemap: line in robots.txt resolves) ─────
+app.get('/sitemap.xml', (req, res) => res.redirect(301, '/api/seo/sitemap.xml'));
+app.get('/robots.txt', (req, res) => res.redirect(301, '/api/seo/robots.txt'));
+
 app.use('/api/whatsapp',      require('./routes/whatsapp'));
 app.use('/api/social-media',  require('./routes/socialMedia'));
 app.use('/api/automation',    require('./routes/automation'));

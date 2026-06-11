@@ -20,7 +20,7 @@ const router   = express.Router();
 const fs       = require('fs');
 const path     = require('path');
 const Product          = require('../models/Product');
-const { Category, Settings } = require('../models/index');
+const { Category, Settings, Review } = require('../models/index');
 
 // ── XML helpers ───────────────────────────────────────────────────────────────
 function xe(str) {
@@ -233,7 +233,7 @@ router.get('/robots.txt', async (req, res) => {
 
     let txt;
     if (noindex) {
-      txt = `User-agent: *\nDisallow: /\n\nSitemap: ${siteUrl}/api/seo/sitemap.xml\n`;
+      txt = `User-agent: *\nDisallow: /\n\nSitemap: ${siteUrl}/sitemap.xml\n`;
     } else {
       txt = `# ShopZen robots.txt — auto-generated
 User-agent: *
@@ -258,7 +258,7 @@ Allow: /*.webp$
 Crawl-delay: 1
 
 # Sitemap index
-Sitemap: ${siteUrl}/api/seo/sitemap.xml
+Sitemap: ${siteUrl}/sitemap.xml
 `;
     }
 
@@ -313,6 +313,31 @@ router.get('/meta', async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
+
+async function getReviewSchemas(productId) {
+  const reviews = await Review.find({ product: productId, isApproved: true })
+    .populate('user', 'firstName lastName')
+    .sort({ createdAt: -1 })
+    .limit(10)
+    .lean();
+
+  return reviews.map(r => ({
+    '@type': 'Review',
+    reviewRating: {
+      '@type': 'Rating',
+      ratingValue: String(r.rating),
+      bestRating: '5',
+      worstRating: '1',
+    },
+    author: {
+      '@type': 'Person',
+      name: [r.user?.firstName, r.user?.lastName].filter(Boolean).join(' ') || 'ShopZen Customer',
+    },
+    datePublished: new Date(r.createdAt).toISOString().split('T')[0],
+    ...(r.title ? { name: r.title } : {}),
+    ...(r.comment ? { reviewBody: String(r.comment).slice(0, 1000) } : {}),
+  }));
+}
 
 // ── GET /api/seo/product-meta/:slug ──────────────────────────────────────────
 router.get('/product-meta/:slug', async (req, res) => {
@@ -394,6 +419,8 @@ router.get('/product-meta/:slug', async (req, res) => {
       };
     }
 
+    const reviewSchemas = await getReviewSchemas(product._id);
+
     const schema = {
       '@context': 'https://schema.org',
       '@type':    'Product',
@@ -416,6 +443,7 @@ router.get('/product-meta/:slug', async (req, res) => {
           worstRating:   '1',
         },
       } : {}),
+      ...(reviewSchemas.length ? { review: reviewSchemas } : {}),
     };
 
     if (!product.brand) delete schema.brand;
@@ -833,6 +861,8 @@ const seoRenderMiddleware = async (req, res) => {
         const keywords     = [product.name, product.brand, product.category?.name, ...(product.tags || []), 'sri lanka'].filter(Boolean).join(', ');
         const schemaDesc   = plainDesc.slice(0, 500) || (product.brand ? `${product.brand} ${product.name}` : product.name);
 
+        const reviewSchemas = await getReviewSchemas(product._id);
+
         const schema = {
           '@context': 'https://schema.org', '@type': 'Product',
           name: product.name, description: schemaDesc,
@@ -876,6 +906,7 @@ const seoRenderMiddleware = async (req, res) => {
               bestRating: '5', worstRating: '1',
             },
           } : {}),
+          ...(reviewSchemas.length ? { review: reviewSchemas } : {}),
         };
         if (!product.sku) delete schema.mpn;
 

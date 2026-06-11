@@ -332,7 +332,7 @@ export default function ProductDetail() {
     toast.custom(t => (
       <div className={`flex items-center gap-3 px-4 py-3 rounded-2xl shadow-2xl border-2 ${t.visible ? 'fade-up' : ''}`}
         style={{ background: 'var(--card-bg)', borderColor: 'var(--color-primary)', minWidth: 250 }}>
-        <img src={product.thumbnail || product.images?.[0] || 'https://via.placeholder.com/48'} alt=""
+        <img src={product.thumbnail || product.images?.[0] || 'https://via.placeholder.com/48'} alt={product.name}
           className="w-12 h-12 rounded-xl object-cover flex-shrink-0"/>
         <div className="flex-1 min-w-0">
           <p className="text-xs font-black" style={{ color: 'var(--color-primary)', fontFamily: 'var(--font-display)' }}>Added to Cart! 🛒</p>
@@ -449,7 +449,7 @@ export default function ProductDetail() {
                   setSelImg(i);
                   gsap.fromTo(imgRef.current, { opacity: 0.4, scale: 0.97 }, { opacity: 1, scale: 1, duration: 0.4, ease: 'power2.out' });
                 }} className={`gallery-thumb ${selImg===i?'active':''}`}>
-                  <img src={img} alt=""/>
+                  <img src={img} alt={`${product.name} — view ${i + 1}`}/>
                 </button>
               ))}
             </div>
