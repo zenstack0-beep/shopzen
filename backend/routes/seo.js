@@ -174,13 +174,6 @@ router.get('/categories-sitemap.xml', async (req, res) => {
       'weekly', '0.8'
     ));
 
-    // Also include legacy ?category= URLs as alternates (keep old links working)
-    const catLegacyEntries = categories.map(c => urlEntry(
-      `${siteUrl}/shop?category=${c.slug}`,
-      c.updatedAt ? new Date(c.updatedAt).toISOString().split('T')[0] : today,
-      'monthly', '0.5'
-    ));
-
     const brandEntries = brandSlugs.map(b => urlEntry(
       `${siteUrl}/brand/${b.slug}`,
       today,
@@ -190,7 +183,6 @@ router.get('/categories-sitemap.xml', async (req, res) => {
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${catEntries.join('\n')}
-${catLegacyEntries.join('\n')}
 ${brandEntries.join('\n')}
 </urlset>`;
 
@@ -601,7 +593,7 @@ function buildProductTitle(product, storeName) {
   return core + suffix;
 }
 
-function injectMeta(html, { title, desc, canonical, ogTitle, ogDesc, ogImage, ogUrl, ogType, keywords, schemas, verification }) {
+function injectMeta(html, { title, desc, canonical, ogTitle, ogDesc, ogImage, ogUrl, ogType, keywords, schemas, verification, robots }) {
   let out = html.includes('__META_INJECT__') ? html.replace('__META_INJECT__', '') : html;
   out = out.replace(/<script type="application\/ld\+json">[\s\S]*?<\/script>\n?/g, '');
 
@@ -618,6 +610,14 @@ function injectMeta(html, { title, desc, canonical, ogTitle, ogDesc, ogImage, og
     .replace(/(<meta name="twitter:description" content=")[^"]*(")/, `$1${xe(ogDesc || desc)}$2`)
     .replace(/(<meta name="twitter:image" content=")[^"]*(")/, `$1${xe(ogImage)}$2`)
     .replace(/yourstore\.com/g, 'shopzen.lk');
+
+  if (robots) {
+    if (out.includes('name="robots"')) {
+      out = out.replace(/(<meta name="robots" content=")[^"]*(")/, `$1${xe(robots)}$2`);
+    } else {
+      out = out.replace('</head>', `<meta name="robots" content="${xe(robots)}"/>\n</head>`);
+    }
+  }
 
   const missing = [
     !out.includes('property="og:type"')        ? `<meta property="og:type" content="${xe(ogType || 'website')}"/>` : '',
@@ -754,7 +754,7 @@ async function renderShopPage(req, html, siteUrl, storeName, defaultOgImage) {
         };
         const orgSchema = { '@context': 'https://schema.org', '@type': 'Organization', name: storeName, url: siteUrl, logo: { '@type': 'ImageObject', url: defaultOgImage } };
 
-        return injectMeta(html, { title, desc, canonical: catUrl, ogImage, ogType: 'website', keywords, schemas: [breadcrumb, orgSchema] });
+        return injectMeta(html, { title, desc, canonical: catUrl, ogImage, ogType: 'website', keywords, robots: 'noindex,follow', schemas: [breadcrumb, orgSchema] });
       }
     } catch (err) {
       console.error('[SSR shop/category]', err.message);
@@ -765,8 +765,9 @@ async function renderShopPage(req, html, siteUrl, storeName, defaultOgImage) {
     return injectMeta(html, {
       title:     `Search: "${searchQ}" — ${storeName} Sri Lanka`,
       desc:      `Search results for "${searchQ}" at ${storeName}. Best deals in Sri Lanka.`,
-      canonical: `${siteUrl}/shop?search=${encodeURIComponent(searchQ)}`,
+      canonical: `${siteUrl}/shop`,
       ogImage: defaultOgImage, ogType: 'website',
+      robots: 'noindex,follow',
       keywords: `${searchQ}, buy ${searchQ} sri lanka, ${storeName}`,
     });
   }
