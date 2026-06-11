@@ -284,6 +284,7 @@ User-agent: *
 Allow: /
 Disallow: /admin/
 Allow: /api/
+Allow: /api/seo/
 Disallow: /checkout/
 Disallow: /account/
 Disallow: /cart/
