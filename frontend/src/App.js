@@ -12,6 +12,8 @@ import AnalyticsBootstrap from './hooks/useAnalytics';
 // Customer Pages
 import Home from './pages/customer/Home';
 import Shop from './pages/customer/Shop';
+import CategoryPage from './pages/customer/CategoryPage';
+import BrandPage from './pages/customer/BrandPage';
 import ProductDetail from './pages/customer/ProductDetail';
 import Cart from './pages/customer/Cart';
 import Checkout from './pages/customer/Checkout';
@@ -49,13 +51,6 @@ import AutomationRules from './pages/admin/AutomationRules';
 import AdminDeals from './pages/admin/Deals';
 
 // Scrolls to top on every route change.
-// Must defeat two things that fight it:
-//   1. "scroll-behavior: smooth" on <html> causes an animated scroll from
-//      the bottom of the old page instead of an instant jump.
-//   2. GSAP ScrollTrigger.refresh() fires inside page components on mount
-//      and repositions the scroll AFTER our scrollTo(0,0) already ran.
-// Fix: override smooth-scroll, jump instantly, then re-enforce across two
-// animation frames so we always win after GSAP finishes its refresh cycle.
 function ScrollToTop() {
   const { pathname } = useLocation();
 
@@ -72,16 +67,12 @@ function ScrollToTop() {
       document.body.scrollTop = 0;
     };
 
-    // Immediate jump
     forceTop();
 
-    // Re-enforce after frame 1 — React has painted the new page
     const raf1 = requestAnimationFrame(() => {
       forceTop();
-      // Re-enforce after frame 2 — GSAP ScrollTrigger.refresh() has run
       const raf2 = requestAnimationFrame(() => {
         forceTop();
-        // Restore smooth scrolling for normal in-page anchor behaviour
         document.documentElement.style.scrollBehavior = '';
         document.body.style.scrollBehavior = '';
       });
@@ -131,7 +122,12 @@ export default function App() {
                   <Route element={<CustomerLayout/>}>
                     <Route path="/" element={<Home/>}/>
                     <Route path="/shop" element={<Shop/>}/>
+                    {/* Legacy /shop/:category param still works */}
                     <Route path="/shop/:category" element={<Shop/>}/>
+                    {/* SEO-friendly category URLs */}
+                    <Route path="/category/:slug" element={<CategoryPage/>}/>
+                    {/* SEO-friendly brand landing pages */}
+                    <Route path="/brand/:slug" element={<BrandPage/>}/>
                     <Route path="/product/:slug" element={<ProductDetail/>}/>
                     <Route path="/cart" element={<Cart/>}/>
                     <Route path="/checkout" element={<Checkout/>}/>

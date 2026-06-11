@@ -125,7 +125,7 @@ export default function Shop() {
     description: currentCat?.description || `Browse our ${currentCat?.name || 'full'} collection — quality products, fast delivery.`,
     breadcrumbs: currentCat ? [
       { name: 'Shop', url: '/shop' },
-      { name: currentCat.name, url: `/shop?category=${currentCat._id}` },
+      { name: currentCat.name, url: `/category/${currentCat.slug}` },
     ] : [{ name: 'Shop', url: '/shop' }],
   });
 

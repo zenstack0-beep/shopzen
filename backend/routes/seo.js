@@ -1,21 +1,24 @@
 /**
- * routes/seo.js — Full SEO backend
+ * routes/seo.js — Full SEO backend for ShopZen
  *
- * GET  /api/seo/sitemap.xml          — Dynamic XML sitemap (images included)
- * GET  /api/seo/robots.txt           — Dynamic robots.txt
- * GET  /api/seo/meta                 — Store-level meta tags
- * GET  /api/seo/product-meta/:slug   — Per-product meta for SSR injection
- * POST /api/seo/bust-cache           — Clear sitemap cache
+ * GET  /api/seo/sitemap.xml               — Sitemap index (points to sub-sitemaps)
+ * GET  /api/seo/products-sitemap.xml      — All product URLs with ALL images
+ * GET  /api/seo/categories-sitemap.xml   — Category + brand landing pages
+ * GET  /api/seo/pages-sitemap.xml        — Static + business pages
+ * GET  /api/seo/robots.txt              — Dynamic robots.txt
+ * GET  /api/seo/meta                    — Store-level meta tags
+ * GET  /api/seo/product-meta/:slug      — Per-product meta for SSR injection
+ * GET  /api/seo/category-meta/:slug     — Per-category meta for SSR injection
+ * GET  /api/seo/brand-meta/:slug        — Per-brand meta for SSR injection
+ * POST /api/seo/bust-cache              — Clear sitemap cache
  *
- * SSR middleware exported:  seoRenderMiddleware
- * Mount: app.use('/api/seo', require('./routes/seo'));
- * Catch-all: app.get('*', require('./routes/seo').seoRenderMiddleware);
+ * SSR middleware exported: seoRenderMiddleware
  */
 
-const express = require('express');
-const router  = express.Router();
-const fs      = require('fs');
-const path    = require('path');
+const express  = require('express');
+const router   = express.Router();
+const fs       = require('fs');
+const path     = require('path');
 const Product          = require('../models/Product');
 const { Category, Settings } = require('../models/index');
 
@@ -23,71 +26,108 @@ const { Category, Settings } = require('../models/index');
 function xe(str) {
   if (!str) return '';
   return String(str)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    .replace(/&/g,  '&amp;')
+    .replace(/</g,  '&lt;')
+    .replace(/>/g,  '&gt;')
+    .replace(/"/g,  '&quot;');
 }
 
-function urlEntry(loc, lastmod, changefreq = 'weekly', priority = '0.7', imageUrl = null) {
-  const img = imageUrl
-    ? `\n    <image:image><image:loc>${xe(imageUrl)}</image:loc></image:image>`
-    : '';
+/** Build a <url> entry with zero or more <image:image> children */
+function urlEntry(loc, lastmod, changefreq = 'weekly', priority = '0.7', images = []) {
+  const imgXml = images
+    .filter(Boolean)
+    .map(img => `\n    <image:image><image:loc>${xe(img)}</image:loc></image:image>`)
+    .join('');
   return `  <url>
     <loc>${xe(loc)}</loc>
     <lastmod>${lastmod}</lastmod>
     <changefreq>${changefreq}</changefreq>
-    <priority>${priority}</priority>${img}
+    <priority>${priority}</priority>${imgXml}
   </url>`;
 }
 
-// ── In-memory sitemap cache ───────────────────────────────────────────────────
-let sitemapCache    = null;
-let sitemapCachedAt = 0;
-const CACHE_TTL_MS  = 60 * 60 * 1000; // 1 hour
+// ── In-memory cache ───────────────────────────────────────────────────────────
+const cache = {};
+const CACHE_TTL = 60 * 60 * 1000; // 1 hour
+
+function cached(key, fn) {
+  return async () => {
+    const now = Date.now();
+    if (cache[key] && now - cache[key].at < CACHE_TTL) return cache[key].data;
+    const data = await fn();
+    cache[key] = { data, at: now };
+    return data;
+  };
+}
 
 async function getSiteUrl() {
   const s = await Settings.findOne({ key: 'seo_config' });
   return (s?.value?.siteUrl || process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
 }
 
-// ── GET /api/seo/sitemap.xml ─────────────────────────────────────────────────
+// ── GET /api/seo/sitemap.xml  — Sitemap index ─────────────────────────────────
 router.get('/sitemap.xml', async (req, res) => {
   try {
+    const siteUrl = await getSiteUrl();
+    const today   = new Date().toISOString().split('T')[0];
+
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <sitemap>
+    <loc>${siteUrl}/api/seo/products-sitemap.xml</loc>
+    <lastmod>${today}</lastmod>
+  </sitemap>
+  <sitemap>
+    <loc>${siteUrl}/api/seo/categories-sitemap.xml</loc>
+    <lastmod>${today}</lastmod>
+  </sitemap>
+  <sitemap>
+    <loc>${siteUrl}/api/seo/pages-sitemap.xml</loc>
+    <lastmod>${today}</lastmod>
+  </sitemap>
+</sitemapindex>`;
+
+    res.setHeader('Content-Type', 'application/xml');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(xml);
+  } catch (err) {
+    console.error('Sitemap index error:', err);
+    res.status(500).send('<?xml version="1.0"?><error>Sitemap generation failed</error>');
+  }
+});
+
+// ── GET /api/seo/products-sitemap.xml  — All products with ALL images ─────────
+router.get('/products-sitemap.xml', async (req, res) => {
+  try {
     const now = Date.now();
-    if (sitemapCache && now - sitemapCachedAt < CACHE_TTL_MS) {
+    if (cache.productsSitemap && now - cache.productsSitemap.at < CACHE_TTL) {
       res.setHeader('Content-Type', 'application/xml');
       res.setHeader('Cache-Control', 'public, max-age=3600');
-      return res.send(sitemapCache);
+      return res.send(cache.productsSitemap.data);
     }
 
-    const [siteUrl, products, categories] = await Promise.all([
+    const [siteUrl, products] = await Promise.all([
       getSiteUrl(),
-      Product.find({ isActive: true }, 'slug updatedAt thumbnail name brand shortDescription').lean(),
-      Category.find({ isActive: true }, 'slug name updatedAt').lean(),
+      Product.find(
+        { isActive: true },
+        'slug updatedAt thumbnail images name brand'
+      ).lean(),
     ]);
 
     const today = new Date().toISOString().split('T')[0];
 
-    const staticPages = [
-      { path: '/',           freq: 'daily',   pri: '1.0' },
-      { path: '/shop',       freq: 'daily',   pri: '0.9' },
-      { path: '/gift-cards', freq: 'monthly', pri: '0.5' },
-    ];
-
-    const entries = [
-      ...staticPages.map(p => urlEntry(`${siteUrl}${p.path}`, today, p.freq, p.pri)),
-      ...categories.map(c => urlEntry(
-        `${siteUrl}/shop?category=${c.slug}`,
-        c.updatedAt ? new Date(c.updatedAt).toISOString().split('T')[0] : today,
-        'weekly', '0.8'
-      )),
-      // Products — with thumbnail image for Google Image Search
-      ...products.map(p => urlEntry(
+    // Include ALL product images (thumbnail + images array) for Google Image Search
+    const entries = products.map(p => {
+      const allImages = [p.thumbnail, ...(p.images || [])].filter(Boolean);
+      const uniqueImages = [...new Set(allImages)].slice(0, 10); // max 10 per Google spec
+      return urlEntry(
         `${siteUrl}/product/${p.slug}`,
         p.updatedAt ? new Date(p.updatedAt).toISOString().split('T')[0] : today,
-        'weekly', '0.9',
-        p.thumbnail || null
-      )),
-    ];
+        'weekly',
+        '0.9',
+        uniqueImages
+      );
+    });
 
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
@@ -95,15 +135,101 @@ router.get('/sitemap.xml', async (req, res) => {
 ${entries.join('\n')}
 </urlset>`;
 
-    sitemapCache    = xml;
-    sitemapCachedAt = now;
-
+    cache.productsSitemap = { data: xml, at: now };
     res.setHeader('Content-Type', 'application/xml');
     res.setHeader('Cache-Control', 'public, max-age=3600');
     res.send(xml);
   } catch (err) {
-    console.error('Sitemap error:', err);
-    res.status(500).send('<?xml version="1.0"?><error>Sitemap generation failed</error>');
+    console.error('Products sitemap error:', err);
+    res.status(500).send('<?xml version="1.0"?><error>Failed</error>');
+  }
+});
+
+// ── GET /api/seo/categories-sitemap.xml — Categories + brand pages ────────────
+router.get('/categories-sitemap.xml', async (req, res) => {
+  try {
+    const now = Date.now();
+    if (cache.categoriesSitemap && now - cache.categoriesSitemap.at < CACHE_TTL) {
+      res.setHeader('Content-Type', 'application/xml');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      return res.send(cache.categoriesSitemap.data);
+    }
+
+    const [siteUrl, categories] = await Promise.all([
+      getSiteUrl(),
+      Category.find({ isActive: true }, 'slug name updatedAt').lean(),
+    ]);
+
+    const today = new Date().toISOString().split('T')[0];
+
+    // Get unique brands from active products
+    const brands = await Product.distinct('brand', { isActive: true, brand: { $ne: '' } });
+    const brandSlugs = brands
+      .filter(Boolean)
+      .map(b => ({ name: b, slug: b.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') }));
+
+    const catEntries = categories.map(c => urlEntry(
+      `${siteUrl}/category/${c.slug}`,
+      c.updatedAt ? new Date(c.updatedAt).toISOString().split('T')[0] : today,
+      'weekly', '0.8'
+    ));
+
+    // Also include legacy ?category= URLs as alternates (keep old links working)
+    const catLegacyEntries = categories.map(c => urlEntry(
+      `${siteUrl}/shop?category=${c.slug}`,
+      c.updatedAt ? new Date(c.updatedAt).toISOString().split('T')[0] : today,
+      'monthly', '0.5'
+    ));
+
+    const brandEntries = brandSlugs.map(b => urlEntry(
+      `${siteUrl}/brand/${b.slug}`,
+      today,
+      'weekly', '0.7'
+    ));
+
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${catEntries.join('\n')}
+${catLegacyEntries.join('\n')}
+${brandEntries.join('\n')}
+</urlset>`;
+
+    cache.categoriesSitemap = { data: xml, at: now };
+    res.setHeader('Content-Type', 'application/xml');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(xml);
+  } catch (err) {
+    console.error('Categories sitemap error:', err);
+    res.status(500).send('<?xml version="1.0"?><error>Failed</error>');
+  }
+});
+
+// ── GET /api/seo/pages-sitemap.xml — Static pages ─────────────────────────────
+router.get('/pages-sitemap.xml', async (req, res) => {
+  try {
+    const siteUrl = await getSiteUrl();
+    const today   = new Date().toISOString().split('T')[0];
+
+    const staticPages = [
+      { path: '/',           freq: 'daily',   pri: '1.0' },
+      { path: '/shop',       freq: 'daily',   pri: '0.9' },
+      { path: '/gift-cards', freq: 'monthly', pri: '0.5' },
+    ];
+
+    const entries = staticPages.map(p =>
+      urlEntry(`${siteUrl}${p.path}`, today, p.freq, p.pri)
+    );
+
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${entries.join('\n')}
+</urlset>`;
+
+    res.setHeader('Content-Type', 'application/xml');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(xml);
+  } catch (err) {
+    res.status(500).send('<?xml version="1.0"?><error>Failed</error>');
   }
 });
 
@@ -115,7 +241,7 @@ router.get('/robots.txt', async (req, res) => {
 
     let txt;
     if (noindex) {
-      txt = `User-agent: *\nDisallow: /\n\nSitemap: ${siteUrl}/sitemap.xml\n`;
+      txt = `User-agent: *\nDisallow: /\n\nSitemap: ${siteUrl}/api/seo/sitemap.xml\n`;
     } else {
       txt = `# ShopZen robots.txt — auto-generated
 User-agent: *
@@ -139,7 +265,8 @@ Allow: /*.webp$
 
 Crawl-delay: 1
 
-Sitemap: ${siteUrl}/sitemap.xml
+# Sitemap index
+Sitemap: ${siteUrl}/api/seo/sitemap.xml
 `;
     }
 
@@ -147,16 +274,14 @@ Sitemap: ${siteUrl}/sitemap.xml
     res.setHeader('Cache-Control', 'public, max-age=86400');
     res.send(txt);
   } catch (err) {
-    console.error('robots.txt error:', err);
     res.status(500).send('User-agent: *\nAllow: /\n');
   }
 });
 
 // ── POST /api/seo/bust-cache ─────────────────────────────────────────────────
 router.post('/bust-cache', (req, res) => {
-  sitemapCache    = null;
-  sitemapCachedAt = 0;
-  res.json({ success: true, message: 'Sitemap cache cleared' });
+  Object.keys(cache).forEach(k => delete cache[k]);
+  res.json({ success: true, message: 'All sitemap caches cleared' });
 });
 
 // ── GET /api/seo/meta — Store-level meta ─────────────────────────────────────
@@ -222,16 +347,16 @@ router.get('/product-meta/:slug', async (req, res) => {
     const baseDesc   = _raw1.length <= 85 ? _raw1 : _raw1.slice(0, _raw1.lastIndexOf(' ', 85));
     const metaDesc   = `${baseDesc || product.name}. ${priceText}. Fast delivery across Sri Lanka. Shop at ${storeName}.`.slice(0, 165);
 
-    const ogImage = product.thumbnail || (product.images?.[0]) || `${siteUrl}/og-default.png`;
+    // ALL images for rich results
+    const allImages  = [product.thumbnail, ...(product.images || [])].filter(Boolean);
+    const uniqueImages = [...new Set(allImages)];
+    const ogImage = uniqueImages[0] || `${siteUrl}/og-default.png`;
     const canonical = productUrl;
 
     const keywords = [
-      product.name,
-      product.brand,
-      catName,
+      product.name, product.brand, catName,
       ...(product.tags || []),
-      'buy in sri lanka',
-      'online shopping sri lanka',
+      'buy in sri lanka', 'online shopping sri lanka',
     ].filter(Boolean).join(', ');
 
     const availability = product.stock > 0
@@ -271,23 +396,24 @@ router.get('/product-meta/:slug', async (req, res) => {
 
     if (product.salePrice) {
       offers.priceSpecification = {
-        '@type':         'PriceSpecification',
-        price:           product.salePrice,
-        priceCurrency:   'LKR',
+        '@type': 'PriceSpecification',
+        price: product.salePrice,
+        priceCurrency: 'LKR',
       };
     }
 
     const schema = {
-      '@context':   'https://schema.org',
-      '@type':      'Product',
-      name:         product.name,
-      description:  plainDesc.slice(0, 500) || (product.brand ? `${product.brand} ${product.name}` : product.name),
-      image:        [ogImage, ...(product.images || [])].filter(Boolean).slice(0, 5),
-      sku:          product.sku || product._id.toString(),
-      mpn:          product.sku || undefined,
-      brand:        product.brand ? { '@type': 'Brand', name: product.brand } : undefined,
-      category:     catName,
-      url:          productUrl,
+      '@context': 'https://schema.org',
+      '@type':    'Product',
+      name:        product.name,
+      description: (plainDesc.slice(0, 500) || (product.brand ? `${product.brand} ${product.name}` : product.name)),
+      // ALL images included for rich results eligibility
+      image:       uniqueImages.slice(0, 10),
+      sku:         product.sku || product._id.toString(),
+      mpn:         product.sku || undefined,
+      brand:       product.brand ? { '@type': 'Brand', name: product.brand } : undefined,
+      category:    catName,
+      url:         productUrl,
       offers,
       ...(product.ratings?.count > 0 ? {
         aggregateRating: {
@@ -301,35 +427,44 @@ router.get('/product-meta/:slug', async (req, res) => {
     };
 
     if (!product.brand) delete schema.brand;
+    if (!product.sku)   delete schema.mpn;
 
+    // Organization schema on every page
+    const orgSchema = {
+      '@context': 'https://schema.org',
+      '@type':    'Organization',
+      name:        storeName,
+      url:         siteUrl,
+      logo: { '@type': 'ImageObject', url: `${siteUrl}/og-default.png` },
+    };
+
+    // Breadcrumb using SEO-friendly category URL
     const breadcrumbSchema = {
       '@context': 'https://schema.org',
       '@type':    'BreadcrumbList',
       itemListElement: [
-        { '@type': 'ListItem', position: 1, name: 'Home',    item: siteUrl },
-        { '@type': 'ListItem', position: 2, name: 'Shop',    item: `${siteUrl}/shop` },
-        catName && { '@type': 'ListItem', position: 3, name: catName, item: `${siteUrl}/shop?category=${product.category?.slug}` },
+        { '@type': 'ListItem', position: 1, name: 'Home', item: siteUrl },
+        { '@type': 'ListItem', position: 2, name: 'Shop', item: `${siteUrl}/shop` },
+        ...(catName ? [{
+          '@type': 'ListItem',
+          position: 3,
+          name: catName,
+          item: `${siteUrl}/category/${product.category?.slug}`,
+        }] : []),
         { '@type': 'ListItem', position: catName ? 4 : 3, name: product.name, item: productUrl },
-      ].filter(Boolean),
+      ],
     };
 
     res.json({
-      metaTitle,
-      metaDesc,
-      canonical,
-      ogTitle:       metaTitle,
-      ogDesc:        metaDesc,
-      ogImage,
-      ogType:        'product',
+      metaTitle, metaDesc, canonical, keywords,
+      ogTitle: metaTitle, ogDesc: metaDesc, ogImage, ogType: 'product',
       productUrl,
-      keywords,
-      schema,
-      breadcrumbSchema,
-      price:         product.price,
-      salePrice:     product.salePrice,
-      availability:  product.stock > 0 ? 'InStock' : 'OutOfStock',
-      brand:         product.brand,
-      category:      catName,
+      schema, breadcrumbSchema, orgSchema,
+      price:        product.price,
+      salePrice:    product.salePrice,
+      availability: product.stock > 0 ? 'InStock' : 'OutOfStock',
+      brand:        product.brand,
+      category:     catName,
     });
   } catch (err) {
     console.error('[SEO /product-meta]', err.message);
@@ -337,78 +472,188 @@ router.get('/product-meta/:slug', async (req, res) => {
   }
 });
 
-// ══════════════════════════════════════════════════════════════════════════════
-//  SSR-lite middleware — injects correct meta into index.html for Googlebot
-// ══════════════════════════════════════════════════════════════════════════════
-
-// ── Embedded build template (real index.html from frontend/build) ─────────────
-// This is the actual compiled React app HTML, embedded so Railway always has
-// the correct template with JS/CSS bundles — no fetching required.
-const BUILT_HTML_TEMPLATE = "<!doctype html><html lang=\"en-LK\"><head><meta charset=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,maximum-scale=5,viewport-fit=cover\"/><link rel=\"icon\" href=\"/favicon.ico\"/><link rel=\"icon\" href=\"/favicon-32x32.png\" sizes=\"32x32\" type=\"image/png\"/><link rel=\"icon\" href=\"/favicon-16x16.png\" sizes=\"16x16\" type=\"image/png\"/><link rel=\"apple-touch-icon\" href=\"/apple-touch-icon.png\"/><link rel=\"manifest\" href=\"/manifest.json\"/><meta name=\"theme-color\" content=\"#b5451b\" id=\"meta-theme-color\"/><meta name=\"mobile-web-app-capable\" content=\"yes\"/><meta name=\"apple-mobile-web-app-capable\" content=\"yes\"/><meta name=\"apple-mobile-web-app-status-bar-style\" content=\"default\"/><meta name=\"apple-mobile-web-app-title\" content=\"ShopZen\"/><meta name=\"format-detection\" content=\"telephone=no\"/><title>ShopZen \u2014 Premium Online Store Sri Lanka</title><meta name=\"description\" content=\"Shop the best products online in Sri Lanka. Fast delivery, guaranteed best prices on electronics, fashion and more at ShopZen.\"/><meta name=\"robots\" content=\"index,follow,max-image-preview:large\"/><link rel=\"canonical\" href=\"https://shopzen.lk\"/><meta property=\"og:type\" content=\"website\"/><meta property=\"og:title\" content=\"ShopZen \u2014 Premium Online Store Sri Lanka\"/><meta property=\"og:description\" content=\"Shop the best products online in Sri Lanka. Fast delivery, guaranteed best prices on electronics, fashion and more at ShopZen.\"/><meta property=\"og:image\" content=\"https://shopzen.lk/og-default.png\"/><meta property=\"og:url\" content=\"https://shopzen.lk\"/><meta property=\"og:site_name\" content=\"ShopZen\"/><meta property=\"og:locale\" content=\"en_US\"/><meta name=\"twitter:card\" content=\"summary_large_image\"/><meta name=\"twitter:title\" content=\"ShopZen \u2014 Premium Online Store Sri Lanka\"/><meta name=\"twitter:description\" content=\"Shop the best products online in Sri Lanka. Fast delivery, guaranteed best prices on electronics, fashion and more at ShopZen.\"/><meta name=\"twitter:image\" content=\"https://shopzen.lk/og-default.png\"/><link rel=\"preconnect\" href=\"https://fonts.googleapis.com\"/><link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin/><link rel=\"dns-prefetch\" href=\"https://res.cloudinary.com\"/><link rel=\"dns-prefetch\" href=\"https://www.googletagmanager.com\"/><link rel=\"dns-prefetch\" href=\"https://connect.facebook.net\"/><script>!function(){var e={default:{p:\"#b5451b\",pd:\"#8b3214\",pl:\"#e8643c\",a:\"#f0a500\",d:\"#0f172a\",s:\"#1e293b\",g:\"linear-gradient(135deg,#b5451b 0%,#e8643c 50%,#f0a500 100%)\",hg:\"linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#b5451b 100%)\",cb:\"#ffffff\",bb:\"#fafaf8\"},ocean:{p:\"#0369a1\",pd:\"#024f7a\",pl:\"#0ea5e9\",a:\"#06b6d4\",d:\"#0c1a2e\",s:\"#0f2744\",g:\"linear-gradient(135deg,#0369a1 0%,#0ea5e9 50%,#06b6d4 100%)\",hg:\"linear-gradient(135deg,#0c1a2e 0%,#0f2744 50%,#0369a1 100%)\",cb:\"#ffffff\",bb:\"#f0f9ff\"},forest:{p:\"#15803d\",pd:\"#0f5f2e\",pl:\"#22c55e\",a:\"#84cc16\",d:\"#052e16\",s:\"#0a3d20\",g:\"linear-gradient(135deg,#15803d 0%,#22c55e 50%,#84cc16 100%)\",hg:\"linear-gradient(135deg,#052e16 0%,#0a3d20 50%,#15803d 100%)\",cb:\"#ffffff\",bb:\"#f0fdf4\"},royal:{p:\"#7c3aed\",pd:\"#5b21b6\",pl:\"#a78bfa\",a:\"#f59e0b\",d:\"#1e1b4b\",s:\"#2e1065\",g:\"linear-gradient(135deg,#7c3aed 0%,#a78bfa 50%,#f59e0b 100%)\",hg:\"linear-gradient(135deg,#1e1b4b 0%,#2e1065 50%,#7c3aed 100%)\",cb:\"#ffffff\",bb:\"#faf5ff\"},rose:{p:\"#be185d\",pd:\"#9d174d\",pl:\"#f43f5e\",a:\"#fb7185\",d:\"#1f0a14\",s:\"#3b0a20\",g:\"linear-gradient(135deg,#be185d 0%,#f43f5e 50%,#fb7185 100%)\",hg:\"linear-gradient(135deg,#1f0a14 0%,#3b0a20 50%,#be185d 100%)\",cb:\"#ffffff\",bb:\"#fff1f2\"},amber:{p:\"#b45309\",pd:\"#92400e\",pl:\"#f59e0b\",a:\"#fbbf24\",d:\"#1c0a00\",s:\"#451a03\",g:\"linear-gradient(135deg,#b45309 0%,#f59e0b 50%,#fbbf24 100%)\",hg:\"linear-gradient(135deg,#1c0a00 0%,#451a03 50%,#b45309 100%)\",cb:\"#ffffff\",bb:\"#fffbeb\"},midnight:{p:\"#6366f1\",pd:\"#4338ca\",pl:\"#818cf8\",a:\"#38bdf8\",d:\"#0a0a0f\",s:\"#111120\",g:\"linear-gradient(135deg,#4338ca 0%,#6366f1 50%,#38bdf8 100%)\",hg:\"linear-gradient(135deg,#0a0a0f 0%,#111120 50%,#4338ca 100%)\",cb:\"#1a1a2e\",bb:\"#0d0d1a\"},coral:{p:\"#f97316\",pd:\"#ea580c\",pl:\"#fb923c\",a:\"#fcd34d\",d:\"#1c0a00\",s:\"#431407\",g:\"linear-gradient(135deg,#ea580c 0%,#f97316 50%,#fcd34d 100%)\",hg:\"linear-gradient(135deg,#1c0a00 0%,#431407 50%,#ea580c 100%)\",cb:\"#ffffff\",bb:\"#fff7ed\"},slate:{p:\"#334155\",pd:\"#1e293b\",pl:\"#475569\",a:\"#38bdf8\",d:\"#0f172a\",s:\"#1e293b\",g:\"linear-gradient(135deg,#1e293b 0%,#334155 50%,#38bdf8 100%)\",hg:\"linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#334155 100%)\",cb:\"#ffffff\",bb:\"#f8fafc\"},sakura:{p:\"#db2777\",pd:\"#be185d\",pl:\"#f472b6\",a:\"#a78bfa\",d:\"#1a0a14\",s:\"#2d1020\",g:\"linear-gradient(135deg,#be185d 0%,#db2777 50%,#a78bfa 100%)\",hg:\"linear-gradient(135deg,#1a0a14 0%,#2d1020 50%,#db2777 100%)\",cb:\"#ffffff\",bb:\"#fdf2f8\"},emerald:{p:\"#059669\",pd:\"#047857\",pl:\"#34d399\",a:\"#6ee7b7\",d:\"#022c22\",s:\"#064e3b\",g:\"linear-gradient(135deg,#047857 0%,#059669 50%,#34d399 100%)\",hg:\"linear-gradient(135deg,#022c22 0%,#064e3b 50%,#047857 100%)\",cb:\"#ffffff\",bb:\"#ecfdf5\"},neon:{p:\"#a855f7\",pd:\"#7c3aed\",pl:\"#c084fc\",a:\"#22d3ee\",d:\"#050010\",s:\"#0d001a\",g:\"linear-gradient(135deg,#7c3aed 0%,#a855f7 50%,#22d3ee 100%)\",hg:\"linear-gradient(135deg,#050010 0%,#0d001a 50%,#7c3aed 100%)\",cb:\"#0d001a\",bb:\"#080010\"}},a={default:{fd:\"'Playfair Display',serif\",fb:\"'DM Sans',sans-serif\",u:\"https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700;900&family=DM+Sans:wght@300;400;500;600;700&display=swap\"},modern:{fd:\"'Poppins',sans-serif\",fb:\"'Inter',sans-serif\",u:\"https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&family=Inter:wght@300;400;500;600&display=swap\"},elegant:{fd:\"'Cormorant Garamond',serif\",fb:\"'Raleway',sans-serif\",u:\"https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=Raleway:wght@300;400;500;600;700&display=swap\"},bold:{fd:\"'Syne',sans-serif\",fb:\"'Work Sans',sans-serif\",u:\"https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Work+Sans:wght@300;400;500;600&display=swap\"},luxury:{fd:\"'Bodoni Moda',serif\",fb:\"'Jost',sans-serif\",u:\"https://fonts.googleapis.com/css2?family=Bodoni+Moda:wght@400;600;700&family=Jost:wght@300;400;500;600&display=swap\"},tech:{fd:\"'Space Grotesk',sans-serif\",fb:\"'IBM Plex Sans',sans-serif\",u:\"https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap\"},minimal:{fd:\"'Outfit',sans-serif\",fb:\"'Nunito',sans-serif\",u:\"https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Nunito:wght@300;400;500;600&display=swap\"},classic:{fd:\"'Libre Baskerville',serif\",fb:\"'Source Sans 3',sans-serif\",u:\"https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@400;700&family=Source+Sans+3:wght@300;400;500;600&display=swap\"}},f=null;try{var t=localStorage.getItem(\"shopzen_theme_v1\");t&&(f=JSON.parse(t))}catch(e){}var d=e[f&&f.theme||\"default\"]||e.default,r=f&&f.primaryColor||d.p,s=f&&f.primaryDarkColor||d.pd,l=f&&f.primaryLightColor||d.pl,i=f&&f.secondaryColor||d.a,n=f&&f.darkBgColor||d.d,o=document.documentElement;o.style.setProperty(\"--color-primary\",r),o.style.setProperty(\"--color-primary-dark\",s),o.style.setProperty(\"--color-primary-light\",l),o.style.setProperty(\"--color-accent\",i),o.style.setProperty(\"--color-dark\",n),o.style.setProperty(\"--color-surface\",d.s),o.style.setProperty(\"--theme-gradient\",d.g),o.style.setProperty(\"--hero-gradient\",d.hg),o.style.setProperty(\"--card-bg\",d.cb),o.style.setProperty(\"--body-bg\",d.bb),o.style.setProperty(\"--glow-primary\",r+\"66\"),o.style.setProperty(\"--glow-accent\",i+\"4d\");var g=document.createElement(\"style\");g.id=\"theme-bootstrap-bg\",g.textContent=\"html,body{background:\"+d.bb+\" !important}\",document.head.appendChild(g);var b=a[f&&f.fontStyle||\"default\"]||a.default;o.style.setProperty(\"--font-display\",b.fd),o.style.setProperty(\"--font-body\",b.fb);var p=document.createElement(\"link\");if(p.id=\"theme-font\",p.rel=\"stylesheet\",p.href=b.u,document.head.appendChild(p),f&&f.customCSS){var c=document.createElement(\"style\");c.id=\"theme-custom-css\",c.textContent=f.customCSS,document.head.appendChild(c)}var y=document.getElementById(\"meta-theme-color\");y&&(y.content=r)}()</script><script defer=\"defer\" src=\"/static/js/main.5d4ddad7.js\"></script><link href=\"/static/css/main.1a2ef7b8.css\" rel=\"stylesheet\"></head><body><noscript>You need to enable JavaScript to run this app.</noscript><div id=\"root\"></div></body></html>";
-
-let _fetchedTemplate = null;
-let _fetchedAt = 0;
-const HTML_CACHE_TTL = 6 * 60 * 60 * 1000;
-
-// Try to fetch fresher build from Vercel (updates after each deploy)
-// Falls back to embedded template if fetch fails
-async function tryFetchFreshTemplate() {
-  const now = Date.now();
-  if (_fetchedTemplate && (now - _fetchedAt) < HTML_CACHE_TTL) {
-    return _fetchedTemplate;
-  }
-  const frontendUrl = (process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
+// ── GET /api/seo/category-meta/:slug ─────────────────────────────────────────
+router.get('/category-meta/:slug', async (req, res) => {
   try {
-    const https = require('https');
-    const html = await new Promise((resolve, reject) => {
-      const req = https.get(frontendUrl, { timeout: 5000 }, (res) => {
-        if (res.statusCode !== 200) return reject(new Error('HTTP ' + res.statusCode));
-        let data = '';
-        res.on('data', chunk => { data += chunk; });
-        res.on('end', () => resolve(data));
-      });
-      req.on('error', reject);
-      req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
-    });
-    // Only use if it looks like the real React build (has JS bundle)
-    if (html.includes('id="root"') && html.includes('/static/js/') && html.includes('shopzen')) {
-      _fetchedTemplate = html;
-      _fetchedAt = now;
-      console.log('[SSR] Fetched fresh template from Vercel (' + html.length + ' bytes)');
-      return _fetchedTemplate;
-    }
+    const cat = await Category.findOne({ slug: req.params.slug, isActive: true }).lean();
+    if (!cat) return res.status(404).json({ message: 'Category not found' });
+
+    const siteUrl   = (process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
+    const storeName = 'ShopZen';
+    const catUrl    = `${siteUrl}/category/${cat.slug}`;
+
+    const metaTitle = `${cat.name} — Buy Online in Sri Lanka | ${storeName}`;
+    const plainCatDesc = cat.description
+      ? String(cat.description).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
+      : '';
+    const metaDesc = (plainCatDesc.slice(0, 155) || `Shop ${cat.name} online in Sri Lanka. Best prices and fast delivery at ${storeName}.`);
+
+    const featuredProduct = await Product.findOne({
+      category: cat._id, isActive: true,
+      thumbnail: { $exists: true, $ne: '' },
+    }).lean();
+    const ogImage = featuredProduct?.thumbnail || `${siteUrl}/og-default.png`;
+
+    const keywords = `${cat.name}, buy ${cat.name} online sri lanka, ${cat.name} price sri lanka, online shopping sri lanka, ${storeName}`;
+
+    const breadcrumbSchema = {
+      '@context': 'https://schema.org',
+      '@type':    'BreadcrumbList',
+      itemListElement: [
+        { '@type': 'ListItem', position: 1, name: 'Home',  item: siteUrl },
+        { '@type': 'ListItem', position: 2, name: 'Shop',  item: `${siteUrl}/shop` },
+        { '@type': 'ListItem', position: 3, name: cat.name, item: catUrl },
+      ],
+    };
+
+    const orgSchema = {
+      '@context': 'https://schema.org',
+      '@type':    'Organization',
+      name:        storeName,
+      url:         siteUrl,
+      logo: { '@type': 'ImageObject', url: `${siteUrl}/og-default.png` },
+    };
+
+    res.json({ metaTitle, metaDesc, canonical: catUrl, ogImage, keywords, breadcrumbSchema, orgSchema });
   } catch (err) {
-    console.log('[SSR] Could not fetch fresh template, using embedded build:', err.message);
+    res.status(500).json({ message: err.message });
   }
-  return null;
+});
+
+// ── GET /api/seo/brand-meta/:slug ─────────────────────────────────────────────
+router.get('/brand-meta/:slug', async (req, res) => {
+  try {
+    const slug      = req.params.slug;
+    const brandName = slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+    const siteUrl   = (process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
+    const storeName = 'ShopZen';
+    const brandUrl  = `${siteUrl}/brand/${slug}`;
+
+    const metaTitle = `${brandName} Products — Buy Online in Sri Lanka | ${storeName}`;
+    const metaDesc  = `Shop genuine ${brandName} products online in Sri Lanka at ${storeName}. Best prices, fast delivery, manufacturer warranty. Browse the full ${brandName} range today.`;
+    const keywords  = `${brandName}, buy ${brandName} online sri lanka, ${brandName} price sri lanka, ${brandName} products, ${storeName}`;
+
+    // Grab a featured product image from this brand
+    const featuredProduct = await Product.findOne({
+      brand: new RegExp(`^${brandName}$`, 'i'),
+      isActive: true,
+      thumbnail: { $exists: true, $ne: '' },
+    }).lean();
+    const ogImage = featuredProduct?.thumbnail || `${siteUrl}/og-default.png`;
+
+    const breadcrumbSchema = {
+      '@context': 'https://schema.org',
+      '@type':    'BreadcrumbList',
+      itemListElement: [
+        { '@type': 'ListItem', position: 1, name: 'Home',                 item: siteUrl },
+        { '@type': 'ListItem', position: 2, name: 'Shop',                 item: `${siteUrl}/shop` },
+        { '@type': 'ListItem', position: 3, name: `${brandName} Products`, item: brandUrl },
+      ],
+    };
+
+    const orgSchema = {
+      '@context': 'https://schema.org',
+      '@type':    'Organization',
+      name:        storeName,
+      url:         siteUrl,
+      logo: { '@type': 'ImageObject', url: `${siteUrl}/og-default.png` },
+    };
+
+    res.json({ metaTitle, metaDesc, canonical: brandUrl, ogImage, keywords, breadcrumbSchema, orgSchema });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  Helpers shared by SSR middleware
+// ══════════════════════════════════════════════════════════════════════════════
+
+function buildProductTitle(product, storeName) {
+  const name  = (product.name  || '').trim();
+  const brand = (product.brand || '').trim();
+  const sku   = (product.sku   || '').trim();
+
+  const modelRe = /\b([A-Z]{1,5}-?[A-Z0-9]{2,}(?:-[A-Z0-9]+)*)\b/g;
+  const nameModels = [...name.matchAll(modelRe)].map(m => m[1]);
+  let model = nameModels.length ? nameModels[0] : null;
+  if (sku && !name.includes(sku) && !nameModels.some(m => sku.includes(m) || m.includes(sku))) {
+    model = sku;
+  }
+
+  const suffix  = ' Price in Sri Lanka | ' + storeName;
+  let core = name;
+  if (brand) {
+    const eb = brand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    core = core.replace(new RegExp('\\s*-\\s*' + eb + '(\\s+\\S+)*\\s*$', 'i'), '').trim();
+  }
+  core = core.replace(/\s+-\s+\S+\s*$/, '').trim();
+  if (model && !core.includes(model)) {
+    if (brand && core.toLowerCase().startsWith(brand.toLowerCase())) {
+      core = core.slice(0, brand.length) + ' ' + model + core.slice(brand.length);
+    } else {
+      core = model + ' ' + core;
+    }
+  }
+  const maxCore = 75 - suffix.length;
+  if (core.length > maxCore) core = core.slice(0, maxCore - 1).trim();
+  return core + suffix;
 }
 
-async function getHtmlTemplate() {
-  // 1. Check local filesystem (monorepo / self-hosted)
-  const candidates = [
-    require('path').join(__dirname, '..', 'frontend', 'build', 'index.html'),
-    require('path').join(__dirname, '..', 'public', 'index.html'),
-    require('path').join(process.cwd(), 'frontend', 'build', 'index.html'),
-  ];
-  for (const p of candidates) {
-    if (require('fs').existsSync(p)) {
-      const html = require('fs').readFileSync(p, 'utf8');
-      if (html.includes('/static/js/')) {
-        console.log('[SSR] Using local build:', p);
-        return html;
-      }
+function injectMeta(html, { title, desc, canonical, ogTitle, ogDesc, ogImage, ogUrl, ogType, keywords, schemas, verification }) {
+  let out = html.includes('__META_INJECT__') ? html.replace('__META_INJECT__', '') : html;
+  out = out.replace(/<script type="application\/ld\+json">[\s\S]*?<\/script>\n?/g, '');
+
+  out = out
+    .replace(/<title>[^<]*<\/title>/,                                       `<title>${xe(title)}</title>`)
+    .replace(/(<meta name="description" content=")[^"]*(")/, `$1${xe(desc)}$2`)
+    .replace(/(<link rel="canonical" href=")[^"]*(")/, `$1${xe(canonical)}$2`)
+    .replace(/(<meta property="og:title" content=")[^"]*(")/, `$1${xe(ogTitle || title)}$2`)
+    .replace(/(<meta property="og:description" content=")[^"]*(")/, `$1${xe(ogDesc || desc)}$2`)
+    .replace(/(<meta property="og:image" content=")[^"]*(")/, `$1${xe(ogImage)}$2`)
+    .replace(/(<meta property="og:url" content=")[^"]*(")/, `$1${xe(ogUrl || canonical)}$2`)
+    .replace(/(<meta property="og:type" content=")[^"]*(")/, `$1${xe(ogType || 'website')}$2`)
+    .replace(/(<meta name="twitter:title" content=")[^"]*(")/, `$1${xe(ogTitle || title)}$2`)
+    .replace(/(<meta name="twitter:description" content=")[^"]*(")/, `$1${xe(ogDesc || desc)}$2`)
+    .replace(/(<meta name="twitter:image" content=")[^"]*(")/, `$1${xe(ogImage)}$2`)
+    .replace(/yourstore\.com/g, 'shopzen.lk');
+
+  const missing = [
+    !out.includes('property="og:type"')        ? `<meta property="og:type" content="${xe(ogType || 'website')}"/>` : '',
+    !out.includes('property="og:title"')       ? `<meta property="og:title" content="${xe(ogTitle || title)}"/>` : '',
+    !out.includes('property="og:description"') ? `<meta property="og:description" content="${xe(ogDesc || desc)}"/>` : '',
+    !out.includes('property="og:image"')       ? `<meta property="og:image" content="${xe(ogImage)}"/>` : '',
+    !out.includes('property="og:url"')         ? `<meta property="og:url" content="${xe(ogUrl || canonical)}"/>` : '',
+    !out.includes('property="og:site_name"')   ? `<meta property="og:site_name" content="ShopZen"/>` : '',
+    !out.includes('name="twitter:card"')       ? `<meta name="twitter:card" content="summary_large_image"/>` : '',
+    !out.includes('name="twitter:title"')      ? `<meta name="twitter:title" content="${xe(ogTitle || title)}"/>` : '',
+    !out.includes('name="twitter:description"')? `<meta name="twitter:description" content="${xe(ogDesc || desc)}"/>` : '',
+    !out.includes('name="twitter:image"')      ? `<meta name="twitter:image" content="${xe(ogImage)}"/>` : '',
+  ].filter(Boolean).join('\n');
+  if (missing) out = out.replace('</head>', missing + '\n</head>');
+
+  if (keywords) {
+    if (!out.includes('name="keywords"')) {
+      out = out.replace('</head>', `<meta name="keywords" content="${xe(keywords)}"/>\n</head>`);
+    } else {
+      out = out.replace(/(<meta name="keywords" content=")[^"]*(")/, `$1${xe(keywords)}$2`);
     }
   }
 
-  // 2. Try fetching fresh from Vercel
-  const fresh = await tryFetchFreshTemplate();
-  if (fresh) return fresh;
+  if (verification && !out.includes('google-site-verification')) {
+    out = out.replace('</head>', `<meta name="google-site-verification" content="${xe(verification)}"/>\n</head>`);
+  }
 
-  // 3. Always-available fallback: embedded compiled build
-  console.log('[SSR] Using embedded build template');
-  return BUILT_HTML_TEMPLATE;
+  if (schemas && schemas.length) {
+    const schemaBlock = schemas
+      .map(s => `<script type="application/ld+json">${JSON.stringify(s)}</script>`)
+      .join('\n');
+    out = out.replace('</head>', schemaBlock + '\n</head>');
+  }
+
+  return out;
 }
-
 
 async function getSeoMeta() {
   try {
@@ -431,139 +676,85 @@ async function getSeoMeta() {
   } catch { return null; }
 }
 
+// ── Embedded build template ───────────────────────────────────────────────────
+const BUILT_HTML_TEMPLATE = "<!doctype html><html lang=\"en-LK\"><head><meta charset=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,maximum-scale=5,viewport-fit=cover\"/><link rel=\"icon\" href=\"/favicon.ico\"/><link rel=\"apple-touch-icon\" href=\"/apple-touch-icon.png\"/><link rel=\"manifest\" href=\"/manifest.json\"/><meta name=\"theme-color\" content=\"#b5451b\" id=\"meta-theme-color\"/><title>ShopZen \u2014 Premium Online Store Sri Lanka</title><meta name=\"description\" content=\"Shop the best products online in Sri Lanka. Fast delivery, guaranteed best prices on electronics, fashion and more at ShopZen.\"/><meta name=\"robots\" content=\"index,follow,max-image-preview:large\"/><link rel=\"canonical\" href=\"https://shopzen.lk\"/><meta property=\"og:type\" content=\"website\"/><meta property=\"og:title\" content=\"ShopZen \u2014 Premium Online Store Sri Lanka\"/><meta property=\"og:description\" content=\"Shop the best products online in Sri Lanka.\"/><meta property=\"og:image\" content=\"https://shopzen.lk/og-default.png\"/><meta property=\"og:url\" content=\"https://shopzen.lk\"/><meta property=\"og:site_name\" content=\"ShopZen\"/><meta property=\"og:locale\" content=\"en_LK\"/><meta name=\"twitter:card\" content=\"summary_large_image\"/><meta name=\"twitter:title\" content=\"ShopZen \u2014 Premium Online Store Sri Lanka\"/><meta name=\"twitter:description\" content=\"Shop the best products online in Sri Lanka.\"/><meta name=\"twitter:image\" content=\"https://shopzen.lk/og-default.png\"/><script defer=\"defer\" src=\"/static/js/main.5d4ddad7.js\"></script><link href=\"/static/css/main.1a2ef7b8.css\" rel=\"stylesheet\"></head><body><noscript>You need to enable JavaScript to run this app.</noscript><div id=\"root\"></div></body></html>";
 
-function buildProductTitle(product, storeName) {
-  const name  = (product.name  || '').trim();
-  const brand = (product.brand || '').trim();
-  const sku   = (product.sku   || '').trim();
+let _fetchedTemplate = null;
+let _fetchedAt = 0;
+const HTML_CACHE_TTL = 6 * 60 * 60 * 1000;
 
-  const modelRe = /\b([A-Z]{1,5}-?[A-Z0-9]{2,}(?:-[A-Z0-9]+)*)\b/g;
-  const nameModels = [...name.matchAll(modelRe)].map(m => m[1]);
-
-  let model = nameModels.length ? nameModels[0] : null;
-  if (sku && !name.includes(sku) && !nameModels.some(m => sku.includes(m) || m.includes(sku))) {
-    model = sku;
-  }
-
-  const suffix = ' Price in Sri Lanka | ' + storeName;
-
-  let core = name;
-  if (brand) {
-    const eb = brand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    core = core.replace(new RegExp('\\s*-\\s*' + eb + '(\\s+\\S+)*\\s*$', 'i'), '').trim();
-  }
-  core = core.replace(/\s+-\s+\S+\s*$/, '').trim();
-
-  if (model && !core.includes(model)) {
-    if (brand && core.toLowerCase().startsWith(brand.toLowerCase())) {
-      core = core.slice(0, brand.length) + ' ' + model + core.slice(brand.length);
-    } else {
-      core = model + ' ' + core;
+async function tryFetchFreshTemplate() {
+  const now = Date.now();
+  if (_fetchedTemplate && (now - _fetchedAt) < HTML_CACHE_TTL) return _fetchedTemplate;
+  const frontendUrl = (process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
+  try {
+    const https = require('https');
+    const html = await new Promise((resolve, reject) => {
+      const req = https.get(frontendUrl, { timeout: 5000 }, (res) => {
+        if (res.statusCode !== 200) return reject(new Error('HTTP ' + res.statusCode));
+        let data = '';
+        res.on('data', chunk => { data += chunk; });
+        res.on('end', () => resolve(data));
+      });
+      req.on('error', reject);
+      req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    });
+    if (html.includes('id="root"') && html.includes('/static/js/') && html.includes('shopzen')) {
+      _fetchedTemplate = html;
+      _fetchedAt = now;
+      return _fetchedTemplate;
     }
+  } catch (err) {
+    console.log('[SSR] Could not fetch fresh template:', err.message);
   }
-
-  const maxCore = 75 - suffix.length;
-  if (core.length > maxCore) core = core.slice(0, maxCore - 1).trim();
-
-  return core + suffix;
+  return null;
 }
 
-// ── injectMeta: replace all standard meta tags in the HTML template ───────────
-function injectMeta(html, { title, desc, canonical, ogTitle, ogDesc, ogImage, ogUrl, ogType, keywords, schemas, verification }) {
-  // Remove __META_INJECT__ placeholder if present
-  let out = html.includes('__META_INJECT__') ? html.replace('__META_INJECT__', '') : html;
-
-  // ── Strip any existing JSON-LD to prevent duplicates on repeat renders ─────
-  out = out.replace(/<script type="application\/ld\+json">[\s\S]*?<\/script>\n?/g, '');
-
-  // ── Replace standard meta tags ─────────────────────────────────────────────
-  out = out
-    .replace(/<title>[^<]*<\/title>/, `<title>${xe(title)}</title>`)
-    .replace(/(<meta name="description" content=")[^"]*(")/,         `$1${xe(desc)}$2`)
-    .replace(/(<link rel="canonical" href=")[^"]*(")/,               `$1${xe(canonical)}$2`)
-    .replace(/(<meta property="og:title" content=")[^"]*(")/,        `$1${xe(ogTitle || title)}$2`)
-    .replace(/(<meta property="og:description" content=")[^"]*(")/,  `$1${xe(ogDesc || desc)}$2`)
-    .replace(/(<meta property="og:image" content=")[^"]*(")/,        `$1${xe(ogImage)}$2`)
-    .replace(/(<meta property="og:url" content=")[^"]*(")/,          `$1${xe(ogUrl || canonical)}$2`)
-    .replace(/(<meta property="og:type" content=")[^"]*(")/,         `$1${xe(ogType || 'website')}$2`)
-    .replace(/(<meta name="twitter:title" content=")[^"]*(")/,       `$1${xe(ogTitle || title)}$2`)
-    .replace(/(<meta name="twitter:description" content=")[^"]*(")/,  `$1${xe(ogDesc || desc)}$2`)
-    .replace(/(<meta name="twitter:image" content=")[^"]*(")/,       `$1${xe(ogImage)}$2`)
-    .replace(/yourstore\.com/g, 'shopzen.lk');
-
-  // ── Insert OG/Twitter tags if missing in template ──────────────────────────
-  const missing = [
-    !out.includes('property="og:type"')         ? `<meta property="og:type" content="${xe(ogType || 'website')}"/>` : '',
-    !out.includes('property="og:title"')        ? `<meta property="og:title" content="${xe(ogTitle || title)}"/>` : '',
-    !out.includes('property="og:description"')  ? `<meta property="og:description" content="${xe(ogDesc || desc)}"/>` : '',
-    !out.includes('property="og:image"')        ? `<meta property="og:image" content="${xe(ogImage)}"/>` : '',
-    !out.includes('property="og:url"')          ? `<meta property="og:url" content="${xe(ogUrl || canonical)}"/>` : '',
-    !out.includes('property="og:site_name"')    ? `<meta property="og:site_name" content="ShopZen"/>` : '',
-    !out.includes('name="twitter:card"')        ? `<meta name="twitter:card" content="summary_large_image"/>` : '',
-    !out.includes('name="twitter:title"')       ? `<meta name="twitter:title" content="${xe(ogTitle || title)}"/>` : '',
-    !out.includes('name="twitter:description"') ? `<meta name="twitter:description" content="${xe(ogDesc || desc)}"/>` : '',
-    !out.includes('name="twitter:image"')       ? `<meta name="twitter:image" content="${xe(ogImage)}"/>` : '',
-  ].filter(Boolean).join('\n');
-  if (missing) out = out.replace('</head>', missing + '\n</head>');
-
-  // ── Keywords ───────────────────────────────────────────────────────────────
-  if (keywords) {
-    if (!out.includes('name="keywords"')) {
-      out = out.replace('</head>', `<meta name="keywords" content="${xe(keywords)}"/>\n</head>`);
-    } else {
-      out = out.replace(/(<meta name="keywords" content=")[^"]*(")/i, `$1${xe(keywords)}$2`);
+async function getHtmlTemplate() {
+  const candidates = [
+    require('path').join(__dirname, '..', 'frontend', 'build', 'index.html'),
+    require('path').join(__dirname, '..', 'public', 'index.html'),
+    require('path').join(process.cwd(), 'frontend', 'build', 'index.html'),
+  ];
+  for (const p of candidates) {
+    if (require('fs').existsSync(p)) {
+      const html = require('fs').readFileSync(p, 'utf8');
+      if (html.includes('/static/js/')) return html;
     }
   }
-
-  // ── Google verification ────────────────────────────────────────────────────
-  if (verification && !out.includes('google-site-verification')) {
-    out = out.replace('</head>', `<meta name="google-site-verification" content="${xe(verification)}"/>\n</head>`);
-  }
-
-  // ── JSON-LD schemas ────────────────────────────────────────────────────────
-  if (schemas && schemas.length) {
-    const schemaBlock = schemas
-      .map(s => `<script type="application/ld+json">${JSON.stringify(s)}</script>`)
-      .join('\n');
-    out = out.replace('</head>', schemaBlock + '\n</head>');
-  }
-
-  return out;
+  const fresh = await tryFetchFreshTemplate();
+  if (fresh) return fresh;
+  return BUILT_HTML_TEMPLATE;
 }
 
-// ── SSR: /shop and /shop?category=slug pages ──────────────────────────────────
+// ── SSR: /shop page ───────────────────────────────────────────────────────────
 async function renderShopPage(req, html, siteUrl, storeName, defaultOgImage) {
   const categorySlug = req.query.category || null;
   const searchQ      = req.query.search   || null;
 
   if (categorySlug) {
-    // Category landing page
     try {
       const cat = await Category.findOne({ slug: categorySlug, isActive: true }).lean();
       if (cat) {
-        const catUrl  = `${siteUrl}/shop?category=${cat.slug}`;
-        const title   = `${cat.name} — Shop Online in Sri Lanka | ${storeName}`;
-        const desc    = `Browse ${cat.name} products online in Sri Lanka. Fast delivery and best prices at ${storeName}.`;
+        // Canonical points to clean /category/:slug URL
+        const catUrl   = `${siteUrl}/category/${cat.slug}`;
+        const title    = `${cat.name} — Shop Online in Sri Lanka | ${storeName}`;
+        const desc     = `Browse ${cat.name} products online in Sri Lanka. Fast delivery and best prices at ${storeName}.`;
         const keywords = `${cat.name}, buy ${cat.name} online, ${cat.name} price sri lanka, online shopping sri lanka, ${storeName}`;
-
-        // Grab a few product thumbnails for the category OG image
         const featuredProduct = await Product.findOne({ category: cat._id, isActive: true, thumbnail: { $exists: true, $ne: '' } }).lean();
         const ogImage = featuredProduct?.thumbnail || defaultOgImage;
 
         const breadcrumb = {
-          '@context': 'https://schema.org',
-          '@type': 'BreadcrumbList',
+          '@context': 'https://schema.org', '@type': 'BreadcrumbList',
           itemListElement: [
             { '@type': 'ListItem', position: 1, name: 'Home', item: siteUrl },
             { '@type': 'ListItem', position: 2, name: 'Shop', item: `${siteUrl}/shop` },
             { '@type': 'ListItem', position: 3, name: cat.name, item: catUrl },
           ],
         };
+        const orgSchema = { '@context': 'https://schema.org', '@type': 'Organization', name: storeName, url: siteUrl, logo: { '@type': 'ImageObject', url: defaultOgImage } };
 
-        return injectMeta(html, {
-          title, desc, canonical: catUrl, ogImage, ogType: 'website', keywords,
-          schemas: [breadcrumb],
-        });
+        return injectMeta(html, { title, desc, canonical: catUrl, ogImage, ogType: 'website', keywords, schemas: [breadcrumb, orgSchema] });
       }
     } catch (err) {
       console.error('[SSR shop/category]', err.message);
@@ -571,40 +762,39 @@ async function renderShopPage(req, html, siteUrl, storeName, defaultOgImage) {
   }
 
   if (searchQ) {
-    const title   = `Search: "${searchQ}" — ${storeName} Sri Lanka`;
-    const desc    = `Search results for "${searchQ}" at ${storeName}. Find the best deals on electronics, fashion and more in Sri Lanka.`;
     return injectMeta(html, {
-      title, desc, canonical: `${siteUrl}/shop?search=${encodeURIComponent(searchQ)}`,
+      title:     `Search: "${searchQ}" — ${storeName} Sri Lanka`,
+      desc:      `Search results for "${searchQ}" at ${storeName}. Best deals in Sri Lanka.`,
+      canonical: `${siteUrl}/shop?search=${encodeURIComponent(searchQ)}`,
       ogImage: defaultOgImage, ogType: 'website',
       keywords: `${searchQ}, buy ${searchQ} sri lanka, ${storeName}`,
     });
   }
 
-  // Generic /shop page
-  const title   = `Shop All Products — ${storeName} Sri Lanka`;
-  const desc    = `Browse all products at ${storeName}. Electronics, fashion, home & more. Fast delivery, best prices in Sri Lanka.`;
-  const keywords = `online shopping sri lanka, buy online sri lanka, best prices sri lanka, ${storeName}`;
-
   const breadcrumb = {
-    '@context': 'https://schema.org',
-    '@type': 'BreadcrumbList',
+    '@context': 'https://schema.org', '@type': 'BreadcrumbList',
     itemListElement: [
       { '@type': 'ListItem', position: 1, name: 'Home', item: siteUrl },
       { '@type': 'ListItem', position: 2, name: 'Shop', item: `${siteUrl}/shop` },
     ],
   };
+  const orgSchema = { '@context': 'https://schema.org', '@type': 'Organization', name: storeName, url: siteUrl };
 
   return injectMeta(html, {
-    title, desc, canonical: `${siteUrl}/shop`, ogImage: defaultOgImage,
-    ogType: 'website', keywords, schemas: [breadcrumb],
+    title:     `Shop All Products — ${storeName} Sri Lanka`,
+    desc:      `Browse all products at ${storeName}. Electronics, fashion, home & more. Fast delivery, best prices in Sri Lanka.`,
+    canonical: `${siteUrl}/shop`,
+    ogImage: defaultOgImage, ogType: 'website',
+    keywords: `online shopping sri lanka, buy online sri lanka, best prices sri lanka, ${storeName}`,
+    schemas: [breadcrumb, orgSchema],
   });
 }
 
+// ── Main SSR Middleware ───────────────────────────────────────────────────────
 const seoRenderMiddleware = async (req, res) => {
   if (req.path.startsWith('/api/') || req.path.match(/\.(js|css|png|jpg|ico|svg|json|xml|txt|woff2?)$/))
     return res.status(404).send('Not found');
 
-  // Always set CORS header for Vercel server-to-server proxying
   res.setHeader('Access-Control-Allow-Origin', process.env.FRONTEND_URL || 'https://shopzen.lk');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
 
@@ -615,34 +805,38 @@ const seoRenderMiddleware = async (req, res) => {
   const storeName      = 'ShopZen';
   const defaultOgImage = `${siteUrl}/og-default.png`;
 
-  // ── /product/:slug ─────────────────────────────────────────────────────────
+  const orgSchema = {
+    '@context': 'https://schema.org', '@type': 'Organization',
+    name: storeName, url: siteUrl,
+    logo: { '@type': 'ImageObject', url: defaultOgImage },
+  };
+
+  // ── /product/:slug ──────────────────────────────────────────────────────────
   const productMatch = req.path.match(/^\/product\/([^/]+)$/);
   if (productMatch) {
     try {
-      const slug    = productMatch[1];
-      const product = await Product.findOne({ slug, isActive: true })
+      const product = await Product.findOne({ slug: productMatch[1], isActive: true })
         .populate('category', 'name slug').lean();
 
       if (product) {
-        const productUrl = `${siteUrl}/product/${product.slug}`;
-        const metaTitle  = buildProductTitle(product, storeName);
-        const plainDesc  = String(product.shortDescription || product.description || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
-        const priceText  = product.salePrice ? `Rs.${product.salePrice.toLocaleString()} (was Rs.${product.price.toLocaleString()})` : `Rs.${product.price.toLocaleString()}`;
-        const _raw2      = (plainDesc.split('.')[0] || plainDesc).trim();
-        const baseDesc   = _raw2.length <= 85 ? _raw2 : _raw2.slice(0, _raw2.lastIndexOf(' ', 85));
-        const metaDesc   = `${baseDesc || product.name}. ${priceText}. Fast delivery across Sri Lanka. Shop at ${storeName}.`.slice(0, 165);
-        const ogImage    = product.thumbnail || product.images?.[0] || defaultOgImage;
-        const keywords   = [product.name, product.brand, product.category?.name, ...(product.tags||[]), 'sri lanka'].filter(Boolean).join(', ');
-
-        // Build a meaningful description: shortDescription → first 200 chars of full desc → brand+name fallback
-        const schemaDesc = plainDesc.slice(0, 500) ||
-          (product.brand ? `${product.brand} ${product.name}` : product.name);
+        const productUrl   = `${siteUrl}/product/${product.slug}`;
+        const metaTitle    = buildProductTitle(product, storeName);
+        const plainDesc    = String(product.shortDescription || product.description || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+        const priceText    = product.salePrice ? `Rs.${product.salePrice.toLocaleString()} (was Rs.${product.price.toLocaleString()})` : `Rs.${product.price.toLocaleString()}`;
+        const _raw         = (plainDesc.split('.')[0] || plainDesc).trim();
+        const baseDesc     = _raw.length <= 85 ? _raw : _raw.slice(0, _raw.lastIndexOf(' ', 85));
+        const metaDesc     = `${baseDesc || product.name}. ${priceText}. Fast delivery across Sri Lanka. Shop at ${storeName}.`.slice(0, 165);
+        const allImages    = [product.thumbnail, ...(product.images || [])].filter(Boolean);
+        const uniqueImages = [...new Set(allImages)];
+        const ogImage      = uniqueImages[0] || defaultOgImage;
+        const keywords     = [product.name, product.brand, product.category?.name, ...(product.tags || []), 'sri lanka'].filter(Boolean).join(', ');
+        const schemaDesc   = plainDesc.slice(0, 500) || (product.brand ? `${product.brand} ${product.name}` : product.name);
 
         const schema = {
           '@context': 'https://schema.org', '@type': 'Product',
-          name: product.name,
-          description: schemaDesc,
-          image: [ogImage, ...(product.images||[])].filter(Boolean).slice(0,5),
+          name: product.name, description: schemaDesc,
+          // ALL images for rich results
+          image: uniqueImages.slice(0, 10),
           sku: product.sku || product._id.toString(),
           mpn: product.sku || undefined,
           ...(product.brand ? { brand: { '@type': 'Brand', name: product.brand } } : {}),
@@ -669,114 +863,180 @@ const seoRenderMiddleware = async (req, res) => {
               '@type': 'MerchantReturnPolicy',
               applicableCountry: 'LK',
               returnPolicyCategory: 'https://schema.org/MerchantReturnFiniteReturnWindow',
-              merchantReturnDays: 14,
-              returnMethod: 'https://schema.org/ReturnByMail',
+              merchantReturnDays: 14, returnMethod: 'https://schema.org/ReturnByMail',
               returnFees: 'https://schema.org/FreeReturn',
             },
           },
-          ...(product.ratings?.count > 0 ? { aggregateRating: { '@type': 'AggregateRating', ratingValue: product.ratings.average.toFixed(1), reviewCount: product.ratings.count, bestRating: '5', worstRating: '1' } } : {}),
+          ...(product.ratings?.count > 0 ? {
+            aggregateRating: {
+              '@type': 'AggregateRating',
+              ratingValue: product.ratings.average.toFixed(1),
+              reviewCount: product.ratings.count,
+              bestRating: '5', worstRating: '1',
+            },
+          } : {}),
         };
+        if (!product.sku) delete schema.mpn;
 
         const breadcrumb = {
           '@context': 'https://schema.org', '@type': 'BreadcrumbList',
           itemListElement: [
             { '@type': 'ListItem', position: 1, name: 'Home', item: siteUrl },
             { '@type': 'ListItem', position: 2, name: 'Shop', item: `${siteUrl}/shop` },
-            ...(product.category ? [{ '@type': 'ListItem', position: 3, name: product.category.name, item: `${siteUrl}/shop?category=${product.category.slug}` }] : []),
+            ...(product.category ? [{
+              '@type': 'ListItem', position: 3,
+              name: product.category.name,
+              // SEO-friendly canonical category URL
+              item: `${siteUrl}/category/${product.category.slug}`,
+            }] : []),
             { '@type': 'ListItem', position: product.category ? 4 : 3, name: product.name, item: productUrl },
           ],
         };
 
         const out = injectMeta(html, {
           title: metaTitle, desc: metaDesc, canonical: productUrl,
-          ogImage, ogType: 'product', keywords, schemas: [schema, breadcrumb],
+          ogImage, ogType: 'product', keywords,
+          schemas: [schema, breadcrumb, orgSchema],
         });
-
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-        return res.send(out);
+        return res.status(200).send(out);
       }
     } catch (err) {
       console.error('[SSR product]', err.message);
     }
   }
 
-  // ── /shop (with optional ?category= or ?search=) ──────────────────────────
+  // ── /category/:slug ─────────────────────────────────────────────────────────
+  const categoryMatch = req.path.match(/^\/category\/([^/]+)$/);
+  if (categoryMatch) {
+    try {
+      const slug = categoryMatch[1];
+      const cat  = await Category.findOne({ slug, isActive: true }).lean();
+      if (cat) {
+        const catUrl  = `${siteUrl}/category/${slug}`;
+        const title   = `${cat.name} — Buy Online in Sri Lanka | ${storeName}`;
+        const plainCatDesc = cat.description ? String(cat.description).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() : '';
+        const desc    = plainCatDesc.slice(0, 155) || `Shop ${cat.name} online in Sri Lanka. Best prices and fast delivery at ${storeName}.`;
+        const keywords = `${cat.name}, buy ${cat.name} online sri lanka, ${cat.name} price sri lanka, ${storeName}`;
+        const featuredProduct = await Product.findOne({ category: cat._id, isActive: true, thumbnail: { $exists: true, $ne: '' } }).lean();
+        const ogImage = featuredProduct?.thumbnail || defaultOgImage;
+
+        const breadcrumb = {
+          '@context': 'https://schema.org', '@type': 'BreadcrumbList',
+          itemListElement: [
+            { '@type': 'ListItem', position: 1, name: 'Home', item: siteUrl },
+            { '@type': 'ListItem', position: 2, name: 'Shop', item: `${siteUrl}/shop` },
+            { '@type': 'ListItem', position: 3, name: cat.name, item: catUrl },
+          ],
+        };
+
+        const out = injectMeta(html, { title, desc, canonical: catUrl, ogImage, ogType: 'website', keywords, schemas: [breadcrumb, orgSchema] });
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+        return res.status(200).send(out);
+      }
+    } catch (err) {
+      console.error('[SSR category]', err.message);
+    }
+  }
+
+  // ── /brand/:slug ─────────────────────────────────────────────────────────────
+  const brandMatch = req.path.match(/^\/brand\/([^/]+)$/);
+  if (brandMatch) {
+    try {
+      const slug      = brandMatch[1];
+      const brandName = slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      const brandUrl  = `${siteUrl}/brand/${slug}`;
+      const title     = `${brandName} Products — Buy Online in Sri Lanka | ${storeName}`;
+      const desc      = `Shop genuine ${brandName} products online in Sri Lanka. Best prices, fast delivery, manufacturer warranty at ${storeName}.`;
+      const keywords  = `${brandName}, buy ${brandName} online sri lanka, ${brandName} price sri lanka, ${storeName}`;
+
+      const featuredProduct = await Product.findOne({
+        brand: new RegExp(`^${brandName}$`, 'i'),
+        isActive: true, thumbnail: { $exists: true, $ne: '' },
+      }).lean();
+      const ogImage = featuredProduct?.thumbnail || defaultOgImage;
+
+      const breadcrumb = {
+        '@context': 'https://schema.org', '@type': 'BreadcrumbList',
+        itemListElement: [
+          { '@type': 'ListItem', position: 1, name: 'Home', item: siteUrl },
+          { '@type': 'ListItem', position: 2, name: 'Shop', item: `${siteUrl}/shop` },
+          { '@type': 'ListItem', position: 3, name: `${brandName} Products`, item: brandUrl },
+        ],
+      };
+
+      const out = injectMeta(html, { title, desc, canonical: brandUrl, ogImage, ogType: 'website', keywords, schemas: [breadcrumb, orgSchema] });
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+      return res.status(200).send(out);
+    } catch (err) {
+      console.error('[SSR brand]', err.message);
+    }
+  }
+
+  // ── /shop ──────────────────────────────────────────────────────────────────
   if (req.path === '/shop' || req.path === '/shop/') {
     try {
       const out = await renderShopPage(req, html, siteUrl, storeName, defaultOgImage);
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-      return res.send(out);
+      return res.status(200).send(out);
     } catch (err) {
       console.error('[SSR shop]', err.message);
     }
   }
 
-  // ── / (homepage) ──────────────────────────────────────────────────────────
+  // ── / (homepage) ────────────────────────────────────────────────────────────
   if (req.path === '/' || req.path === '') {
     try {
       const meta = await getSeoMeta();
       if (meta) {
         const websiteSchema = {
-          '@context': 'https://schema.org',
-          '@type': 'WebSite',
-          name: storeName,
-          url: siteUrl,
+          '@context': 'https://schema.org', '@type': 'WebSite',
+          name: storeName, url: siteUrl,
           potentialAction: {
             '@type': 'SearchAction',
             target: { '@type': 'EntryPoint', urlTemplate: `${siteUrl}/shop?search={search_term_string}` },
             'query-input': 'required name=search_term_string',
           },
         };
-
-        const orgSchema = {
-          '@context': 'https://schema.org',
-          '@type': 'Organization',
-          name: storeName,
-          url: siteUrl,
-          logo: { '@type': 'ImageObject', url: meta.ogImage },
-        };
-
         const out = injectMeta(html, {
           title: meta.metaTitle, desc: meta.metaDesc, canonical: siteUrl,
           ogImage: meta.ogImage, ogType: 'website',
           verification: meta.verification,
           schemas: [websiteSchema, orgSchema],
         });
-
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-        return res.send(out);
+        return res.status(200).send(out);
       }
     } catch (err) {
       console.error('[SSR home]', err.message);
     }
   }
 
-  // ── /cart ─────────────────────────────────────────────────────────────────
+  // ── /cart ──────────────────────────────────────────────────────────────────
   if (req.path === '/cart') {
-    const meta = await getSeoMeta();
     const out = injectMeta(html, {
-      title: `Your Cart | ${storeName}`,
-      desc: `Review your cart and checkout. Fast delivery across Sri Lanka at ${storeName}.`,
+      title: `Your Cart | ${storeName}`, desc: `Review your cart and checkout. Fast delivery at ${storeName}.`,
       canonical: `${siteUrl}/cart`, ogImage: defaultOgImage, ogType: 'website',
+      schemas: [orgSchema],
     });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-    return res.send(out);
+    return res.status(200).send(out);
   }
 
   // ── /wishlist ──────────────────────────────────────────────────────────────
   if (req.path === '/wishlist') {
     const out = injectMeta(html, {
-      title: `Wishlist | ${storeName}`,
-      desc: `Your saved products at ${storeName}. Shop online in Sri Lanka.`,
+      title: `Wishlist | ${storeName}`, desc: `Your saved products at ${storeName}.`,
       canonical: `${siteUrl}/wishlist`, ogImage: defaultOgImage, ogType: 'website',
+      schemas: [orgSchema],
     });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-    return res.send(out);
+    return res.status(200).send(out);
   }
 
   // ── /gift-cards ────────────────────────────────────────────────────────────
@@ -785,54 +1045,62 @@ const seoRenderMiddleware = async (req, res) => {
       title: `Gift Cards | ${storeName} Sri Lanka`,
       desc: `Buy ${storeName} gift cards online. Perfect gift for anyone in Sri Lanka.`,
       canonical: `${siteUrl}/gift-cards`, ogImage: defaultOgImage, ogType: 'website',
+      schemas: [orgSchema],
     });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-    return res.send(out);
+    return res.status(200).send(out);
   }
 
-  // ── /page/:slug (business/static pages) ───────────────────────────────────
+  // ── /page/:slug ────────────────────────────────────────────────────────────
   const pageMatch = req.path.match(/^\/page\/([^/]+)$/);
   if (pageMatch) {
+    const pageName = pageMatch[1].replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     const out = injectMeta(html, {
-      title: `${pageMatch[1].replace(/-/g, ' ').replace(/\w/g, c => c.toUpperCase())} | ${storeName}`,
-      desc: `Learn more at ${storeName}. Shop online in Sri Lanka.`,
+      title: `${pageName} | ${storeName}`,
+      desc: `${pageName} — Learn more at ${storeName}.`,
       canonical: `${siteUrl}/page/${pageMatch[1]}`, ogImage: defaultOgImage, ogType: 'website',
+      schemas: [orgSchema],
     });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-    return res.send(out);
+    return res.status(200).send(out);
   }
 
   // ── /campaign/:slug ────────────────────────────────────────────────────────
   const campaignMatch = req.path.match(/^\/campaign\/([^/]+)$/);
   if (campaignMatch) {
+    const campName = campaignMatch[1].replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     const out = injectMeta(html, {
-      title: `${campaignMatch[1].replace(/-/g, ' ').replace(/\w/g, c => c.toUpperCase())} | ${storeName}`,
+      title: `${campName} | ${storeName}`,
       desc: `Special campaign at ${storeName}. Best deals in Sri Lanka.`,
       canonical: `${siteUrl}/campaign/${campaignMatch[1]}`, ogImage: defaultOgImage, ogType: 'website',
+      schemas: [orgSchema],
     });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-    return res.send(out);
+    return res.status(200).send(out);
   }
 
-  // ── Generic page fallback ──────────────────────────────────────────────────
+  // ── Generic fallback — always return HTTP 200 with index.html ──────────────
   const meta = await getSeoMeta();
-  const fallbackMeta = meta || { metaTitle: `${storeName} — Shop Online in Sri Lanka`, metaDesc: 'Shop the best products online in Sri Lanka.', ogImage: defaultOgImage };
+  const fallbackMeta = meta || {
+    metaTitle: `${storeName} — Shop Online in Sri Lanka`,
+    metaDesc:  'Shop the best products online in Sri Lanka.',
+    ogImage:    defaultOgImage,
+  };
 
   const out = injectMeta(html, {
-    title: fallbackMeta.metaTitle,
-    desc: fallbackMeta.metaDesc,
+    title:     fallbackMeta.metaTitle,
+    desc:      fallbackMeta.metaDesc,
     canonical: `${siteUrl}${req.path}`,
-    ogImage: fallbackMeta.ogImage,
-    ogType: 'website',
+    ogImage:   fallbackMeta.ogImage,
+    ogType:    'website',
     verification: meta ? meta.verification : undefined,
+    schemas: [orgSchema],
   });
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-  res.send(out);
+  // Always 200 — never 404 for valid public routes (React SPA handles routing)
+  res.status(200).send(out);
 };
 
 module.exports = router;
