@@ -56,7 +56,11 @@ function ScrollToTop() {
     if ('scrollRestoration' in window.history) {
       window.history.scrollRestoration = 'manual';
     }
+    // Cover all possible scroll containers (window, html, body)
+    // overflow-x:hidden on html/body can shift the scroll context on Safari/mobile
     window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
   }, [pathname]);
   return null;
 }
