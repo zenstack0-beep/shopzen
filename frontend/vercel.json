@@ -1,97 +1,81 @@
 {
-  "rewrites": [
+  "routes": [
     {
-      "source": "/sitemap.xml",
-      "destination": "https://shopzen-production.up.railway.app/api/seo/sitemap.xml"
+      "src": "/sitemap.xml",
+      "dest": "https://shopzen-production.up.railway.app/api/seo/sitemap.xml"
     },
     {
-      "source": "/api/seo/products-sitemap.xml",
-      "destination": "https://shopzen-production.up.railway.app/api/seo/products-sitemap.xml"
+      "src": "/api/seo/products-sitemap.xml",
+      "dest": "https://shopzen-production.up.railway.app/api/seo/products-sitemap.xml"
     },
     {
-      "source": "/api/seo/categories-sitemap.xml",
-      "destination": "https://shopzen-production.up.railway.app/api/seo/categories-sitemap.xml"
+      "src": "/api/seo/categories-sitemap.xml",
+      "dest": "https://shopzen-production.up.railway.app/api/seo/categories-sitemap.xml"
     },
     {
-      "source": "/api/seo/brands-sitemap.xml",
-      "destination": "https://shopzen-production.up.railway.app/api/seo/brands-sitemap.xml"
+      "src": "/api/seo/brands-sitemap.xml",
+      "dest": "https://shopzen-production.up.railway.app/api/seo/brands-sitemap.xml"
     },
     {
-      "source": "/api/seo/pages-sitemap.xml",
-      "destination": "https://shopzen-production.up.railway.app/api/seo/pages-sitemap.xml"
+      "src": "/api/seo/pages-sitemap.xml",
+      "dest": "https://shopzen-production.up.railway.app/api/seo/pages-sitemap.xml"
     },
     {
-      "source": "/robots.txt",
-      "destination": "https://shopzen-production.up.railway.app/api/seo/robots.txt"
+      "src": "/robots.txt",
+      "dest": "https://shopzen-production.up.railway.app/api/seo/robots.txt"
     },
     {
-      "source": "/api/:path*",
-      "destination": "https://shopzen-production.up.railway.app/api/:path*"
+      "src": "/api/(.*)",
+      "dest": "https://shopzen-production.up.railway.app/api/$1"
     },
     {
-      "source": "/(.*)",
-      "destination": "/index.html"
+      "src": "/favicon.ico",
+      "headers": {
+        "Cache-Control": "public, max-age=86400"
+      },
+      "dest": "https://res.cloudinary.com/dn7tvazaw/image/upload/w_32,h_32,c_fit,f_ico/v1779758903/shopzen/1779758893538-714817024.png"
+    },
+    {
+      "src": "/favicon-32x32.png",
+      "headers": {
+        "Cache-Control": "public, max-age=86400"
+      },
+      "dest": "https://res.cloudinary.com/dn7tvazaw/image/upload/w_32,h_32,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png"
+    },
+    {
+      "src": "/favicon-16x16.png",
+      "headers": {
+        "Cache-Control": "public, max-age=86400"
+      },
+      "dest": "https://res.cloudinary.com/dn7tvazaw/image/upload/w_16,h_16,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "headers": {
+        "Cache-Control": "public, max-age=86400"
+      },
+      "dest": "https://res.cloudinary.com/dn7tvazaw/image/upload/w_180,h_180,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png"
+    },
+    {
+      "src": "/static/(.*)",
+      "headers": {
+        "Cache-Control": "public, max-age=31536000, immutable"
+      },
+      "dest": "/static/$1"
+    },
+    {
+      "src": "/(.*\\.(json|html|txt|xml))",
+      "dest": "/$1"
+    },
+    {
+      "src": "/(.*)",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate"
+      },
+      "dest": "/index.html"
     }
   ],
   "headers": [
-    {
-      "source": "/(.*)\\.xml",
-      "headers": [
-        {
-          "key": "Cache-Control",
-          "value": "public, s-maxage=3600, stale-while-revalidate=86400"
-        }
-      ]
-    },
-    {
-      "source": "/robots.txt",
-      "headers": [
-        {
-          "key": "Cache-Control",
-          "value": "public, s-maxage=3600, stale-while-revalidate=86400"
-        }
-      ]
-    },
-    {
-      "source": "/static/(.*)",
-      "headers": [
-        {
-          "key": "Cache-Control",
-          "value": "public, max-age=31536000, immutable"
-        }
-      ]
-    },
-    {
-      "source": "/api/(.*)",
-      "headers": [
-        {
-          "key": "Cache-Control",
-          "value": "no-store"
-        }
-      ]
-    },
-    {
-      "source": "/index.html",
-      "headers": [
-        {
-          "key": "Cache-Control",
-          "value": "no-cache, no-store, must-revalidate"
-        },
-        {
-          "key": "Pragma",
-          "value": "no-cache"
-        }
-      ]
-    },
-    {
-      "source": "/(.*)\\.html",
-      "headers": [
-        {
-          "key": "Cache-Control",
-          "value": "no-cache, no-store, must-revalidate"
-        }
-      ]
-    },
     {
       "source": "/(.*)",
       "headers": [
@@ -106,6 +90,10 @@
         {
           "key": "Referrer-Policy",
           "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Strict-Transport-Security",
+          "value": "max-age=63072000"
         }
       ]
     }
