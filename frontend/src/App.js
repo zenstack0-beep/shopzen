@@ -21,8 +21,7 @@ const BrandPage      = lazy(() => import('./pages/customer/BrandPage'));
 const ProductDetail  = lazy(() => import('./pages/customer/ProductDetail'));
 const Cart           = lazy(() => import('./pages/customer/Cart'));
 const Checkout       = lazy(() => import('./pages/customer/Checkout'));
-const OrderSuccessModule = lazy(() => import('./pages/customer/OrderSuccess'));
-const LoginModule    = lazy(() => import('./pages/customer/Login'));
+
 const ForgotPassword = lazy(() => import('./pages/customer/ForgotPassword'));
 const Account        = lazy(() => import('./pages/customer/Account'));
 const MyOrders       = lazy(() => import('./pages/customer/MyOrders'));
@@ -40,8 +39,7 @@ const Dashboard          = lazy(() => import('./pages/admin/Dashboard'));
 const AdminProducts      = lazy(() => import('./pages/admin/Products'));
 const AdminOrders        = lazy(() => import('./pages/admin/Orders'));
 const AdminOrderDetail   = lazy(() => import('./pages/admin/OrderDetail'));
-const AdminCategoriesModule = lazy(() => import('./pages/admin/Categories'));
-const AdminBannersModule = lazy(() => import('./pages/admin/Banners'));
+
 const AdminSettings      = lazy(() => import('./pages/admin/Settings'));
 const AdminReturns       = lazy(() => import('./pages/admin/Returns'));
 const AdminGiftCards     = lazy(() => import('./pages/admin/GiftCards'));
