@@ -81,25 +81,27 @@ function getBackendUrl() {
 // ── GET /api/seo/sitemap.xml  — Sitemap index ─────────────────────────────────
 router.get('/sitemap.xml', async (req, res) => {
   try {
-    const backendUrl = getBackendUrl();
-    const today      = new Date().toISOString().split('T')[0];
+    // Sub-sitemap locs must use the frontend domain (shopzen.lk) so GSC can
+    // submit them. Vercel rewrites each /api/seo/*-sitemap.xml → Railway.
+    const siteUrl = await getSiteUrl();
+    const today   = new Date().toISOString().split('T')[0];
 
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <sitemap>
-    <loc>${backendUrl}/api/seo/products-sitemap.xml</loc>
+    <loc>${siteUrl}/api/seo/products-sitemap.xml</loc>
     <lastmod>${today}</lastmod>
   </sitemap>
   <sitemap>
-    <loc>${backendUrl}/api/seo/categories-sitemap.xml</loc>
+    <loc>${siteUrl}/api/seo/categories-sitemap.xml</loc>
     <lastmod>${today}</lastmod>
   </sitemap>
   <sitemap>
-    <loc>${backendUrl}/api/seo/brands-sitemap.xml</loc>
+    <loc>${siteUrl}/api/seo/brands-sitemap.xml</loc>
     <lastmod>${today}</lastmod>
   </sitemap>
   <sitemap>
-    <loc>${backendUrl}/api/seo/pages-sitemap.xml</loc>
+    <loc>${siteUrl}/api/seo/pages-sitemap.xml</loc>
     <lastmod>${today}</lastmod>
   </sitemap>
 </sitemapindex>`;
