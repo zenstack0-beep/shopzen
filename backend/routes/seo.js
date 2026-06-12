@@ -81,25 +81,25 @@ function getBackendUrl() {
 // ── GET /api/seo/sitemap.xml  — Sitemap index ─────────────────────────────────
 router.get('/sitemap.xml', async (req, res) => {
   try {
-    const siteUrl    = await getSiteUrl();
+    const backendUrl = getBackendUrl();
     const today      = new Date().toISOString().split('T')[0];
 
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <sitemap>
-    <loc>${siteUrl}/api/seo/products-sitemap.xml</loc>
+    <loc>${backendUrl}/api/seo/products-sitemap.xml</loc>
     <lastmod>${today}</lastmod>
   </sitemap>
   <sitemap>
-    <loc>${siteUrl}/api/seo/categories-sitemap.xml</loc>
+    <loc>${backendUrl}/api/seo/categories-sitemap.xml</loc>
     <lastmod>${today}</lastmod>
   </sitemap>
   <sitemap>
-    <loc>${siteUrl}/api/seo/brands-sitemap.xml</loc>
+    <loc>${backendUrl}/api/seo/brands-sitemap.xml</loc>
     <lastmod>${today}</lastmod>
   </sitemap>
   <sitemap>
-    <loc>${siteUrl}/api/seo/pages-sitemap.xml</loc>
+    <loc>${backendUrl}/api/seo/pages-sitemap.xml</loc>
     <lastmod>${today}</lastmod>
   </sitemap>
 </sitemapindex>`;
@@ -326,7 +326,7 @@ Allow: /*.webp$
 Crawl-delay: 1
 
 # Sitemap index
-Sitemap: ${siteUrl}/sitemap.xml
+Sitemap: ${backendUrl}/api/seo/sitemap.xml
 `;
     }
 
