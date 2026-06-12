@@ -50,6 +50,7 @@ const AnimationSettings  = lazy(() => import('./pages/admin/AnimationSettings'))
 const ThemeBuilder       = lazy(() => import('./pages/admin/ThemeBuilder'));
 const LayoutEditor       = lazy(() => import('./pages/admin/LayoutEditor'));
 const AdminLayout        = lazy(() => import('./pages/admin/AdminLayout'));
+const Monitoring         = lazy(() => import('./pages/admin/Monitoring'));
 const SocialMediaSettings = lazy(() => import('./pages/admin/SocialMedia'));
 const AutomationRules    = lazy(() => import('./pages/admin/AutomationRules'));
 const AdminDeals         = lazy(() => import('./pages/admin/Deals'));
@@ -251,6 +252,7 @@ export default function App() {
                       <Route path="social-media"     element={<SocialMediaSettings/>}/>
                       <Route path="automation"       element={<AutomationRules/>}/>
                       <Route path="deals"            element={<AdminDeals/>}/>
+                      <Route path="monitoring"       element={<Monitoring/>}/>
                     </Route>
                   </Routes>
                 </Suspense>

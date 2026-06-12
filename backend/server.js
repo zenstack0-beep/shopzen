@@ -44,6 +44,10 @@ app.use(cors({
 
 app.use((req, res, next) => { console.log(`→ ${req.method} ${req.url}`); next(); });
 app.use(express.json({ limit: '50mb' }));
+
+// ── Monitoring middleware — must come before routes ────────────────────────────
+const { monitoringMiddleware } = require('./middleware/monitoring');
+app.use(monitoringMiddleware);
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
@@ -78,6 +82,7 @@ app.use('/api/social-media',  require('./routes/socialMedia'));
 app.use('/api/automation',    require('./routes/automation'));
 app.use('/api/deals',         require('./routes/deals'));
 app.use('/api/ai',            require('./routes/ai'));
+app.use('/api/monitoring',    require('./routes/monitoring'));
 
 // ── Page SSR for crawlers ──────────────────────────────────────────────────────
 // Real users are served /index.html directly by Vercel (React SPA).

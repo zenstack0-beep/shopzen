@@ -205,6 +205,7 @@ export default function Dashboard() {
     { id: 'customers', label: '👥 Customers' },
     { id: 'conversion', label: '🎯 Conversion' },
     { id: 'operations', label: '🚦 Operations'  },
+    { id: 'monitoring', label: '📡 Monitoring', to: '/admin/monitoring' },
   ];
 
   return (
@@ -213,7 +214,7 @@ export default function Dashboard() {
       {/* Nav pills */}
       <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
         {navSections.map(s => (
-          <button key={s.id} onClick={() => setActiveSection(s.id)}
+          <button key={s.id} onClick={() => s.to ? navigate(s.to) : setActiveSection(s.id)}
             className={`flex-shrink-0 text-xs font-semibold px-4 py-2 rounded-full transition-all
               ${activeSection === s.id ? 'bg-primary text-white shadow' : 'bg-white text-gray-500 border border-gray-200 hover:border-gray-300'}`}>
             {s.label}

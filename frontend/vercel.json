@@ -29,30 +29,6 @@
       "destination": "https://shopzen-production.up.railway.app/api/:path*"
     },
     {
-      "source": "/static/(.*)",
-      "destination": "/static/$1"
-    },
-    {
-      "source": "/favicon.ico",
-      "destination": "/favicon.ico"
-    },
-    {
-      "source": "/favicon-32x32.png",
-      "destination": "/favicon-32x32.png"
-    },
-    {
-      "source": "/favicon-16x16.png",
-      "destination": "/favicon-16x16.png"
-    },
-    {
-      "source": "/apple-touch-icon.png",
-      "destination": "/apple-touch-icon.png"
-    },
-    {
-      "source": "/manifest.json",
-      "destination": "/manifest.json"
-    },
-    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
