@@ -222,10 +222,24 @@ router.get('/brands-sitemap.xml', async (req, res) => {
 
     // Get unique brands from active products
     const brands = await Product.distinct('brand', { isActive: true, brand: { $ne: '' } });
-    const brandSlugs = brands
-      .filter(Boolean)
-      .map(b => b.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''))
-      .filter(Boolean);
+
+    // Deduplicate slugs — prevents typo brands (e.g. "phlips", "pilips") from
+    // each generating their own sitemap entry and wasting crawl budget.
+    // We keep only slugs that have at least 1 active product with that exact brand slug.
+    const brandCountAgg = await Product.aggregate([
+      { $match: { isActive: true, brand: { $ne: '', $exists: true } } },
+      { $group: { _id: { $toLower: '$brand' }, count: { $sum: 1 } } },
+      { $match: { count: { $gte: 2 } } }  // only brands with 2+ products
+    ]);
+    const qualifiedBrands = new Set(brandCountAgg.map(r => r._id));
+
+    const brandSlugs = [...new Set(
+      brands
+        .filter(Boolean)
+        .filter(b => qualifiedBrands.has(b.toLowerCase()))  // skip 1-product typo brands
+        .map(b => b.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-+$/, '').replace(/^-+/, ''))
+        .filter(s => s.length >= 2)  // skip empty or single-char slugs
+    )];
 
     const brandEntries = brandSlugs.map(slug => urlEntry(
       `${siteUrl}/brand/${slug}`,
