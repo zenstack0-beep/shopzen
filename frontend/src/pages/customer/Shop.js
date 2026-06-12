@@ -35,6 +35,10 @@ export default function Shop() {
   const [total,      setTotal]      = useState(0);
   const [category,   setCategory]   = useState(catParam);
   const [search,     setSearch]     = useState(searchParam);
+  // Debounced copy of `search` — fetchProducts depends on THIS, not `search`,
+  // so rapid typing doesn't trigger an API call (and thus an Edge Request)
+  // on every keystroke. Waits 500ms after the user stops typing.
+  const [debouncedSearch, setDebouncedSearch] = useState(searchParam);
   const [sortBy,     setSortBy]     = useState('newest');
   const [priceMin,   setPriceMin]   = useState('');
   const [priceMax,   setPriceMax]   = useState('');
@@ -62,6 +66,15 @@ export default function Shop() {
     setPage(1);
   }, [searchParam]);
 
+  // Debounce: only update debouncedSearch 500ms after the user stops typing.
+  // This is what actually triggers fetchProducts (via the dependency below),
+  // drastically cutting /api/products calls — and therefore Edge Requests —
+  // while the user is typing in the search box.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 500);
+    return () => clearTimeout(t);
+  }, [search]);
+
   const fetchProducts = useCallback(() => {
     setLoading(true);
     const q = new URLSearchParams({ page, limit:12, sort:sortBy });
@@ -71,7 +84,7 @@ export default function Shop() {
       q.set('category', matched ? matched._id : category);
     }
     if (subCategory) q.set('subCategory', subCategory);
-    if (search)   q.set('search', search);
+    if (debouncedSearch) q.set('search', debouncedSearch);
     if (onSale)   q.set('onSale', 'true');
     if (featParam) q.set('featured','true');
     if (inStock)  q.set('inStock','true');
@@ -88,9 +101,9 @@ export default function Shop() {
         }
       }, 50);
     }).catch(()=>{}).finally(()=>setLoading(false));
-  }, [page, category, subCategory, categories, search, sortBy, onSale, inStock, priceMin, priceMax, featParam]);
+  }, [page, category, subCategory, categories, debouncedSearch, sortBy, onSale, inStock, priceMin, priceMax, featParam]);
 
-  useEffect(() => { setPage(1); }, [category, subCategory, search, sortBy, onSale, inStock, priceMin, priceMax]);
+  useEffect(() => { setPage(1); }, [category, subCategory, debouncedSearch, sortBy, onSale, inStock, priceMin, priceMax]);
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
 
   // Scroll to top of page whenever the page number changes (pagination)
