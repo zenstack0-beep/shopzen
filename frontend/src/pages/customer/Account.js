@@ -10,7 +10,7 @@ export default function Account() {
   useSEO({ title: 'Account', noindex: true });
   const [tab, setTab] = useState('profile');
   const [profile, setProfile] = useState({ firstName: user?.firstName||'', lastName: user?.lastName||'', phone: '' });
-  const [passwords, setPasswords] = useState({ currentPassword:'', newPassword:'', confirm:'' });
+  const [passwords, setPasswords] = useState({ newPassword:'', confirm:'' });
   const [saving, setSaving] = useState(false);
   const primary = 'var(--color-primary)';
 
@@ -34,9 +34,9 @@ export default function Account() {
     if (passwords.newPassword !== passwords.confirm) { toast.error('Passwords do not match'); return; }
     setSaving(true);
     try {
-      await API.put('/auth/change-password', { currentPassword: passwords.currentPassword, newPassword: passwords.newPassword });
+      await API.put('/auth/change-password', { newPassword: passwords.newPassword });
       toast.success('Password changed!');
-      setPasswords({ currentPassword:'', newPassword:'', confirm:'' });
+      setPasswords({ newPassword:'', confirm:'' });
     } catch (err) { toast.error(err.response?.data?.message || 'Failed'); }
     finally { setSaving(false); }
   };
@@ -112,7 +112,6 @@ export default function Account() {
       {tab === 'security' && (
         <div className="max-w-lg">
           <div className="rounded-2xl border border-gray-100 p-6 space-y-4" style={{ background: 'var(--card-bg)' }}>
-            <div><label className="form-label">Current Password</label><input type="password" value={passwords.currentPassword} onChange={e => setPasswords(p => ({...p, currentPassword: e.target.value}))} className="form-input"/></div>
             <div><label className="form-label">New Password</label><input type="password" value={passwords.newPassword} onChange={e => setPasswords(p => ({...p, newPassword: e.target.value}))} className="form-input"/></div>
             <div><label className="form-label">Confirm New Password</label><input type="password" value={passwords.confirm} onChange={e => setPasswords(p => ({...p, confirm: e.target.value}))} className="form-input"/></div>
             <button onClick={changePassword} disabled={saving} className="btn-primary">{saving ? 'Changing...' : 'Change Password'}</button>

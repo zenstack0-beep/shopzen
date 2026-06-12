@@ -298,7 +298,7 @@ async function validateGiftCard(code) {
     isActive: true,
     expiresAt: { $gte: new Date() },
   });
-  if (!giftCard || giftCard.balance <= 0) return { error: 'Invalid or expired gift card' };
+  if (!giftCard || giftCard.balance <= 0.01) return { error: 'Invalid or expired gift card' };
   return { giftCard, balance: giftCard.balance };
 }
 
@@ -434,13 +434,19 @@ function computeTotals({ subtotal, deliveryFee, benefit }) {
  * Safe to call even when benefit.type === 'none'.
  * NOW supports 'both' — applies coupon AND gift card side effects.
  *
+ * FIX: Gift card deactivation (when balance hits zero) is now done atomically
+ * inside the same findOneAndUpdate call using an aggregation pipeline update,
+ * eliminating the previous two-step race condition where a separate .save()
+ * could fail and leave the card active with zero balance.
+ *
  * @param {BenefitResult} benefit
  * @param {string}        orderId
  * @param {string}        [userId]
  * @param {string}        [email]
+ * @param {number}        [giftCardDeductionAmount] – actual amount to deduct (from computeTotals)
  * @returns {Promise<{ ok: boolean, reason?: string }>}
  */
-async function applyBenefit(benefit, orderId, userId, email) {
+async function applyBenefit(benefit, orderId, userId, email, giftCardDeductionAmount) {
   // ── Coupon side-effect ────────────────────────────────────────────────────
   if ((benefit.type === 'coupon' || benefit.type === 'both') && benefit.coupon) {
     const couponId  = benefit.coupon._id;
@@ -498,27 +504,55 @@ async function applyBenefit(benefit, orderId, userId, email) {
   }
 
   // ── Gift card side-effect ─────────────────────────────────────────────────
+  // FIX: Deactivation is now part of the same atomic write via aggregation
+  // pipeline update. The previous approach did a separate updated.save() after
+  // the findOneAndUpdate which could silently fail, leaving a zero-balance card
+  // still marked isActive:true and reusable.
   if ((benefit.type === 'giftcard' || benefit.type === 'both') && benefit.giftCard) {
     const giftCardId = benefit.giftCard._id;
-    const amount     = benefit.giftCardDeduction || benefit.discount || 0;
+    const amount = giftCardDeductionAmount || 0;
 
     if (amount > 0) {
+      const now = new Date();
       const updated = await GiftCard.findOneAndUpdate(
         { _id: giftCardId, balance: { $gte: amount }, isActive: true },
-        {
-          $inc:  { balance: -amount },
-          $push: { usageHistory: { orderId, amount } },
-        },
+        [
+          {
+            $set: {
+              // Deduct balance and round to 2 decimals to avoid floating-point
+              // dust (e.g. 0.0000000001) keeping the card "active" forever.
+              balance: {
+                $round: [{ $subtract: ['$balance', amount] }, 2]
+              },
+              // Atomically deactivate if balance will hit (near) zero after deduction
+              isActive: {
+                $cond: [
+                  { $lte: [{ $round: [{ $subtract: ['$balance', amount] }, 2] }, 0.01] },
+                  false,
+                  '$isActive'
+                ]
+              },
+              // Append usage history entry in the same write
+              usageHistory: {
+                $concatArrays: [
+                  '$usageHistory',
+                  [{
+                    orderId: { $literal: orderId },
+                    amount:  { $literal: amount },
+                    balanceBefore: '$balance',
+                    balanceAfter:  { $round: [{ $subtract: ['$balance', amount] }, 2] },
+                    date: { $literal: now },
+                  }]
+                ]
+              }
+            }
+          }
+        ],
         { new: true }
       );
 
       if (!updated) {
         return { ok: false, reason: 'giftcard_conflict' };
-      }
-
-      if (updated.balance <= 0 && updated.isActive) {
-        updated.isActive = false;
-        await updated.save();
       }
     }
   }

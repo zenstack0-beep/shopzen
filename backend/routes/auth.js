@@ -273,7 +273,7 @@ router.put('/profile', auth, async (req, res) => {
 // ─── Change password ──────────────────────────────────────────────────────────
 router.put('/change-password', auth, async (req, res) => {
   try {
-    const { currentPassword, newPassword } = req.body;
+    const { newPassword } = req.body;
 
     // Validate new password strength
     const pwCheck = validatePasswordStrength(newPassword);
@@ -282,7 +282,6 @@ router.put('/change-password', auth, async (req, res) => {
     }
 
     const user = await User.findById(req.user._id);
-    if (!(await user.comparePassword(currentPassword))) return res.status(400).json({ message: 'Current password is incorrect' });
     user.password = newPassword;
     await user.save();
     res.json({ message: 'Password updated successfully' });

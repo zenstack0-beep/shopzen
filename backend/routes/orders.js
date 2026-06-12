@@ -345,6 +345,37 @@ router.put('/admin/:id/status', adminAuth, async (req, res) => {
   }
 });
 
+// ── Admin — Update payment status (COD and manual adjustments) ───────────────
+// FIX: The previous code in OrderDetail.js was calling /admin/:id/status
+// (the order-status endpoint) which never saved paymentStatus to the DB.
+// This dedicated endpoint correctly persists paymentStatus changes.
+router.put('/admin/:id/payment-status', adminAuth, async (req, res) => {
+  try {
+    const { paymentStatus } = req.body;
+    const validStatuses = ['pending', 'paid', 'failed', 'refunded'];
+    if (!validStatuses.includes(paymentStatus)) {
+      return res.status(400).json({ message: 'Invalid payment status' });
+    }
+
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ message: 'Order not found' });
+
+    const previousStatus = order.paymentStatus;
+    order.paymentStatus = paymentStatus;
+    order.updatedAt = Date.now();
+    order.statusHistory.push({
+      status: order.orderStatus,
+      note: `Payment status changed from ${previousStatus} to ${paymentStatus} by admin`,
+      updatedBy: req.user.email,
+    });
+    await order.save();
+
+    res.json(order);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // ── Admin — Mark order as read ────────────────────────────────────────────────
 router.put('/admin/:id/read', adminAuth, async (req, res) => {
   try {
@@ -563,7 +594,7 @@ router.post('/', async (req, res) => {
       shipping: shipToDifferentAddress ? shipping : billing,
       shipToDifferentAddress,
       paymentMethod,
-      paymentStatus: 'pending',
+      paymentStatus: paymentMethod === 'free' ? 'paid' : 'pending',
       orderStatus:   'pending',
       // Coupon — discount applied to subtotal
       couponCode:      hasCoupon   ? couponCode : undefined,
@@ -588,7 +619,7 @@ router.post('/', async (req, res) => {
     const order = await Order.create(orderData);
 
     // ── 6. Apply benefit side-effects (atomic, race-safe) ──────────────────────
-    const applied = await DiscountEngine.applyBenefit(benefit, order._id, userId, billingEmail);
+    const applied = await DiscountEngine.applyBenefit(benefit, order._id, userId, billingEmail, totals.giftCardDeduction);
 
     if (!applied.ok) {
       // The coupon/gift card was consumed by a concurrent request between our

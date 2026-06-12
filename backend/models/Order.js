@@ -26,7 +26,7 @@ const orderSchema = new mongoose.Schema({
     city: String, phone: String
   },
   shipToDifferentAddress: { type: Boolean, default: false },
-  paymentMethod: { type: String, enum: ['bank_transfer', 'cod'], required: true },
+  paymentMethod: { type: String, enum: ['bank_transfer', 'cod', 'free', 'payhere', 'stripe', 'paypal'], required: true },
   paymentStatus: { type: String, enum: ['pending', 'paid', 'failed', 'refunded'], default: 'pending' },
   orderStatus: {
     type: String,

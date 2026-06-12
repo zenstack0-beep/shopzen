@@ -388,12 +388,13 @@ export default function AdminOrderDetail() {
               <div className="flex justify-between"><span className="text-gray-500">Method</span><span className="font-medium capitalize">{order.paymentMethod?.replace('_',' ')}</span></div>
               <div className="flex justify-between items-center">
                 <span className="text-gray-500">Status</span>
+                {/* FIX: was calling /admin/:id/status (order status endpoint) which never
+                    saved paymentStatus. Now calls the dedicated /payment-status endpoint. */}
                 <select value={paymentStatus} onChange={async (e) => {
                   const newStatus = e.target.value;
                   setPaymentStatus(newStatus);
                   try {
-                    await API.put(`/orders/admin/${id}/status`, { status: order.orderStatus, note: `Payment status manually set to ${newStatus}` });
-                    // Patch local order state so paymentStatus badge refreshes
+                    await API.put(`/orders/admin/${id}/payment-status`, { paymentStatus: newStatus });
                     setOrder(prev => prev ? { ...prev, paymentStatus: newStatus } : prev);
                     toast.success('Payment status updated');
                   } catch { toast.error('Failed to update payment status'); }
