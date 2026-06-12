@@ -93,10 +93,12 @@ export default function ProductDetail() {
   const [brandProducts, setBrandProducts] = useState([]);
   const [siblingCategories, setSiblingCategories] = useState([]);
   const [recentlyViewed, setRecentlyViewed] = useState([]);
-  const [tab, setTab] = useState('description');
+  const [tab, setTab] = useState(() => (typeof window !== 'undefined' && window.location.hash === '#reviews') ? 'reviews' : 'description');
   const [wishlist, setWishlist] = useState([]);
   const [submittingReview, setSubmittingReview] = useState(false);
   const [reviewForm, setReviewForm] = useState({ rating: 5, title: '', comment: '' });
+  const [reviewableOrderId, setReviewableOrderId] = useState(null);
+  const [checkingReviewEligibility, setCheckingReviewEligibility] = useState(true);
   const [selVars, setSelVars] = useState({});
   const [varError, setVarError] = useState('');
   const [adding, setAdding] = useState(false);
@@ -160,10 +162,22 @@ export default function ProductDetail() {
 
   useEffect(() => {
     setLoading(true); setSelVars({}); setSimilarLoading(true);
+    if (window.location.hash === '#reviews') setTab('reviews'); else setTab('description');
     API.get(`/products/${slug}`).then(r => {
       setProduct(r.data);
       trackViewItem(r.data);
       API.get(`/reviews/product/${r.data._id}`).then(rr => setReviews(rr.data || [])).catch(() => {});
+
+      if (user) {
+        setCheckingReviewEligibility(true);
+        API.get('/reviews/reviewable').then(rr => {
+          const match = (rr.data || []).find(item => String(item.product?._id) === String(r.data._id));
+          setReviewableOrderId(match ? match.orderId : null);
+        }).catch(() => setReviewableOrderId(null))
+          .finally(() => setCheckingReviewEligibility(false));
+      } else {
+        setCheckingReviewEligibility(false);
+      }
 
       const cat = r.data.category;
       const catId = cat?._id;
@@ -358,11 +372,15 @@ export default function ProductDetail() {
   const submitReview = async (e) => {
     e.preventDefault();
     if (!user) { toast.error('Please log in'); return; }
+    if (!reviewableOrderId) { toast.error('You can only review products you have purchased and received.'); return; }
     setSubmittingReview(true);
     try {
-      await API.post('/reviews', { ...reviewForm, product: product._id });
+      await API.post('/reviews', { ...reviewForm, product: product._id, order: reviewableOrderId });
       toast.success('Review submitted! ⭐');
       setReviewForm({ rating: 5, title: '', comment: '' });
+      setReviewableOrderId(null);
+      API.get(`/reviews/product/${product._id}`).then(rr => setReviews(rr.data || [])).catch(() => {});
+      API.get(`/products/${slug}`).then(r => setProduct(r.data)).catch(() => {});
     } catch (err) { toast.error(err.response?.data?.message || 'Failed'); }
     finally { setSubmittingReview(false); }
   };
@@ -640,6 +658,13 @@ export default function ProductDetail() {
               <h3 className="font-black text-lg mb-5" style={{ fontFamily: 'var(--font-display)', color: 'var(--color-dark)' }}>Write a Review</h3>
               {!user ? (
                 <p className="text-gray-500 text-sm">Please <Link to="/login" className="font-bold hover:underline" style={{ color: 'var(--color-primary)' }}>sign in</Link> to write a review.</p>
+              ) : checkingReviewEligibility ? (
+                <p className="text-gray-400 text-sm">Checking your purchase history...</p>
+              ) : !reviewableOrderId ? (
+                <p className="text-gray-500 text-sm">
+                  Only customers who have purchased and received this product can leave a review.
+                  {' '}<Link to="/my-orders" className="font-bold hover:underline" style={{ color: 'var(--color-primary)' }}>View your orders</Link>.
+                </p>
               ) : (
                 <form onSubmit={submitReview} className="space-y-4">
                   <div><label className="form-label">Rating</label><Stars rating={0} interactive selected={reviewForm.rating} onSelect={s => setReviewForm(p => ({ ...p, rating: s }))}/></div>

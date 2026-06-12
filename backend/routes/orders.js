@@ -480,7 +480,7 @@ router.get('/my-orders', auth, async (req, res) => {
   try {
     const orders = await Order.find({ customer: req.user._id })
       .sort({ createdAt: -1 })
-      .populate('items.product', 'name thumbnail');
+      .populate('items.product', 'name thumbnail slug');
     res.json(orders);
   } catch (err) {
     res.status(500).json({ message: err.message });

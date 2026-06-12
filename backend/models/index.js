@@ -91,12 +91,15 @@ const Banner = mongoose.model('Banner', bannerSchema);
 const reviewSchema = new mongoose.Schema({
   product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  order: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', required: true },
   rating: { type: Number, required: true, min: 1, max: 5 },
   title: String, comment: String,
   isApproved: { type: Boolean, default: false },
-  isVerifiedPurchase: { type: Boolean, default: false },
+  isVerifiedPurchase: { type: Boolean, default: true },
   createdAt: { type: Date, default: Date.now }
 });
+// One review per product per order — prevents duplicate reviews from the same purchase
+reviewSchema.index({ product: 1, user: 1, order: 1 }, { unique: true });
 const Review = mongoose.model('Review', reviewSchema);
 
 // Notification

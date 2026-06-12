@@ -13,6 +13,11 @@ const statusColors = {
   cancelled: 'status-cancelled',
 };
 
+const statusIcons = {
+  pending: '🕐', confirmed: '✅', processing: '⚙️', shipped: '🚚',
+  out_for_delivery: '🛵', delivered: '📦', cancelled: '✕', refunded: '↩️',
+};
+
 // ── Countdown hook ────────────────────────────────────────────────────────────
 // Returns:
 //   null                              → settings not yet loaded
@@ -345,6 +350,8 @@ export default function MyOrders() {
   const [cancelWindowMinutes, setCancelWindowMinutes]   = useState(null);
   const [giftCards, setGiftCards]                       = useState([]);
   const [gcLoading, setGcLoading]                       = useState(true);
+  const [expandedOrders, setExpandedOrders]             = useState(new Set());
+  const [visibleCount, setVisibleCount]                 = useState(5);
 
   const sym      = settings?.currencySymbol || 'Rs.';
   const primary  = 'var(--color-primary)';
@@ -360,6 +367,11 @@ export default function MyOrders() {
   }, []);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
+
+  // Auto-expand the newly placed order so its details are immediately visible
+  useEffect(() => {
+    if (newOrderId) setExpandedOrders(prev => new Set(prev).add(newOrderId));
+  }, [newOrderId]);
 
   // Load cancel window setting — keep null until response arrives so the
   // countdown hook doesn't flash "window closed" before we know the real value.
@@ -560,85 +572,148 @@ export default function MyOrders() {
           <Link to="/shop" className="btn-primary inline-block">Start Shopping →</Link>
         </div>
       ) : (
-        <div className="space-y-4">
-          {orders.map(order => {
+        <div className="space-y-3">
+          {orders.slice(0, visibleCount).map(order => {
             const isNew        = order._id === newOrderId;
             const needsPayment = order.paymentMethod === 'bank_transfer' && order.paymentStatus !== 'paid';
+            const isExpanded   = expandedOrders.has(order._id);
+            const toggleExpand = () => {
+              setExpandedOrders(prev => {
+                const next = new Set(prev);
+                next.has(order._id) ? next.delete(order._id) : next.add(order._id);
+                return next;
+              });
+            };
+            const itemCount = order.items?.reduce((s, i) => s + (i.quantity || 1), 0) || 0;
 
             return (
               <div key={order._id}
-                className="rounded-2xl border p-5 transition-all"
+                className="rounded-2xl border transition-all overflow-hidden"
                 style={{
                   background:  'var(--card-bg)',
-                  borderColor: isNew ? primary : needsPayment ? '#fcd34d' : '#e5e7eb',
+                  borderColor: isNew ? primary : needsPayment ? '#fcd34d' : 'var(--card-border, #e5e7eb)',
                   borderWidth: (isNew || needsPayment) ? '2px' : '1px',
                   boxShadow: isNew ? `0 0 0 4px ${primary}15` : 'none',
                 }}>
 
-                {/* Top row */}
-                <div className="flex items-start justify-between gap-4 flex-wrap">
-                  <div>
-                    <p className="font-mono text-sm font-bold" style={{ color: primary }}>{order.orderNumber}</p>
+                {/* Compact summary row — always visible, click to expand */}
+                <button onClick={toggleExpand} className="w-full text-left p-4 flex items-center gap-3 sm:gap-4 hover:bg-black/[0.02] transition-colors">
+                  {/* Item thumbnails stack */}
+                  <div className="flex -space-x-3 flex-shrink-0">
+                    {order.items?.slice(0, 3).map((item, i) => (
+                      item.image
+                        ? <img key={i} src={item.image} alt="" className="w-11 h-11 rounded-xl object-cover border-2"
+                            style={{ borderColor: 'var(--card-bg)', zIndex: 3 - i }} />
+                        : <div key={i} className="w-11 h-11 rounded-xl border-2 bg-gray-100 flex items-center justify-center text-gray-300 text-lg"
+                            style={{ borderColor: 'var(--card-bg)', zIndex: 3 - i }}>📦</div>
+                    ))}
+                    {order.items?.length > 3 && (
+                      <div className="w-11 h-11 rounded-xl border-2 flex items-center justify-center text-xs font-bold text-gray-500 bg-gray-100"
+                        style={{ borderColor: 'var(--card-bg)' }}>
+                        +{order.items.length - 3}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Order info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-mono text-sm font-bold truncate" style={{ color: primary }}>{order.orderNumber}</p>
+                      {isNew && (
+                        <span className="text-[10px] font-bold text-white px-1.5 py-0.5 rounded-full" style={{ background: primary }}>NEW</span>
+                      )}
+                    </div>
                     <p className="text-xs text-gray-400 mt-0.5">
-                      {new Date(order.createdAt).toLocaleDateString('en-LK', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      {new Date(order.createdAt).toLocaleDateString('en-LK', { year: 'numeric', month: 'short', day: 'numeric' })}
+                      {' · '}{itemCount} item{itemCount !== 1 ? 's' : ''}
                     </p>
+                  </div>
+
+                  {/* Status + total */}
+                  <div className="text-right flex-shrink-0">
+                    <p className="font-bold text-gray-900 text-sm sm:text-base">{sym} {order.total?.toLocaleString()}</p>
+                    <span className={`badge ${statusColors[order.orderStatus] || ''} capitalize text-[11px] mt-1 inline-block`}>
+                      {statusIcons[order.orderStatus] || ''} {order.orderStatus?.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+
+                  {/* Expand chevron */}
+                  <svg className={`w-5 h-5 text-gray-400 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/>
+                  </svg>
+                </button>
+
+                {/* Expanded details */}
+                {isExpanded && (
+                  <div className="px-4 pb-4 border-t" style={{ borderColor: 'var(--card-border, #e5e7eb)' }}>
                     {needsPayment && (
-                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full mt-1.5">
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full mt-3">
                         ⏳ Awaiting Payment
                       </span>
                     )}
-                  </div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {isNew && (
-                      <span className="text-xs font-bold text-white px-2 py-0.5 rounded-full" style={{ background: primary }}>✓ New</span>
-                    )}
-                    <span className={`badge ${statusColors[order.orderStatus] || ''} capitalize text-xs`}>
-                      {order.orderStatus?.replace(/_/g, ' ')}
-                    </span>
-                  </div>
-                </div>
 
-                {/* Items preview */}
-                <div className="flex gap-2 mt-3 flex-wrap">
-                  {order.items?.slice(0, 3).map((item, i) => (
-                    <div key={i} className="flex items-center gap-2 text-xs text-gray-600 bg-gray-50 rounded-lg px-2 py-1.5 border border-gray-100">
-                      {item.image && <img src={item.image} alt="" className="w-6 h-6 rounded object-cover" />}
-                      <span>{item.name}</span>
-                      <span className="text-gray-400">×{item.quantity}</span>
+                    {/* Full items list */}
+                    <div className="flex flex-col gap-1.5 mt-3">
+                      {order.items?.map((item, i) => (
+                        <div key={i} className="flex items-center gap-2 text-sm text-gray-600">
+                          {item.image && <img src={item.image} alt="" className="w-7 h-7 rounded-lg object-cover flex-shrink-0" />}
+                          <span className="truncate flex-1">{item.name}</span>
+                          <span className="text-gray-400 text-xs">×{item.quantity}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                  {order.items?.length > 3 && (
-                    <span className="text-xs text-gray-400 self-center px-2">+{order.items.length - 3} more</span>
-                  )}
-                </div>
 
-                {/* Footer row */}
-                <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-100 flex-wrap gap-3">
-                  <div>
-                    <p className="font-bold text-gray-900 text-base">{sym} {order.total?.toLocaleString()}</p>
-                    <p className="text-xs text-gray-400 capitalize mt-0.5">
-                      {order.paymentMethod?.replace(/_/g, ' ')} ·{' '}
-                      <span className={order.paymentStatus === 'paid' ? 'text-green-600 font-medium' : 'text-amber-600 font-medium'}>
-                        {order.paymentStatus === 'paid' ? '✅ Paid' : '⏳ Payment Pending'}
-                      </span>
-                    </p>
+                    {/* Review prompt — encourage feedback once delivered */}
+                    {order.orderStatus === 'delivered' && order.items?.some(item => item.product?.slug) && (
+                      <div className="mt-3 p-3 rounded-xl border flex flex-wrap items-center gap-2" style={{ background: `${primary}0d`, borderColor: `${primary}30` }}>
+                        <span className="text-sm font-semibold" style={{ color: 'var(--color-dark)' }}>⭐ How was it?</span>
+                        <div className="flex gap-2 flex-wrap">
+                          {order.items?.filter(item => item.product?.slug).map((item, i) => (
+                            <Link key={i} to={`/product/${item.product.slug}#reviews`}
+                              className="inline-flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors hover:opacity-90"
+                              style={{ color: primary, borderColor: `${primary}40`, background: 'var(--card-bg)' }}>
+                              Review {item.name?.length > 18 ? item.name.slice(0, 18) + '…' : item.name} →
+                            </Link>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Footer row */}
+                    <div className="flex items-center justify-between mt-3 pt-3 border-t flex-wrap gap-3" style={{ borderColor: 'var(--card-border, #e5e7eb)' }}>
+                      <p className="text-xs text-gray-400 capitalize">
+                        {order.paymentMethod?.replace(/_/g, ' ')} ·{' '}
+                        <span className={order.paymentStatus === 'paid' ? 'text-green-600 font-medium' : 'text-amber-600 font-medium'}>
+                          {order.paymentStatus === 'paid' ? '✅ Paid' : '⏳ Payment Pending'}
+                        </span>
+                      </p>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <CancelButton
+                          order={order}
+                          windowMinutes={cancelWindowMinutes}
+                          onCancelled={fetchOrders}
+                        />
+                        <Link to={`/track-order/${order._id}`}
+                          className="inline-flex items-center gap-1 text-sm font-semibold px-3 py-1.5 rounded-lg border transition-colors hover:opacity-90"
+                          style={{ color: primary, borderColor: `${primary}40`, background: `${primary}0d` }}>
+                          {needsPayment ? '📤 Upload Slip' : '📍 Track Order'} →
+                        </Link>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <CancelButton
-                      order={order}
-                      windowMinutes={cancelWindowMinutes}
-                      onCancelled={fetchOrders}
-                    />
-                    <Link to={`/track-order/${order._id}`}
-                      className="inline-flex items-center gap-1 text-sm font-semibold px-3 py-1.5 rounded-lg border transition-colors hover:opacity-90"
-                      style={{ color: primary, borderColor: `${primary}40`, background: `${primary}0d` }}>
-                      {needsPayment ? '📤 Upload Slip' : '📍 Track Order'} →
-                    </Link>
-                  </div>
-                </div>
+                )}
               </div>
             );
           })}
+
+          {/* Load more */}
+          {visibleCount < orders.length && (
+            <button onClick={() => setVisibleCount(c => c + 5)}
+              className="w-full py-3 rounded-xl border text-sm font-semibold transition-colors hover:opacity-90"
+              style={{ color: primary, borderColor: `${primary}40`, background: `${primary}0d` }}>
+              Show more orders ({orders.length - visibleCount} remaining)
+            </button>
+          )}
         </div>
       )}
       {/* ── Gift Card Purchases — always shown ────────────────────────── */}
