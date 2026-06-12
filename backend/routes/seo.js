@@ -287,14 +287,15 @@ router.get('/robots.txt', async (req, res) => {
 
     let txt;
     if (noindex) {
-      txt = `User-agent: *\nDisallow: /\n\nSitemap: ${siteUrl}/sitemap.xml\n`;
+      txt = `User-agent: *\nDisallow: /\n\nSitemap: ${getBackendUrl()}/api/seo/sitemap.xml\n`;
     } else {
+      const backendUrl = getBackendUrl();
       txt = `# ShopZen robots.txt — auto-generated
 User-agent: *
 Allow: /
+
+# Block private/functional paths
 Disallow: /admin/
-Disallow: /api/
-Allow: /api/seo/
 Disallow: /checkout/
 Disallow: /account/
 Disallow: /cart/
@@ -313,7 +314,7 @@ Allow: /*.webp$
 Crawl-delay: 1
 
 # Sitemap index
-Sitemap: ${siteUrl}/sitemap.xml
+Sitemap: ${backendUrl}/api/seo/sitemap.xml
 `;
     }
 
