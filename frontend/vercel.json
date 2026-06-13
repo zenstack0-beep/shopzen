@@ -87,20 +87,6 @@
       "dest": "https://shopzen-production.up.railway.app/$1/$2"
     },
     {
-      "src": "/(shop|cart|wishlist|gift-cards)",
-      "headers": {
-        "Cache-Control": "no-cache, no-store, must-revalidate"
-      },
-      "dest": "https://shopzen-production.up.railway.app/$1"
-    },
-    {
-      "src": "/",
-      "headers": {
-        "Cache-Control": "no-cache, no-store, must-revalidate"
-      },
-      "dest": "https://shopzen-production.up.railway.app/"
-    },
-    {
       "src": "/(.*)",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate"
