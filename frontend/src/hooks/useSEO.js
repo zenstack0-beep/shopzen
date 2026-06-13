@@ -135,6 +135,7 @@ export default function useSEO({
   reviews,
   breadcrumbs,
   noindex = false,
+  noindexFollow = false,
   keywords,
 } = {}) {
   const location = useLocation();
@@ -214,7 +215,17 @@ export default function useSEO({
     document.title = finalTitle;
 
     setMeta('description', finalDesc);
-    setMeta('robots', noindex ? 'noindex,nofollow' : 'index,follow,max-image-preview:large');
+    // Private pages (cart/checkout/account) → noindex,nofollow.
+    // Faceted/search-result combinations → noindex,follow (keep crawling
+    // through to canonical category/product pages without indexing every
+    // filter/sort/search permutation as its own page).
+    // Everything else → index,follow.
+    const robotsValue = noindex
+      ? 'noindex,nofollow'
+      : noindexFollow
+        ? 'noindex,follow'
+        : 'index,follow,max-image-preview:large';
+    setMeta('robots', robotsValue);
 
     // Keywords meta — rich buying-intent signals for Google/Bing
     let kwString = keywords;
@@ -430,5 +441,5 @@ export default function useSEO({
       window.dataLayer.push({ event: 'pageview', page: { url: finalUrl, title: finalTitle } });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [finalTitle, finalDesc, finalImage, finalUrl, type, noindex, keywords, location.pathname, reviews]);
+  }, [finalTitle, finalDesc, finalImage, finalUrl, type, noindex, noindexFollow, keywords, location.pathname, reviews]);
 }

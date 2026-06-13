@@ -4,7 +4,7 @@ import { gsap } from 'gsap';
 import API from '../../utils/api';
 import { useCart } from '../../context/CartContext';
 import { useTheme } from '../../context/ThemeContext';
-import useSEO from '../../hooks/useSEO';
+import useSEO, { getSeoConfig } from '../../hooks/useSEO';
 
 const Stars = ({ rating=0 }) => (
   <div className="flex gap-0.5">
@@ -133,9 +133,22 @@ export default function Shop() {
   const currentCat = categories.find(c=>c._id===category||c.slug===category);
 
   // ── SEO for shop/category pages ──────────────────────────────────────────
+  // /shop?category=X is the same content as /category/X — canonicalize to
+  // the latter so the two URL forms aren't treated as duplicates.
+  // Any other filter/sort/search combination is noindex,follow: Google keeps
+  // crawling through to the real product/category pages, but doesn't index
+  // every permutation of ?sort=&minPrice=&onSale=&search= as its own page.
+  const siteUrl = (getSeoConfig().siteUrl || window.location.origin).replace(/\/$/, '');
+  const isFiltered = !!(searchParam || onSale || featParam || inStock || priceMin || priceMax || subCategory || sortBy !== 'newest');
+
+  const canonicalPath = currentCat ? `/category/${currentCat.slug}` : '/shop';
+  const canonicalUrl  = `${siteUrl}${canonicalPath}${page > 1 ? `?page=${page}` : ''}`;
+
   useSEO({
     title: currentCat ? currentCat.name : searchParam ? `Search: ${searchParam}` : 'Shop',
     description: currentCat?.description || `Browse our ${currentCat?.name || 'full'} collection — quality products, fast delivery.`,
+    url: canonicalUrl,
+    noindexFollow: isFiltered,
     breadcrumbs: currentCat ? [
       { name: 'Shop', url: '/shop' },
       { name: currentCat.name, url: `/category/${currentCat.slug}` },
