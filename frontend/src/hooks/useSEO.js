@@ -184,13 +184,31 @@ export default function useSEO({
     finalDesc = defaultDesc;
   }
 
-  // Apply Cloudinary social-card transforms for consistent 1200×630 OG images
+  // Apply Cloudinary social-card transforms for consistent 1200×630 OG images.
+  // c_fill (not c_fit) crops to fully cover the 1200×630 box — no letterboxing
+  // on Facebook/LinkedIn/WhatsApp previews. f_jpg + q_auto keeps the social
+  // card lightweight vs. f_png.
   function buildOgImage(rawUrl) {
     if (!rawUrl || !rawUrl.includes('res.cloudinary.com')) return rawUrl;
-    return rawUrl.replace(/\/upload\/(v\d+\/)?/, '/upload/w_1200,h_630,c_fill,f_jpg,q_auto/$1');
+    return rawUrl.replace(/\/upload\/(v\d+\/)?/, '/upload/w_1200,h_630,c_fill,g_auto,f_jpg,q_auto/$1');
   }
   const finalImage  = buildOgImage(image || defaultImage);
-  const finalUrl    = url         || siteUrl + location.pathname;
+
+  // Build canonical from explicit `url`, or from the current path with
+  // tracking params (utm_*, fbclid, gclid, etc.) stripped. Meaningful params
+  // like pagination/search/sort are preserved if the caller passes a full
+  // `url` themselves.
+  function buildCanonical(explicitUrl) {
+    if (explicitUrl) return explicitUrl;
+    const path = location.pathname;
+    const params = new URLSearchParams(location.search);
+    [...params.keys()].forEach((key) => {
+      if (/^(utm_|fbclid|gclid|msclkid|ref|igshid)/i.test(key)) params.delete(key);
+    });
+    const query = params.toString();
+    return `${siteUrl}${path}${query ? `?${query}` : ''}`;
+  }
+  const finalUrl = buildCanonical(url);
 
   useEffect(() => {
     document.title = finalTitle;
@@ -230,6 +248,9 @@ export default function useSEO({
     setMeta('og:title',       finalTitle, 'property');
     setMeta('og:description', finalDesc,  'property');
     setMeta('og:image',       finalImage, 'property');
+    setMeta('og:image:width',  '1200',    'property');
+    setMeta('og:image:height', '630',     'property');
+    setMeta('og:image:alt',   finalTitle, 'property');
     setMeta('og:url',         finalUrl,   'property');
     setMeta('og:site_name',   siteName,   'property');
     setMeta('og:locale', 'en_LK', 'property');
@@ -239,6 +260,7 @@ export default function useSEO({
     setMeta('twitter:title',       finalTitle);
     setMeta('twitter:description', finalDesc);
     setMeta('twitter:image',       finalImage);
+    setMeta('twitter:image:alt',   finalTitle);
     if (twitterHandle) setMeta('twitter:site', twitterHandle);
 
     // JSON-LD: WebSite
@@ -256,6 +278,11 @@ export default function useSEO({
 
     // JSON-LD: Organization
     if (cfg.orgName || cfg.siteName) {
+      const sameAs = [
+        cfg.facebookUrl, cfg.instagramUrl, cfg.twitterUrl,
+        cfg.linkedinUrl, cfg.youtubeUrl, cfg.tiktokUrl, cfg.whatsappUrl,
+      ].filter(Boolean);
+
       setJsonLd('ld-org', {
         '@context': 'https://schema.org',
         '@type': 'Organization',
@@ -267,7 +294,10 @@ export default function useSEO({
           telephone: cfg.phone,
           contactType: 'customer service',
         }] : undefined,
-        sameAs: [cfg.facebookUrl, cfg.instagramUrl, cfg.twitterUrl, cfg.linkedinUrl, cfg.youtubeUrl].filter(Boolean),
+        // Only include sameAs if at least one social profile is configured —
+        // an empty array signals "no social presence" to crawlers, which is
+        // worse than omitting the field entirely.
+        sameAs: sameAs.length ? sameAs : undefined,
       });
     }
 
