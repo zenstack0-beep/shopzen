@@ -516,8 +516,9 @@ function buildBrandFAQ(brandName, siteUrl, slug) {
 
 // ── ItemList Schema Builder ──────────────────────────────────────────────────
 // CollectionPage + ItemList enables Google to show product carousels in search.
-function buildItemListSchema(products, pageUrl, name) {
+function buildItemListSchema(products, pageUrl, name, siteUrl) {
   if (!products || !products.length) return null;
+  const base = siteUrl || pageUrl.split('/category/')[0].split('/brand/')[0].split('/shop')[0];
   return {
     '@context': 'https://schema.org',
     '@type': 'CollectionPage',
@@ -533,9 +534,9 @@ function buildItemListSchema(products, pageUrl, name) {
         item: {
           '@type': 'Product',
           name: p.name,
-          url: pageUrl.split('/category/')[0].split('/brand/')[0] + `/product/${p.slug}`,
+          url: `${base}/product/${p.slug}`,
           image: p.thumbnail || p.images?.[0] || undefined,
-          ...(p.brand ? { brand: { '@type': 'Brand', name: p.brand } } : {}),
+          ...(p.brand ? { brand: { '@type': 'Brand', name: String(p.brand).trim() } } : {}),
           offers: {
             '@type': 'Offer',
             priceCurrency: 'LKR',
@@ -968,11 +969,13 @@ function buildHomeSeoContent({ storeName, siteUrl, categories = [], bestSellers 
     const price = p.salePrice || p.price;
     const img   = p.thumbnail || (p.images && p.images[0]) || '';
     const loadingAttr = idx === 0 ? 'eager' : 'lazy';
+    const name  = String(p.name || '').trim();
+    const brand = String(p.brand || '').trim();
     return `<li>
       <a href="${he(siteUrl)}/product/${he(p.slug)}">
-        ${img ? `<img src="${he(img)}" alt="${he(p.name)}" width="200" height="200" loading="${loadingAttr}"/>` : ''}
-        <h3>${he(p.name)}</h3>
-        <p>${he(p.brand || '')} ${price ? `— Rs.${Number(price).toLocaleString()}` : ''}</p>
+        ${img ? `<img src="${he(img)}" alt="${he(name)}" width="200" height="200" loading="${loadingAttr}"/>` : ''}
+        <h3>${he(name)}</h3>
+        <p>${brand ? `${he(brand)} — ` : ''}${price ? `Rs.${Number(price).toLocaleString()}` : ''}</p>
       </a>
     </li>`;
   }).join('');
@@ -1366,19 +1369,9 @@ const seoRenderMiddleware = async (req, res) => {
     try {
       const meta = await getSeoMeta();
       if (meta) {
+        // WebSite schema with SiteLinksSearchBox — appears in Google's
+        // sitelinks search box in SERPs
         const websiteSchema = {
-          '@context': 'https://schema.org', '@type': 'WebSite',
-          name: storeName, url: siteUrl,
-          potentialAction: [
-            {
-              '@type': 'SearchAction',
-              target: { '@type': 'EntryPoint', urlTemplate: `${siteUrl}/shop?search={search_term_string}` },
-              'query-input': 'required name=search_term_string',
-            },
-          ],
-        };
-        // SiteLinksSearchBox — appears in Google's sitelinks search box in SERPs
-        const siteLinksSchema = {
           '@context': 'https://schema.org',
           '@type': 'WebSite',
           name: storeName,
@@ -1417,7 +1410,7 @@ const seoRenderMiddleware = async (req, res) => {
         ]);
 
         const bestSellersItemListSchema = buildItemListSchema(
-          bestSellers, `${siteUrl}/shop`, `Best Selling Products — ${storeName} Sri Lanka`
+          bestSellers, `${siteUrl}/shop`, `Best Selling Products — ${storeName} Sri Lanka`, siteUrl
         );
 
         const webPageSchema = {
@@ -1444,7 +1437,7 @@ const seoRenderMiddleware = async (req, res) => {
           title: meta.metaTitle, desc: meta.metaDesc, canonical: siteUrl,
           ogImage: meta.ogImage, ogImageWidth: '1200', ogImageHeight: '630', ogType: 'website',
           verification: meta.verification,
-          schemas: [websiteSchema, siteLinksSchema, storeSchema, webPageSchema, orgSchema, bestSellersItemListSchema].filter(Boolean),
+          schemas: [websiteSchema, storeSchema, webPageSchema, orgSchema, bestSellersItemListSchema].filter(Boolean),
         });
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.setHeader('Cache-Control', 'no-cache, must-revalidate');
