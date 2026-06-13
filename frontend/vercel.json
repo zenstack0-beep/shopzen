@@ -87,6 +87,13 @@
       "dest": "https://shopzen-production.up.railway.app/$1/$2"
     },
     {
+      "src": "/",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate"
+      },
+      "dest": "https://shopzen-production.up.railway.app/"
+    },
+    {
       "src": "/(.*)",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate"

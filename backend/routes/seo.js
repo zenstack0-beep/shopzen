@@ -1031,10 +1031,15 @@ async function tryFetchFreshTemplate() {
   const now = Date.now();
   if (_fetchedTemplate && (now - _fetchedAt) < HTML_CACHE_TTL) return _fetchedTemplate;
   const frontendUrl = (process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
+  // Fetch /index.html (a static asset served directly by Vercel) instead of
+  // "/" — fetching "/" would loop back into this same SSR middleware if "/"
+  // is proxied to this backend, causing a 5s timeout and falling back to the
+  // stale embedded BUILT_HTML_TEMPLATE (with outdated /static/ hashes).
+  const templateUrl = `${frontendUrl}/index.html`;
   try {
     const https = require('https');
     const html = await new Promise((resolve, reject) => {
-      const req = https.get(frontendUrl, { timeout: 5000 }, (res) => {
+      const req = https.get(templateUrl, { timeout: 5000 }, (res) => {
         if (res.statusCode !== 200) return reject(new Error('HTTP ' + res.statusCode));
         let data = '';
         res.on('data', chunk => { data += chunk; });
