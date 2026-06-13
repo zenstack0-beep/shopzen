@@ -28,26 +28,60 @@ function proxyImage(imageUrl, res, fallbackContentType = 'image/png') {
 // so Google always gets the current logo as a proper ICO/PNG
 router.get('/favicon.ico', async (req, res) => {
   try {
-    const row = await Settings.findOne({ key: 'faviconUrl' }) || await Settings.findOne({ key: 'logoUrl' });
-    if (!row?.value) return res.status(404).send('No favicon configured');
-    // Ask Cloudinary for a 32x32 ICO
-    const url = row.value.replace('/upload/', '/upload/w_32,h_32,c_fit,f_ico/');
+    const logoUrl = await getLogoUrl();
+    if (!logoUrl) return res.status(404).send('No favicon configured');
+    // Ask Cloudinary for a 48x48 ICO (covers 16, 32, 48 sizes)
+    const url = logoUrl.replace('/upload/', '/upload/w_48,h_48,c_fit,f_ico/');
     proxyImage(url, res, 'image/x-icon');
   } catch (err) {
     res.status(500).send(err.message);
   }
 });
 
+// Helper to get logo URL from DB
+async function getLogoUrl() {
+  const row = await Settings.findOne({ key: 'faviconUrl' }) || await Settings.findOne({ key: 'logoUrl' });
+  return row?.value || null;
+}
+
+// /favicon.png → 192x192 (Google search result icon)
 router.get('/favicon.png', async (req, res) => {
   try {
-    const row = await Settings.findOne({ key: 'faviconUrl' }) || await Settings.findOne({ key: 'logoUrl' });
-    if (!row?.value) return res.status(404).send('No favicon configured');
-    // 192x192 PNG — the size Google requires for search results
-    const url = row.value.replace('/upload/', '/upload/w_192,h_192,c_fit,f_png/');
+    const logoUrl = await getLogoUrl();
+    if (!logoUrl) return res.status(404).send('No favicon configured');
+    const url = logoUrl.replace('/upload/', '/upload/w_192,h_192,c_fit,f_png/');
     proxyImage(url, res, 'image/png');
-  } catch (err) {
-    res.status(500).send(err.message);
-  }
+  } catch (err) { res.status(500).send(err.message); }
+});
+
+// /favicon-96x96.png → exactly 96x96
+router.get('/favicon-96x96.png', async (req, res) => {
+  try {
+    const logoUrl = await getLogoUrl();
+    if (!logoUrl) return res.status(404).send('No favicon configured');
+    const url = logoUrl.replace('/upload/', '/upload/w_96,h_96,c_fit,f_png/');
+    proxyImage(url, res, 'image/png');
+  } catch (err) { res.status(500).send(err.message); }
+});
+
+// /favicon-32x32.png → exactly 32x32
+router.get('/favicon-32x32.png', async (req, res) => {
+  try {
+    const logoUrl = await getLogoUrl();
+    if (!logoUrl) return res.status(404).send('No favicon configured');
+    const url = logoUrl.replace('/upload/', '/upload/w_32,h_32,c_fit,f_png/');
+    proxyImage(url, res, 'image/png');
+  } catch (err) { res.status(500).send(err.message); }
+});
+
+// /apple-touch-icon.png → 180x180
+router.get('/apple-touch-icon.png', async (req, res) => {
+  try {
+    const logoUrl = await getLogoUrl();
+    if (!logoUrl) return res.status(404).send('No favicon configured');
+    const url = logoUrl.replace('/upload/', '/upload/w_180,h_180,c_fit,f_png/');
+    proxyImage(url, res, 'image/png');
+  } catch (err) { res.status(500).send(err.message); }
 });
 
 // Get all settings as a flat key→value object (public — needed for store name etc.)

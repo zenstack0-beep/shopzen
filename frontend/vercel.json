@@ -46,7 +46,7 @@
         "Cache-Control": "public, max-age=3600",
         "Content-Type": "image/png"
       },
-      "dest": "https://shopzen-production.up.railway.app/api/settings/favicon.png"
+      "dest": "https://shopzen-production.up.railway.app/api/settings/favicon-32x32.png"
     },
     {
       "src": "/favicon-96x96.png",
@@ -54,7 +54,7 @@
         "Cache-Control": "public, max-age=3600",
         "Content-Type": "image/png"
       },
-      "dest": "https://shopzen-production.up.railway.app/api/settings/favicon.png"
+      "dest": "https://shopzen-production.up.railway.app/api/settings/favicon-96x96.png"
     },
     {
       "src": "/apple-touch-icon.png",
@@ -62,7 +62,7 @@
         "Cache-Control": "public, max-age=3600",
         "Content-Type": "image/png"
       },
-      "dest": "https://shopzen-production.up.railway.app/api/settings/favicon.png"
+      "dest": "https://shopzen-production.up.railway.app/api/settings/apple-touch-icon.png"
     },
     {
       "src": "/api/(.*)",
