@@ -1,16 +1,601 @@
 /**
- * routes/products.js  — with automation hooks
+ * routes/products.js  — with automation hooks + Excel export
  *
  *   POST /       → fires 'new_product'      trigger after product create
  *   PUT  /:id    → fires 'product_discount' trigger when salePrice is set/changed
+ *   GET  /admin/export/excel → streams a full product list as .xlsx
  */
 const express = require('express');
 const router  = express.Router();
+const multer  = require('multer');
 const Product = require('../models/Product');
+const { Category } = require('../models/index');
 const { adminAuth } = require('../middleware/auth');
 const { dispatchForTrigger, manualPublish } = require('../services/publisherService');
 
+// In-memory upload for bulk-import excel files (not saved to disk)
+const bulkUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
 // ── IMPORTANT: named routes BEFORE /:slug wildcard ───────────────────────────
+
+// Admin — export all products as Excel
+router.get('/admin/export/excel', adminAuth, async (req, res) => {
+  try {
+    // Lazy-require so exceljs is only loaded when this route is hit
+    const ExcelJS = require('exceljs');
+
+    const products = await Product.find({})
+      .populate('category', 'name')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'ShopZen';
+    wb.created = new Date();
+
+    const ws = wb.addWorksheet('Products', {
+      views: [{ state: 'frozen', ySplit: 1 }],
+    });
+
+    // ── Column definitions ──────────────────────────────────────────────────
+    ws.columns = [
+      { header: 'Name',             key: 'name',             width: 35 },
+      { header: 'SKU',              key: 'sku',              width: 18 },
+      { header: 'Category',         key: 'category',         width: 20 },
+      { header: 'Sub-Category',     key: 'subCategory',      width: 20 },
+      { header: 'Brand',            key: 'brand',            width: 18 },
+      { header: 'Price (Rs.)',       key: 'price',            width: 14 },
+      { header: 'Sale Price (Rs.)',  key: 'salePrice',        width: 16 },
+      { header: 'Cost Price (Rs.)',  key: 'costPrice',        width: 16 },
+      { header: 'Stock',            key: 'stock',            width: 10 },
+      { header: 'Low Stock Alert',  key: 'lowStockThreshold',width: 16 },
+      { header: 'Weight (g)',        key: 'weight',           width: 12 },
+      { header: 'Status',           key: 'status',           width: 12 },
+      { header: 'Featured',         key: 'isFeatured',       width: 11 },
+      { header: 'On Sale',          key: 'isOnSale',         width: 11 },
+      { header: 'Rating (avg)',      key: 'ratingAvg',        width: 13 },
+      { header: 'Rating (count)',    key: 'ratingCount',      width: 14 },
+      { header: 'Views',            key: 'views',            width: 10 },
+      { header: 'Sold Count',       key: 'soldCount',        width: 12 },
+      { header: 'Tags',             key: 'tags',             width: 35 },
+      { header: 'Short Description',key: 'shortDescription', width: 50 },
+      { header: 'Thumbnail URL',    key: 'thumbnail',        width: 60 },
+      { header: 'Image 1',          key: 'image1',           width: 60 },
+      { header: 'Image 2',          key: 'image2',           width: 60 },
+      { header: 'Image 3',          key: 'image3',           width: 60 },
+      { header: 'Image 4',          key: 'image4',           width: 60 },
+      { header: 'Image 5',          key: 'image5',           width: 60 },
+      { header: 'Specifications',   key: 'specifications',   width: 60 },
+      { header: 'Variants',         key: 'variants',         width: 40 },
+      { header: 'Slug',             key: 'slug',             width: 40 },
+      { header: 'Created At',       key: 'createdAt',        width: 20 },
+    ];
+
+    // ── Header row styling ──────────────────────────────────────────────────
+    const headerRow = ws.getRow(1);
+    headerRow.eachCell(cell => {
+      cell.font      = { bold: true, color: { argb: 'FFFFFFFF' }, name: 'Arial', size: 10 };
+      cell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      cell.border    = {
+        bottom: { style: 'thin', color: { argb: 'FF334155' } },
+      };
+    });
+    headerRow.height = 30;
+
+    // ── Colour helpers ──────────────────────────────────────────────────────
+    const ROW_EVEN    = 'FFF8FAFC';
+    const ROW_ODD     = 'FFFFFFFF';
+    const GREEN_BG    = 'FFD1FAE5';
+    const RED_BG      = 'FFFEE2E2';
+    const AMBER_BG    = 'FFFEF3C7';
+    const BLUE_TEXT   = 'FF2563EB';
+
+    // ── Data rows ──────────────────────────────────────────────────────────
+    products.forEach((p, idx) => {
+      const images = Array.isArray(p.images) ? p.images : [];
+
+      const specsText = Array.isArray(p.specifications) && p.specifications.length
+        ? p.specifications.map(s => `${s.key}: ${s.value}`).join(' | ')
+        : '';
+
+      const variantsText = Array.isArray(p.variants) && p.variants.length
+        ? p.variants.map(v => {
+            const vals = (v.values || []).map(vv => vv.label).join(', ');
+            return `${v.name}: ${vals}`;
+          }).join(' | ')
+        : '';
+
+      const row = ws.addRow({
+        name:             p.name             || '',
+        sku:              p.sku              || '',
+        category:         p.category?.name  || '',
+        subCategory:      p.subCategory     || '',
+        brand:            p.brand           || '',
+        price:            p.price           ?? '',
+        salePrice:        p.salePrice       ?? '',
+        costPrice:        p.costPrice       ?? '',
+        stock:            p.stock           ?? 0,
+        lowStockThreshold:p.lowStockThreshold ?? 5,
+        weight:           p.weight          ?? '',
+        status:           p.isActive ? 'Active' : 'Hidden',
+        isFeatured:       p.isFeatured ? 'Yes' : 'No',
+        isOnSale:         p.isOnSale   ? 'Yes' : 'No',
+        ratingAvg:        p.ratings?.average  ?? 0,
+        ratingCount:      p.ratings?.count    ?? 0,
+        views:            p.views      ?? 0,
+        soldCount:        p.soldCount  ?? 0,
+        tags:             Array.isArray(p.tags) ? p.tags.join(', ') : '',
+        shortDescription: p.shortDescription  || '',
+        thumbnail:        p.thumbnail         || '',
+        image1:           images[0]           || '',
+        image2:           images[1]           || '',
+        image3:           images[2]           || '',
+        image4:           images[3]           || '',
+        image5:           images[4]           || '',
+        specifications:   specsText,
+        variants:         variantsText,
+        slug:             p.slug              || '',
+        createdAt:        p.createdAt ? new Date(p.createdAt).toLocaleDateString('en-GB') : '',
+      });
+
+      // Alternating row background
+      const rowBg = idx % 2 === 0 ? ROW_EVEN : ROW_ODD;
+      row.eachCell({ includeEmpty: true }, cell => {
+        cell.font      = { name: 'Arial', size: 9 };
+        cell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: rowBg } };
+        cell.alignment = { vertical: 'middle', wrapText: false };
+      });
+
+      // Status cell colour
+      const statusCell = row.getCell('status');
+      statusCell.font = { bold: true, name: 'Arial', size: 9,
+        color: { argb: p.isActive ? 'FF065F46' : 'FF92400E' } };
+      statusCell.fill = { type: 'pattern', pattern: 'solid',
+        fgColor: { argb: p.isActive ? GREEN_BG : AMBER_BG } };
+      statusCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      // Stock cell colour: red if 0, amber if low
+      const stockCell = row.getCell('stock');
+      if (p.stock === 0) {
+        stockCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: RED_BG } };
+        stockCell.font = { bold: true, color: { argb: 'FF991B1B' }, name: 'Arial', size: 9 };
+      } else if (p.stock <= (p.lowStockThreshold || 5)) {
+        stockCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: AMBER_BG } };
+        stockCell.font = { bold: true, color: { argb: 'FF92400E' }, name: 'Arial', size: 9 };
+      }
+      stockCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      // Price cells — right-aligned
+      ['price', 'salePrice', 'costPrice'].forEach(k => {
+        const cell = row.getCell(k);
+        cell.numFmt = '#,##0';
+        cell.alignment = { horizontal: 'right', vertical: 'middle' };
+      });
+
+      // URL cells — blue, clickable-looking
+      ['thumbnail', 'image1', 'image2', 'image3', 'image4', 'image5'].forEach(k => {
+        const cell = row.getCell(k);
+        const url  = cell.value;
+        if (url) {
+          cell.font      = { color: { argb: BLUE_TEXT }, underline: true, name: 'Arial', size: 9 };
+          // Make it a proper hyperlink
+          cell.value     = { text: url, hyperlink: url };
+        }
+      });
+
+      // Featured / On Sale — centre
+      ['isFeatured', 'isOnSale'].forEach(k => {
+        const cell = row.getCell(k);
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        if (cell.value === 'Yes') {
+          cell.font = { bold: true, color: { argb: 'FF065F46' }, name: 'Arial', size: 9 };
+        }
+      });
+
+      row.height = 18;
+    });
+
+    // ── Auto-filter on header row ───────────────────────────────────────────
+    ws.autoFilter = {
+      from: { row: 1, column: 1 },
+      to:   { row: 1, column: ws.columns.length },
+    };
+
+    // ── Summary sheet ───────────────────────────────────────────────────────
+    const summary = wb.addWorksheet('Summary');
+    summary.columns = [
+      { header: 'Metric', key: 'metric', width: 30 },
+      { header: 'Value',  key: 'value',  width: 20 },
+    ];
+
+    const sHeaderRow = summary.getRow(1);
+    sHeaderRow.eachCell(cell => {
+      cell.font  = { bold: true, color: { argb: 'FFFFFFFF' }, name: 'Arial', size: 10 };
+      cell.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    });
+    sHeaderRow.height = 28;
+
+    const active   = products.filter(p => p.isActive).length;
+    const hidden   = products.length - active;
+    const outOfStock  = products.filter(p => p.stock === 0).length;
+    const lowStock    = products.filter(p => p.stock > 0 && p.stock <= (p.lowStockThreshold || 5)).length;
+    const onSale      = products.filter(p => p.isOnSale).length;
+    const featured    = products.filter(p => p.isFeatured).length;
+    const totalStock  = products.reduce((s, p) => s + (p.stock || 0), 0);
+    const totalValue  = products.reduce((s, p) => s + ((p.costPrice || p.price || 0) * (p.stock || 0)), 0);
+
+    const summaryData = [
+      ['Total Products',       products.length],
+      ['Active Products',      active],
+      ['Hidden Products',      hidden],
+      ['Out of Stock',         outOfStock],
+      ['Low Stock',            lowStock],
+      ['On Sale',              onSale],
+      ['Featured',             featured],
+      ['Total Units in Stock', totalStock],
+      ['Inventory Value (Rs.)',totalValue],
+      ['Export Date', new Date().toLocaleString('en-GB')],
+    ];
+
+    summaryData.forEach(([metric, value], i) => {
+      const sRow = summary.addRow({ metric, value });
+      const bg   = i % 2 === 0 ? ROW_EVEN : ROW_ODD;
+      sRow.eachCell({ includeEmpty: true }, cell => {
+        cell.font      = { name: 'Arial', size: 10 };
+        cell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
+        cell.alignment = { vertical: 'middle' };
+      });
+      const valCell = sRow.getCell('value');
+      if (typeof value === 'number') {
+        valCell.numFmt    = '#,##0';
+        valCell.alignment = { horizontal: 'right', vertical: 'middle' };
+      }
+      sRow.height = 20;
+    });
+
+    // ── Stream response ─────────────────────────────────────────────────────
+    const filename = `shopzen-products-${new Date().toISOString().slice(0,10)}.xlsx`;
+    res.setHeader('Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    await wb.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error('[Excel Export]', err.message);
+    res.status(500).json({ message: 'Export failed: ' + err.message });
+  }
+});
+
+// Admin — download a blank/filled Excel template for bulk product upload
+router.get('/admin/import-template/excel', adminAuth, async (req, res) => {
+  try {
+    const ExcelJS = require('exceljs');
+    const categories = await Category.find({ isActive: true }).sort({ name: 1 }).lean();
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'ShopZen';
+    wb.created = new Date();
+
+    const ws = wb.addWorksheet('Products');
+
+    const columns = [
+      { header: 'Name *',            key: 'name',             width: 32 },
+      { header: 'Description *',     key: 'description',      width: 45 },
+      { header: 'Short Description', key: 'shortDescription', width: 35 },
+      { header: 'Category *',        key: 'category',         width: 22 },
+      { header: 'Sub-Category',      key: 'subCategory',       width: 20 },
+      { header: 'Brand',             key: 'brand',            width: 18 },
+      { header: 'SKU',               key: 'sku',              width: 18 },
+      { header: 'Price *',           key: 'price',            width: 12 },
+      { header: 'Sale Price',        key: 'salePrice',        width: 12 },
+      { header: 'Cost Price',        key: 'costPrice',        width: 12 },
+      { header: 'Stock',             key: 'stock',            width: 10 },
+      { header: 'Low Stock Alert',   key: 'lowStockThreshold',width: 14 },
+      { header: 'Weight (g)',        key: 'weight',           width: 12 },
+      { header: 'Tags (comma separated)', key: 'tags',         width: 35 },
+      { header: 'Thumbnail URL',     key: 'thumbnail',        width: 50 },
+      { header: 'Image 1',           key: 'image1',           width: 50 },
+      { header: 'Image 2',           key: 'image2',           width: 50 },
+      { header: 'Image 3',           key: 'image3',           width: 50 },
+      { header: 'Image 4',           key: 'image4',           width: 50 },
+      { header: 'Image 5',           key: 'image5',           width: 50 },
+      { header: 'Specifications (key: value | key: value)', key: 'specifications', width: 55 },
+      { header: 'Status (Active/Hidden)', key: 'status',      width: 14 },
+      { header: 'Featured (Yes/No)', key: 'isFeatured',       width: 14 },
+    ];
+    ws.columns = columns;
+
+    const headerRow = ws.getRow(1);
+    headerRow.eachCell(cell => {
+      cell.font      = { bold: true, color: { argb: 'FFFFFFFF' }, name: 'Arial', size: 10 };
+      cell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    });
+    headerRow.height = 36;
+
+    // Sample row — a real, fully-filled example record to copy/replace
+    const sampleRow = ws.addRow({
+      name: 'Classic Cotton T-Shirt',
+      description: 'A premium 100% cotton t-shirt with a relaxed fit, breathable fabric, and reinforced stitching. Perfect for everyday wear in any season.',
+      shortDescription: 'Soft, breathable everyday cotton tee',
+      category: categories[0]?.name || 'Fashion',
+      subCategory: '',
+      brand: 'ShopZen Basics',
+      sku: 'SZ-TSHIRT-001',
+      price: 2500,
+      salePrice: 1999,
+      costPrice: 1200,
+      stock: 100,
+      lowStockThreshold: 10,
+      weight: 200,
+      tags: 'tshirt, cotton, casual, new',
+      thumbnail: 'https://example.com/images/tshirt-thumb.jpg',
+      image1: 'https://example.com/images/tshirt-front.jpg',
+      image2: 'https://example.com/images/tshirt-back.jpg',
+      image3: '',
+      image4: '',
+      image5: '',
+      specifications: 'Material: 100% Cotton | Fit: Regular | Care: Machine wash cold',
+      status: 'Active',
+      isFeatured: 'Yes',
+    });
+    sampleRow.eachCell(cell => {
+      cell.font = { name: 'Arial', size: 9 };
+      cell.alignment = { vertical: 'middle', wrapText: false };
+    });
+    sampleRow.height = 18;
+
+    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: columns.length } };
+    ws.views = [{ state: 'frozen', ySplit: 1 }];
+
+    // Reference sheet — valid category names
+    const catSheet = wb.addWorksheet('Categories (reference)');
+    catSheet.columns = [
+      { header: 'Category Name', key: 'name', width: 30 },
+      { header: 'Parent Category', key: 'parent', width: 30 },
+    ];
+    const catHeader = catSheet.getRow(1);
+    catHeader.eachCell(cell => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, name: 'Arial', size: 10 };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    });
+    catHeader.height = 26;
+
+    const byId = {};
+    categories.forEach(c => { byId[c._id.toString()] = c; });
+    categories.forEach(c => {
+      const parent = c.parent ? byId[c.parent.toString()] : null;
+      catSheet.addRow({ name: c.name, parent: parent ? parent.name : '' });
+    });
+
+    // Instructions sheet
+    const info = wb.addWorksheet('Instructions');
+    info.columns = [{ header: 'How to use this template', key: 'a', width: 100 }];
+    info.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' }, name: 'Arial', size: 11 };
+    info.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+    [
+      'Fill one row per product in the "Products" sheet. Do not change column headers.',
+      'Fields marked with * (Name, Description, Category, Price) are required.',
+      'Category must EXACTLY match a name from the "Categories (reference)" sheet (case-insensitive).',
+      'Sub-Category (optional) should match a sub-category name under the chosen category.',
+      'Tags: separate multiple tags with commas, e.g. "new, summer, trending".',
+      'Images: paste direct image URLs into Thumbnail URL / Image 1-5. If Thumbnail is empty, Image 1 will be used as the thumbnail.',
+      'Specifications: use the format "Key: Value" and separate multiple specs with " | ", e.g. "Material: Cotton | Origin: Sri Lanka".',
+      'Status: write "Active" or "Hidden" (default is Active if left empty).',
+      'Featured: write "Yes" or "No" (default is No).',
+      'Row 2 is a filled sample record — replace it with your own product or delete the row before uploading.',
+      'Save the file and upload it via the "Bulk Upload" button on the Products page.',
+    ].forEach(text => info.addRow({ a: text }));
+    info.getColumn(1).alignment = { wrapText: true, vertical: 'middle' };
+
+    const filename = `shopzen-product-import-template.xlsx`;
+    res.setHeader('Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    await wb.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error('[Excel Template]', err.message);
+    res.status(500).json({ message: 'Template generation failed: ' + err.message });
+  }
+});
+
+// Admin — bulk import products from an uploaded Excel file
+// POST /api/products/admin/import/excel  (multipart/form-data, field name: "file")
+router.post('/admin/import/excel', adminAuth, bulkUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
+
+    const ExcelJS = require('exceljs');
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(req.file.buffer);
+
+    const ws = wb.getWorksheet('Products') || wb.worksheets[0];
+    if (!ws) return res.status(400).json({ message: 'No worksheet found in file' });
+
+    // Map headers (row 1) -> column index
+    const headerMap = {};
+    ws.getRow(1).eachCell((cell, colNumber) => {
+      const raw = String(cell.value || '').toLowerCase().trim();
+      headerMap[raw] = colNumber;
+    });
+
+    const findCol = (...names) => {
+      for (const n of names) {
+        const key = n.toLowerCase();
+        for (const h in headerMap) {
+          if (h === key || h.startsWith(key)) return headerMap[h];
+        }
+      }
+      return null;
+    };
+
+    const colMap = {
+      name:              findCol('name *', 'name'),
+      description:       findCol('description *', 'description'),
+      shortDescription:  findCol('short description'),
+      category:          findCol('category *', 'category'),
+      subCategory:       findCol('sub-category', 'sub category', 'subcategory'),
+      brand:             findCol('brand'),
+      sku:               findCol('sku'),
+      price:             findCol('price *', 'price'),
+      salePrice:         findCol('sale price'),
+      costPrice:         findCol('cost price'),
+      stock:             findCol('stock'),
+      lowStockThreshold: findCol('low stock'),
+      weight:            findCol('weight'),
+      tags:              findCol('tags'),
+      thumbnail:         findCol('thumbnail'),
+      image1:            findCol('image 1', 'image1'),
+      image2:            findCol('image 2', 'image2'),
+      image3:            findCol('image 3', 'image3'),
+      image4:            findCol('image 4', 'image4'),
+      image5:            findCol('image 5', 'image5'),
+      specifications:    findCol('specifications'),
+      status:            findCol('status'),
+      isFeatured:        findCol('featured'),
+    };
+
+    if (!colMap.name || !colMap.description || !colMap.category || !colMap.price) {
+      return res.status(400).json({
+        message: 'Invalid template: missing required columns (Name, Description, Category, Price). Please use the provided template.'
+      });
+    }
+
+    // Build a lookup of categories by lowercase name (and optionally scoped by parent)
+    const allCategories = await Category.find({}).lean();
+    const catByNameAndParent = {}; // key: `${lowerName}|${parentId||''}`
+    const catByName = {};          // key: lowerName -> first match
+    allCategories.forEach(c => {
+      const lname = (c.name || '').toLowerCase().trim();
+      const pkey  = c.parent ? c.parent.toString() : '';
+      catByNameAndParent[`${lname}|${pkey}`] = c;
+      if (!catByName[lname]) catByName[lname] = c;
+    });
+
+    const cell = (row, col) => {
+      if (!col) return '';
+      const v = row.getCell(col).value;
+      if (v == null) return '';
+      if (typeof v === 'object') {
+        if (v.text != null) return String(v.text).trim();      // hyperlink object
+        if (v.richText) return v.richText.map(t => t.text).join('').trim();
+        if (v.result != null) return String(v.result).trim();   // formula result
+        return String(v).trim();
+      }
+      return String(v).trim();
+    };
+    const num = (row, col) => {
+      const v = cell(row, col);
+      if (v === '') return undefined;
+      const n = Number(v);
+      return Number.isNaN(n) ? undefined : n;
+    };
+
+    const results = { created: 0, skipped: 0, errors: [] };
+    const rowCount = ws.rowCount;
+
+    for (let r = 2; r <= rowCount; r++) {
+      const row = ws.getRow(r);
+      const name = cell(row, colMap.name);
+      if (!name) continue; // skip empty rows (e.g. the example row if left blank)
+
+      try {
+        const description = cell(row, colMap.description);
+        const priceVal     = num(row, colMap.price);
+        const categoryName = cell(row, colMap.category);
+        const subCatName   = cell(row, colMap.subCategory);
+
+        if (!description) throw new Error('Description is required');
+        if (priceVal == null) throw new Error('Price is required and must be a number');
+        if (!categoryName) throw new Error('Category is required');
+
+        // Resolve category — prefer subcategory match (scoped under main category), else the main category itself
+        let categoryDoc = null;
+        const mainLower = categoryName.toLowerCase().trim();
+        const mainMatch = catByName[mainLower];
+        if (!mainMatch) throw new Error(`Category "${categoryName}" not found`);
+
+        if (subCatName) {
+          const subLower = subCatName.toLowerCase().trim();
+          const subMatch = catByNameAndParent[`${subLower}|${mainMatch._id.toString()}`] || catByName[subLower];
+          categoryDoc = subMatch || mainMatch;
+        } else {
+          categoryDoc = mainMatch;
+        }
+
+        const images = [colMap.image1, colMap.image2, colMap.image3, colMap.image4, colMap.image5]
+          .map(c => cell(row, c)).filter(Boolean);
+        const thumbnail = cell(row, colMap.thumbnail) || images[0] || '';
+
+        const tagsRaw = cell(row, colMap.tags);
+        const tags = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
+
+        const specsRaw = cell(row, colMap.specifications);
+        const specifications = specsRaw
+          ? specsRaw.split('|').map(s => s.trim()).filter(Boolean).map(pair => {
+              const idx = pair.indexOf(':');
+              return idx === -1
+                ? { key: pair.trim(), value: '' }
+                : { key: pair.slice(0, idx).trim(), value: pair.slice(idx + 1).trim() };
+            })
+          : [];
+
+        const statusRaw   = cell(row, colMap.status).toLowerCase();
+        const isActive    = statusRaw === 'hidden' || statusRaw === 'inactive' ? false : true;
+        const featuredRaw = cell(row, colMap.isFeatured).toLowerCase();
+        const isFeatured  = featuredRaw === 'yes' || featuredRaw === 'true';
+
+        const salePrice = num(row, colMap.salePrice);
+
+        const productData = {
+          name,
+          description,
+          shortDescription: cell(row, colMap.shortDescription) || undefined,
+          category:    categoryDoc._id,
+          subCategory: subCatName || undefined,
+          brand:       cell(row, colMap.brand) || undefined,
+          sku:         cell(row, colMap.sku) || undefined,
+          price:       priceVal,
+          salePrice:   salePrice,
+          costPrice:   num(row, colMap.costPrice),
+          stock:       num(row, colMap.stock) ?? 0,
+          lowStockThreshold: num(row, colMap.lowStockThreshold) ?? 5,
+          weight:      num(row, colMap.weight),
+          tags,
+          thumbnail,
+          images,
+          specifications,
+          isActive,
+          isFeatured,
+          isOnSale: !!salePrice,
+        };
+
+        const product = await Product.create(productData);
+        results.created++;
+
+        // Fire automation for each newly-created active product (non-blocking)
+        if (product.isActive !== false) {
+          dispatchForTrigger('new_product', product, 'product').catch(e =>
+            console.error('[Automation] new_product dispatch error:', e.message)
+          );
+        }
+      } catch (err) {
+        results.skipped++;
+        results.errors.push({ row: r, name: name || '(blank)', message: err.message });
+      }
+    }
+
+    res.json(results);
+  } catch (err) {
+    console.error('[Bulk Import]', err.message);
+    res.status(500).json({ message: 'Import failed: ' + err.message });
+  }
+});
 
 // Admin — get all products
 router.get('/admin/all', adminAuth, async (req, res) => {

@@ -266,6 +266,83 @@ Rules:
 });
 
 /* ══════════════════════════════════════════════════════════════════
+   POST /api/ai/description  →  { description: "<html>..." }
+   Full long-form product description in the fixed marketing format:
+   Title line, intro paragraph, "Key Features" bullets, "Product
+   Description" paragraphs (with related-search keywords woven in),
+   "Ideal For" bullets, closing line. Returned as ready-to-use HTML
+   for the rich-text editor.
+══════════════════════════════════════════════════════════════════ */
+router.post('/description', async (req, res) => {
+  const { name, category, brand, sku, price, salePrice, shortDescription, tags } = req.body;
+  if (!name || name.trim().length < 3)
+    return res.status(400).json({ message: 'Product name too short' });
+
+  const ctxLines = [
+    brand            && `Brand: ${brand}`,
+    category         && `Category: ${category}`,
+    sku              && `Model / SKU: ${sku}`,
+    price            && `Price: Rs.${price}${salePrice ? ` (sale Rs.${salePrice})` : ''}`,
+    shortDescription && `Short description: ${shortDescription}`,
+    tags             && `Existing tags/keywords: ${Array.isArray(tags) ? tags.join(', ') : tags}`,
+  ].filter(Boolean).join('\n');
+
+  const systemMsg = 'You are an expert e-commerce copywriter for a Sri Lankan online store. You output ONLY valid HTML for a product description. No markdown, no code fences, no explanation, no <html>/<body> wrapper — just the inner HTML fragment.';
+
+  const userMsg = [
+    `Write a long-form product description for "${name.trim()}" for shopzen.lk.`,
+    ctxLines ? `\nProduct context:\n${ctxLines}` : '',
+    ``,
+    `Return ONLY an HTML fragment using EXACTLY this structure and tags (fill in real content, keep the section order and headings):`,
+    ``,
+    `<h3>{Catchy SEO title for the product, ~60-90 chars, may include the product/model name}</h3>`,
+    `<p>{1-2 sentence intro paragraph describing what the product is and its main benefit/technology}</p>`,
+    `<h4>Key Features</h4>`,
+    `<ul>`,
+    `<li>{feature 1}</li>`,
+    `<li>{feature 2}</li>`,
+    `... (8-10 short feature bullets total, each 3-8 words)`,
+    `</ul>`,
+    `<h4>Product Description</h4>`,
+    `<p>{paragraph 1: 2-3 sentences expanding on the product's purpose and what kind of buyer it suits}</p>`,
+    `<p>{paragraph 2: 1-2 sentences that naturally weave in 5-8 related search terms a shopper might type, phrased like "This product is perfect for customers searching for X, Y, Z, ..."}</p>`,
+    `<p>{paragraph 3: 1-2 sentences about ideal usage settings (home/office/etc) and the overall value proposition}</p>`,
+    `<h4>Ideal For</h4>`,
+    `<ul>`,
+    `<li>{use case 1}</li>`,
+    `<li>{use case 2}</li>`,
+    `... (4-6 short "ideal for" bullets total, each 2-6 words)`,
+    `</ul>`,
+    `<p>{1 short closing sentence that reinforces the key benefit and ends with the product name}</p>`,
+    ``,
+    `Rules:`,
+    `- Plain factual marketing tone, no emojis, no asterisks, no markdown.`,
+    `- Use the exact tag names <h3>, <p>, <h4>, <ul>, <li> only — no extra attributes, classes, or wrapper divs.`,
+    `- Do not invent specific technical specs that weren't provided — keep features plausible and generic to the product type if details are missing.`,
+    `- Output must start with <h3> and contain nothing before or after the HTML fragment.`,
+  ].filter(s => s !== undefined).join('\n');
+
+  try {
+    let html = await callAI(systemMsg, userMsg, 1200);
+
+    // Strip accidental code fences / wrappers if the model adds them
+    html = html.trim()
+      .replace(/^```(?:html)?\s*/i, '')
+      .replace(/```\s*$/i, '')
+      .trim();
+
+    const start = html.indexOf('<h3');
+    if (start === -1) throw new Error('AI did not return expected HTML structure');
+    html = html.slice(start).trim();
+
+    res.json({ description: html });
+  } catch (err) {
+    console.error('[AI /description]', err.message);
+    res.status(500).json({ message: 'AI description generation failed: ' + err.message });
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════════
    GET /api/ai/status
 ══════════════════════════════════════════════════════════════════ */
 router.get('/status', (req, res) => {

@@ -143,7 +143,6 @@ function SpecsPanel({ specs, onChange }) {
   const [pasteText,  setPasteText] = useState('');
   const [showPaste,  setShowPaste] = useState(false);
 
-  // Use a ref so parseAndAdd always reads the LATEST specs, never stale
   const specsRef = useRef(specs);
   useEffect(() => { specsRef.current = specs; }, [specs]);
 
@@ -273,7 +272,16 @@ export default function AdminProducts() {
   const [hasDraft, setHasDraft]   = useState(false);
   const [autoSaveStatus, setAutoSaveStatus] = useState('');
 
-  // formRef always mirrors form state — handleSave reads this to avoid stale closures
+  // ── Excel export state ────────────────────────────────────────────────────
+  const [exporting, setExporting] = useState(false);
+
+  // ── Bulk import state ─────────────────────────────────────────────────────
+  const [bulkModal, setBulkModal]       = useState(false);
+  const [bulkFile, setBulkFile]         = useState(null);
+  const [bulkUploading, setBulkUploading] = useState(false);
+  const [bulkDownloading, setBulkDownloading] = useState(false);
+  const [bulkResult, setBulkResult]     = useState(null);
+
   const formRef       = useRef(emptyProduct);
   const autoSaveTimer = useRef(null);
   const isEditMode    = useRef(false);
@@ -283,9 +291,9 @@ export default function AdminProducts() {
   const [aiFillingShort, setAiFillingShort]     = useState(false);
   const [tagSuggestions, setTagSuggestions]     = useState([]);
   const [loadingTags, setLoadingTags]           = useState(false);
+  const [loadingDescription, setLoadingDescription] = useState(false);
   const aiNameTimer = useRef(null);
 
-  // setForm wrapper that keeps formRef in sync
   const updateForm = useCallback((updater) => {
     setForm(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
@@ -294,9 +302,6 @@ export default function AdminProducts() {
     });
   }, []);
 
-  /* ── AI Autofill helpers (calls own backend → Anthropic) ── */
-  // Track whether shortDescription was manually edited by the user.
-  // If it hasn't been touched, always overwrite with fresh AI output when name changes.
   const shortDescManuallyEdited = useRef(false);
 
   const autofillFromName = async (name) => {
@@ -304,10 +309,8 @@ export default function AdminProducts() {
     setAiFillingBrand(true);
     setAiFillingShort(true);
     try {
-      // Send all available context so the AI can write a better description
       const current = formRef.current;
       const categoryName = (() => {
-        // categories is a list of { _id, name } objects in scope
         try {
           const catObj = categories.find(c => c._id === current.category);
           return catObj?.name || '';
@@ -322,9 +325,7 @@ export default function AdminProducts() {
       });
       updateForm(p => ({
         ...p,
-        // Brand: only fill if empty
         brand: (!p.brand && data.brand) ? data.brand : p.brand,
-        // shortDescription: fill if empty OR if the user hasn't manually edited it
         shortDescription: (data.shortDescription && (!p.shortDescription || !shortDescManuallyEdited.current))
           ? data.shortDescription
           : p.shortDescription,
@@ -352,6 +353,38 @@ export default function AdminProducts() {
     }
   };
 
+  const fetchAIDescription = async () => {
+    const current = formRef.current;
+    if (!current.name || current.name.trim().length < 3) {
+      toast.error('Enter a product name first'); return;
+    }
+    setLoadingDescription(true);
+    const toastId = toast.loading('✨ Generating description…');
+    try {
+      const categoryName = categories.find(c => c._id === current.category)?.name || '';
+      const { data } = await API.post('/ai/description', {
+        name:             current.name,
+        category:         categoryName,
+        brand:            current.brand || '',
+        sku:              current.sku || '',
+        price:            current.price || '',
+        salePrice:        current.salePrice || '',
+        shortDescription: current.shortDescription || '',
+        tags:             current.tags || '',
+      });
+      if (data.description) {
+        updateForm(p => ({ ...p, description: data.description }));
+        toast.success('✅ Description generated!', { id: toastId });
+      } else {
+        throw new Error('Empty response');
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Could not generate description', { id: toastId });
+    } finally {
+      setLoadingDescription(false);
+    }
+  };
+
   const handleNameChange = (name) => {
     updateForm(p => ({ ...p, name }));
     clearTimeout(aiNameTimer.current);
@@ -368,7 +401,6 @@ export default function AdminProducts() {
       return { ...p, tags: updated.join(", ") };
     });
   };
-
 
   /* ── Fetch products ── */
   const fetchProducts = useCallback(async () => {
@@ -466,7 +498,6 @@ export default function AdminProducts() {
     setForm(ef);
     setModal('edit'); setActiveTab('basic');
   };
-  
 
   const closeModal = () => { setModal(null); setTagSuggestions([]); shortDescManuallyEdited.current = false; };
 
@@ -510,8 +541,113 @@ export default function AdminProducts() {
     } catch { toast.error('Failed'); }
   };
 
+  /* ── Bulk Import: Download Template ── */
+  const handleDownloadTemplate = async () => {
+    setBulkDownloading(true);
+    const toastId = toast.loading('⏳ Preparing template…');
+    try {
+      const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
+      const baseURL = API.defaults?.baseURL || '';
+      const response = await fetch(`${baseURL}/products/admin/import-template/excel`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.message || 'Failed to download template');
+      }
+      const blob = await response.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = 'shopzen-product-import-template.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success('✅ Template downloaded!', { id: toastId });
+    } catch (err) {
+      toast.error(err.message || 'Failed to download template', { id: toastId });
+    } finally {
+      setBulkDownloading(false);
+    }
+  };
+
+  /* ── Bulk Import: Upload filled file ── */
+  const handleBulkUpload = async () => {
+    if (!bulkFile) { toast.error('Please choose an Excel file first'); return; }
+    setBulkUploading(true);
+    setBulkResult(null);
+    const toastId = toast.loading('⏳ Importing products…');
+    try {
+      const formData = new FormData();
+      formData.append('file', bulkFile);
+      const { data } = await API.post('/products/admin/import/excel', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setBulkResult(data);
+      if (data.created > 0) {
+        toast.success(`✅ Imported ${data.created} product${data.created === 1 ? '' : 's'}!`, { id: toastId });
+        fetchProducts();
+      } else {
+        toast.error('No products were imported. See details below.', { id: toastId });
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Bulk import failed', { id: toastId });
+    } finally {
+      setBulkUploading(false);
+    }
+  };
+
+  const closeBulkModal = () => {
+    setBulkModal(false);
+    setBulkFile(null);
+    setBulkResult(null);
+  };
+
+  /* ── Excel Export ── */
+  const handleExportExcel = async () => {
+    setExporting(true);
+    const toastId = toast.loading('⏳ Generating Excel file…');
+    try {
+      // Use fetch directly so we can handle a binary (blob) response
+      const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
+      const baseURL = API.defaults?.baseURL || '';
+      const response = await fetch(`${baseURL}/products/admin/export/excel`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.message || 'Export failed');
+      }
+
+      const blob = await response.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      // Try to extract filename from Content-Disposition, else use a default
+      const cd   = response.headers.get('Content-Disposition') || '';
+      const match = cd.match(/filename="?([^"]+)"?/);
+      a.download = match ? match[1] : `shopzen-products-${new Date().toISOString().slice(0,10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+
+      toast.success('✅ Excel file downloaded!', { id: toastId });
+    } catch (err) {
+      toast.error(err.message || 'Export failed', { id: toastId });
+    } finally {
+      setExporting(false);
+    }
+  };
+
   /* ── Publish to Social Media ── */
-  const [publishModal, setPublishModal] = useState(null); // { product }
+  const [publishModal, setPublishModal] = useState(null);
   const [publishPlatforms, setPublishPlatforms] = useState([]);
   const [publishMsg, setPublishMsg] = useState('');
   const [publishing, setPublishing] = useState(false);
@@ -564,7 +700,7 @@ export default function AdminProducts() {
     }
   };
 
-  /* ── Variant helpers — all use updateForm ── */
+  /* ── Variant helpers ── */
   const addVariant       = () => updateForm(p=>({...p,variants:[...(p.variants||[]),{name:'',type:'button',required:true,values:[]}]}));
   const removeVariant    = i  => updateForm(p=>({...p,variants:p.variants.filter((_,vi)=>vi!==i)}));
   const updateVariant    = (i,k,v) => updateForm(p=>({...p,variants:p.variants.map((vt,vi)=>vi===i?{...vt,[k]:v}:vt)}));
@@ -594,13 +730,36 @@ export default function AdminProducts() {
           <h2 className="font-display text-xl font-bold text-gray-900">Products</h2>
           <p className="text-sm text-gray-500">Manage your product catalog</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {hasDraft && (
             <button onClick={restoreDraft}
               className="text-sm font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg hover:bg-amber-100 flex items-center gap-1.5">
               💾 Resume Draft
             </button>
           )}
+          {/* ── Export to Excel button ── */}
+          <button
+            onClick={handleExportExcel}
+            disabled={exporting}
+            className="text-sm font-semibold px-3 py-1.5 rounded-lg border flex items-center gap-1.5 transition-all disabled:opacity-60"
+            style={{
+              background: exporting ? '#f0fdf4' : '#f0fdf4',
+              borderColor: '#16a34a',
+              color: '#15803d',
+            }}
+            title="Download full product list as Excel spreadsheet"
+          >
+            {exporting
+              ? <><span style={{display:'inline-block',width:12,height:12,border:'2px solid #16a34a',borderTopColor:'transparent',borderRadius:'50%',animation:'spin 0.7s linear infinite'}}></span> Exporting…</>
+              : <>📊 Export Excel</>
+            }
+          </button>
+          <button onClick={()=>{setBulkModal(true); setBulkResult(null); setBulkFile(null);}}
+            className="text-sm font-semibold px-3 py-1.5 rounded-lg border flex items-center gap-1.5 transition-all"
+            style={{ background:'#eff6ff', borderColor:'#3b82f6', color:'#1d4ed8' }}
+            title="Bulk upload products via Excel">
+            📥 Bulk Upload
+          </button>
           <button onClick={openAdd} className="btn-primary text-sm">+ Add Product</button>
         </div>
       </div>
@@ -681,7 +840,6 @@ export default function AdminProducts() {
         <Modal title={`📢 Publish: ${publishModal.product.name}`} onClose={()=>setPublishModal(null)}>
           <div className="space-y-4">
             <p className="text-sm text-gray-500">Choose platforms to publish this product to:</p>
-
             <div className="grid grid-cols-2 gap-2">
               {PLATFORMS.map(pl => (
                 <button
@@ -699,7 +857,6 @@ export default function AdminProducts() {
                 </button>
               ))}
             </div>
-
             <div>
               <label className="block text-xs font-semibold text-gray-600 mb-1">Custom Message <span className="font-normal text-gray-400">(optional — overrides template)</span></label>
               <textarea
@@ -710,7 +867,6 @@ export default function AdminProducts() {
                 className="form-input text-sm w-full resize-none"
               />
             </div>
-
             <div className="flex gap-2 pt-1">
               <button onClick={()=>setPublishModal(null)} className="btn-secondary flex-1 text-sm">Cancel</button>
               <button
@@ -722,6 +878,66 @@ export default function AdminProducts() {
                 {publishing ? '⏳ Publishing...' : `📢 Publish to ${publishPlatforms.length || 0} Platform${publishPlatforms.length!==1?'s':''}`}
               </button>
             </div>
+          </div>
+        </Modal>
+      )}
+
+      {bulkModal && (
+        <Modal title="📥 Bulk Upload Products" onClose={closeBulkModal}>
+          <div className="space-y-4">
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-gray-700">
+              <p className="font-semibold text-blue-800 mb-1">How it works</p>
+              <ol className="list-decimal list-inside space-y-1">
+                <li>Download the Excel template below.</li>
+                <li>Fill in one row per product (Category names must match an existing category).</li>
+                <li>Save the file, then upload it here to create the products.</li>
+              </ol>
+            </div>
+
+            <button
+              onClick={handleDownloadTemplate}
+              disabled={bulkDownloading}
+              className="w-full text-sm font-semibold px-3 py-2.5 rounded-lg border flex items-center justify-center gap-1.5 transition-all disabled:opacity-60"
+              style={{ background:'#f0fdf4', borderColor:'#16a34a', color:'#15803d' }}
+            >
+              {bulkDownloading ? '⏳ Preparing…' : '⬇️ Download Excel Template'}
+            </button>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Upload filled template</label>
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={e => { setBulkFile(e.target.files?.[0] || null); setBulkResult(null); }}
+                className="block w-full text-sm border border-gray-300 rounded-lg cursor-pointer file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-gray-100 file:text-gray-700 file:font-semibold hover:file:bg-gray-200"
+              />
+              {bulkFile && <p className="text-xs text-gray-500 mt-1">Selected: {bulkFile.name}</p>}
+            </div>
+
+            <button
+              onClick={handleBulkUpload}
+              disabled={bulkUploading || !bulkFile}
+              className="btn-primary text-sm w-full disabled:opacity-60"
+            >
+              {bulkUploading ? '⏳ Importing…' : '🚀 Upload & Create Products'}
+            </button>
+
+            {bulkResult && (
+              <div className="border border-gray-200 rounded-xl p-3 text-sm space-y-2 max-h-64 overflow-y-auto">
+                <p className="font-semibold text-emerald-700">✅ Created: {bulkResult.created}</p>
+                <p className="font-semibold text-amber-700">⚠️ Skipped: {bulkResult.skipped}</p>
+                {bulkResult.errors?.length > 0 && (
+                  <div>
+                    <p className="font-semibold text-gray-700 mb-1">Errors:</p>
+                    <ul className="list-disc list-inside text-xs text-gray-600 space-y-0.5">
+                      {bulkResult.errors.map((e, i) => (
+                        <li key={i}>Row {e.row} ({e.name}): {e.message}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </Modal>
       )}
@@ -762,7 +978,6 @@ export default function AdminProducts() {
                     {categories.filter(c=>!c.parent).map(c=><option key={c._id} value={c._id}>{c.name}</option>)}
                   </select>
                 </div>
-                {/* Subcategory — shows only when selected category has subcategories */}
                 {form.category && categories.filter(c=>(c.parent?._id||c.parent)===form.category).length > 0 && (
                   <div>
                     <label className="form-label">Subcategory</label>
@@ -797,7 +1012,17 @@ export default function AdminProducts() {
                   <input value={form.shortDescription} onChange={e=>{shortDescManuallyEdited.current=true; updateForm(p=>({...p,shortDescription:e.target.value}));}} className="form-input" placeholder="Brief product summary (50–160 chars recommended for SEO)"/>
                 </div>
                 <div className="sm:col-span-2">
-                  <label className="form-label">Full Description *</label>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:4}}>
+                    <label className="form-label" style={{margin:0}}>Full Description *</label>
+                    <button type="button"
+                      onClick={fetchAIDescription}
+                      disabled={!form.name || loadingDescription}
+                      style={{fontSize:11,padding:'3px 10px',borderRadius:20,border:'1.5px solid var(--color-primary)',color:'var(--color-primary)',background:'transparent',cursor:'pointer',fontWeight:600,display:'flex',alignItems:'center',gap:5,opacity:(!form.name||loadingDescription)?0.5:1}}>
+                      {loadingDescription
+                        ? <><span style={{display:'inline-block',width:9,height:9,border:'2px solid var(--color-primary)',borderTopColor:'transparent',borderRadius:'50%',animation:'spin 0.7s linear infinite'}}></span>Generating…</>
+                        : <>✨ AI Generate Description</>}
+                    </button>
+                  </div>
                   <RichEditor value={form.description} onChange={val=>updateForm(p=>({...p,description:val}))} />
                 </div>
                 <div className="sm:col-span-2">
