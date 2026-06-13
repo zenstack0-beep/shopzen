@@ -864,7 +864,7 @@ function buildProductTitle(product, storeName) {
   return core + suffix;
 }
 
-function injectMeta(html, { title, desc, canonical, ogTitle, ogDesc, ogImage, ogUrl, ogType, keywords, schemas, verification, robots }) {
+function injectMeta(html, { title, desc, canonical, ogTitle, ogDesc, ogImage, ogImageWidth, ogImageHeight, ogUrl, ogType, keywords, schemas, verification, robots }) {
   let out = html.includes('__META_INJECT__') ? html.replace('__META_INJECT__', '') : html;
   out = out.replace(/<script type="application\/ld\+json">[\s\S]*?<\/script>\n?/g, '');
 
@@ -895,6 +895,8 @@ function injectMeta(html, { title, desc, canonical, ogTitle, ogDesc, ogImage, og
     !out.includes('property="og:title"')       ? `<meta property="og:title" content="${xe(ogTitle || title)}"/>` : '',
     !out.includes('property="og:description"') ? `<meta property="og:description" content="${xe(ogDesc || desc)}"/>` : '',
     !out.includes('property="og:image"')       ? `<meta property="og:image" content="${xe(ogImage)}"/>` : '',
+    (ogImageWidth && !out.includes('property="og:image:width"'))   ? `<meta property="og:image:width" content="${xe(ogImageWidth)}"/>`   : '',
+    (ogImageHeight && !out.includes('property="og:image:height"')) ? `<meta property="og:image:height" content="${xe(ogImageHeight)}"/>` : '',
     !out.includes('property="og:url"')         ? `<meta property="og:url" content="${xe(ogUrl || canonical)}"/>` : '',
     !out.includes('property="og:site_name"')   ? `<meta property="og:site_name" content="ShopZen"/>` : '',
     !out.includes('name="twitter:card"')       ? `<meta name="twitter:card" content="summary_large_image"/>` : '',
@@ -962,12 +964,13 @@ function buildHomeSeoContent({ storeName, siteUrl, categories = [], bestSellers 
     `<li><a href="${he(siteUrl)}/category/${he(c.slug)}">${he(c.name)}</a></li>`
   ).join('');
 
-  const productCards = bestSellers.map(p => {
+  const productCards = bestSellers.map((p, idx) => {
     const price = p.salePrice || p.price;
     const img   = p.thumbnail || (p.images && p.images[0]) || '';
+    const loadingAttr = idx === 0 ? 'eager' : 'lazy';
     return `<li>
       <a href="${he(siteUrl)}/product/${he(p.slug)}">
-        ${img ? `<img src="${he(img)}" alt="${he(p.name)}" width="200" height="200" loading="lazy"/>` : ''}
+        ${img ? `<img src="${he(img)}" alt="${he(p.name)}" width="200" height="200" loading="${loadingAttr}"/>` : ''}
         <h3>${he(p.name)}</h3>
         <p>${he(p.brand || '')} ${price ? `— Rs.${Number(price).toLocaleString()}` : ''}</p>
       </a>
@@ -1002,7 +1005,7 @@ function buildHomeSeoContent({ storeName, siteUrl, categories = [], bestSellers 
 async function getSeoMeta() {
   try {
     const rows = await Settings.find({
-      key: { $in: ['seo_config','seo_metaTitle','seo_metaDesc','seo_ogTitle','seo_ogDesc','seo_ogImage','seo_googleVerification','storeName'] },
+      key: { $in: ['seo_config','seo_metaTitle','seo_metaDesc','seo_ogTitle','seo_ogDesc','seo_ogImage','seo_googleVerification','storeName','facebookUrl','instagramUrl','twitterUrl','linkedinUrl','youtubeUrl','tiktokUrl','whatsappUrl'] },
     }).lean();
     const s = {};
     rows.forEach(r => { s[r.key] = r.value; });
@@ -1016,6 +1019,7 @@ async function getSeoMeta() {
       ogDesc:       s.seo_ogDesc    || s.seo_metaDesc  || 'Shop the best products online in Sri Lanka.',
       ogImage:      s.seo_ogImage   || `${siteUrl}/og-default.png`,
       verification: s.seo_googleVerification || '',
+      sameAs: [s.facebookUrl, s.instagramUrl, s.twitterUrl, s.linkedinUrl, s.youtubeUrl, s.tiktokUrl, s.whatsappUrl].filter(Boolean),
     };
   } catch { return null; }
 }
@@ -1416,15 +1420,31 @@ const seoRenderMiddleware = async (req, res) => {
           bestSellers, `${siteUrl}/shop`, `Best Selling Products — ${storeName} Sri Lanka`
         );
 
+        const webPageSchema = {
+          '@context': 'https://schema.org',
+          '@type': 'WebPage',
+          '@id': siteUrl,
+          url: siteUrl,
+          name: meta.metaTitle,
+          description: meta.metaDesc,
+          inLanguage: 'en-LK',
+          isPartOf: { '@type': 'WebSite', name: storeName, url: siteUrl },
+        };
+
+        if (meta.sameAs && meta.sameAs.length) {
+          storeSchema.sameAs = meta.sameAs;
+          orgSchema.sameAs = meta.sameAs;
+        }
+
         const homeContentHtml = buildHomeSeoContent({
           storeName, siteUrl, categories: homeCategories, bestSellers,
         });
 
         const out = injectMeta(injectHomeContent(html, homeContentHtml), {
           title: meta.metaTitle, desc: meta.metaDesc, canonical: siteUrl,
-          ogImage: meta.ogImage, ogType: 'website',
+          ogImage: meta.ogImage, ogImageWidth: '1200', ogImageHeight: '630', ogType: 'website',
           verification: meta.verification,
-          schemas: [websiteSchema, siteLinksSchema, storeSchema, orgSchema, bestSellersItemListSchema].filter(Boolean),
+          schemas: [websiteSchema, siteLinksSchema, storeSchema, webPageSchema, orgSchema, bestSellersItemListSchema].filter(Boolean),
         });
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.setHeader('Cache-Control', 'no-cache, must-revalidate');
