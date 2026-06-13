@@ -308,7 +308,7 @@ router.get('/robots.txt', async (req, res) => {
 User-agent: *
 Allow: /
 
-# Block private/functional paths
+# Block private/functional paths — do NOT block pagination (Google crawls it)
 Disallow: /admin/
 Disallow: /checkout/
 Disallow: /account/
@@ -316,10 +316,16 @@ Disallow: /cart/
 Disallow: /login
 Disallow: /register
 Disallow: /forgot-password
+Disallow: /my-orders
+Disallow: /returns
 Disallow: /*?*sort=
-Disallow: /*?*page=
 
-# Allow product images
+# Allow paginated product/category/brand pages for crawling
+Allow: /shop?page=
+Allow: /category/
+Allow: /brand/
+
+# Allow product images for Google Image Search
 Allow: /images/
 Allow: /*.jpg$
 Allow: /*.png$
@@ -383,6 +389,173 @@ router.get('/meta', async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
+
+// ── FAQ Schema Builder ───────────────────────────────────────────────────────
+// Generates FAQPage JSON-LD for product, category, and brand pages.
+// Google shows FAQ rich results directly in SERPs — high CTR impact.
+function buildProductFAQ(product, siteUrl, storeName) {
+  const price    = product.salePrice || product.price;
+  const priceStr = price ? `Rs.${price.toLocaleString()}` : 'competitive';
+  const name     = product.name;
+  const catName  = product.category?.name || 'products';
+  const brand    = product.brand || storeName;
+
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: [
+      {
+        '@type': 'Question',
+        name: `What is the price of ${name} in Sri Lanka?`,
+        acceptedAnswer: {
+          '@type': 'Answer',
+          text: `The current price of ${name} in Sri Lanka is ${priceStr}. You can buy it online at ShopZen (${siteUrl}/product/${product.slug}) with fast island-wide delivery.`,
+        },
+      },
+      {
+        '@type': 'Question',
+        name: `Is ${name} available for delivery across Sri Lanka?`,
+        acceptedAnswer: {
+          '@type': 'Answer',
+          text: `Yes, ${name} is available for delivery island-wide in Sri Lanka. ShopZen ships to all major cities including Colombo, Kandy, Galle, Jaffna, and more within 1–5 business days.`,
+        },
+      },
+      {
+        '@type': 'Question',
+        name: `What is the return policy for ${name}?`,
+        acceptedAnswer: {
+          '@type': 'Answer',
+          text: `ShopZen offers a 14-day hassle-free return policy on ${name}. If you are not satisfied, you can return it by mail at no extra cost.`,
+        },
+      },
+      {
+        '@type': 'Question',
+        name: `Is the ${name} sold at ShopZen genuine / authentic?`,
+        acceptedAnswer: {
+          '@type': 'Answer',
+          text: `Yes, all ${brand} products sold at ShopZen including ${name} are 100% genuine and sourced from authorised channels, covered by the manufacturer's warranty.`,
+        },
+      },
+    ],
+  };
+}
+
+function buildCategoryFAQ(catName, siteUrl) {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: [
+      {
+        '@type': 'Question',
+        name: `Where can I buy ${catName} online in Sri Lanka?`,
+        acceptedAnswer: {
+          '@type': 'Answer',
+          text: `You can buy ${catName} online in Sri Lanka at ShopZen (${siteUrl}/category/${catName.toLowerCase().replace(/\s+/g, '-')}). ShopZen offers the widest selection of ${catName} at competitive prices with fast island-wide delivery.`,
+        },
+      },
+      {
+        '@type': 'Question',
+        name: `What is the delivery time for ${catName} in Sri Lanka?`,
+        acceptedAnswer: {
+          '@type': 'Answer',
+          text: `ShopZen delivers ${catName} across Sri Lanka within 1–5 business days. Orders placed before noon are typically dispatched the same day.`,
+        },
+      },
+      {
+        '@type': 'Question',
+        name: `Are the ${catName} sold at ShopZen covered by warranty?`,
+        acceptedAnswer: {
+          '@type': 'Answer',
+          text: `Yes, all ${catName} products sold at ShopZen come with the manufacturer's warranty. ShopZen also offers a 14-day hassle-free return policy.`,
+        },
+      },
+      {
+        '@type': 'Question',
+        name: `What are the best ${catName} brands available in Sri Lanka?`,
+        acceptedAnswer: {
+          '@type': 'Answer',
+          text: `ShopZen stocks ${catName} from leading global brands including Sony, Philips, Samsung, JBL, and more — all available online in Sri Lanka with fast delivery.`,
+        },
+      },
+    ],
+  };
+}
+
+function buildBrandFAQ(brandName, siteUrl, slug) {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: [
+      {
+        '@type': 'Question',
+        name: `Where can I buy genuine ${brandName} products in Sri Lanka?`,
+        acceptedAnswer: {
+          '@type': 'Answer',
+          text: `You can buy genuine ${brandName} products in Sri Lanka at ShopZen (${siteUrl}/brand/${slug}). All ${brandName} products are authentic and backed by the manufacturer's warranty.`,
+        },
+      },
+      {
+        '@type': 'Question',
+        name: `Does ShopZen deliver ${brandName} products across Sri Lanka?`,
+        acceptedAnswer: {
+          '@type': 'Answer',
+          text: `Yes, ShopZen delivers ${brandName} products island-wide across Sri Lanka. Delivery typically takes 1–5 business days to all major cities and towns.`,
+        },
+      },
+      {
+        '@type': 'Question',
+        name: `What is the return policy for ${brandName} products at ShopZen?`,
+        acceptedAnswer: {
+          '@type': 'Answer',
+          text: `ShopZen offers a 14-day hassle-free return policy on all ${brandName} products. Returns are free and processed promptly.`,
+        },
+      },
+    ],
+  };
+}
+
+// ── ItemList Schema Builder ──────────────────────────────────────────────────
+// CollectionPage + ItemList enables Google to show product carousels in search.
+function buildItemListSchema(products, pageUrl, name) {
+  if (!products || !products.length) return null;
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'CollectionPage',
+    name,
+    url: pageUrl,
+    mainEntity: {
+      '@type': 'ItemList',
+      name,
+      numberOfItems: products.length,
+      itemListElement: products.slice(0, 20).map((p, i) => ({
+        '@type': 'ListItem',
+        position: i + 1,
+        item: {
+          '@type': 'Product',
+          name: p.name,
+          url: pageUrl.split('/category/')[0].split('/brand/')[0] + `/product/${p.slug}`,
+          image: p.thumbnail || p.images?.[0] || undefined,
+          ...(p.brand ? { brand: { '@type': 'Brand', name: p.brand } } : {}),
+          offers: {
+            '@type': 'Offer',
+            priceCurrency: 'LKR',
+            price: String(p.salePrice || p.price || 0),
+            availability: (p.stock > 0) ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+          },
+          ...(p.ratings?.count > 0 ? {
+            aggregateRating: {
+              '@type': 'AggregateRating',
+              ratingValue: Number(p.ratings.average).toFixed(1),
+              reviewCount: p.ratings.count,
+              bestRating: '5',
+              worstRating: '1',
+            },
+          } : {}),
+        },
+      })),
+    },
+  };
+}
 
 async function getReviewSchemas(productId) {
   const reviews = await Review.find({ product: productId, isApproved: true })
@@ -743,6 +916,17 @@ function injectMeta(html, { title, desc, canonical, ogTitle, ogDesc, ogImage, og
     out = out.replace('</head>', `<meta name="google-site-verification" content="${xe(verification)}"/>\n</head>`);
   }
 
+  // Core Web Vitals: inject preconnect hints for Cloudinary CDN if not already present
+  if (!out.includes('res.cloudinary.com') || !out.includes('rel="preconnect"')) {
+    const preconnects = [
+      '<link rel="preconnect" href="https://res.cloudinary.com" crossorigin/>',
+      '<link rel="dns-prefetch" href="https://res.cloudinary.com"/>',
+    ].join('\n');
+    if (!out.includes('preconnect" href="https://res.cloudinary.com"')) {
+      out = out.replace('<link rel="manifest"', preconnects + '\n<link rel="manifest"');
+    }
+  }
+
   if (schemas && schemas.length) {
     const schemaBlock = schemas
       .map(s => `<script type="application/ld+json">${JSON.stringify(s)}</script>`)
@@ -995,10 +1179,11 @@ const seoRenderMiddleware = async (req, res) => {
           ],
         };
 
+        const faqSchema      = buildProductFAQ(product, siteUrl, storeName);
         const out = injectMeta(html, {
           title: metaTitle, desc: metaDesc, canonical: productUrl,
           ogImage, ogType: 'product', keywords,
-          schemas: [schema, breadcrumb, orgSchema],
+          schemas: [schema, breadcrumb, orgSchema, faqSchema],
         });
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.setHeader('Cache-Control', 'no-cache, must-revalidate');
@@ -1020,8 +1205,11 @@ const seoRenderMiddleware = async (req, res) => {
         const title   = `${cat.name} — Buy Online in Sri Lanka | ${storeName}`;
         const plainCatDesc = cat.description ? String(cat.description).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() : '';
         const desc    = plainCatDesc.slice(0, 155) || `Shop ${cat.name} online in Sri Lanka. Best prices and fast delivery at ${storeName}.`;
-        const keywords = `${cat.name}, buy ${cat.name} online sri lanka, ${cat.name} price sri lanka, ${storeName}`;
-        const featuredProduct = await Product.findOne({ category: cat._id, isActive: true, thumbnail: { $exists: true, $ne: '' } }).lean();
+        const keywords = `${cat.name}, buy ${cat.name} online sri lanka, ${cat.name} price sri lanka, best ${cat.name.toLowerCase()} brands sri lanka, ${storeName}`;
+        const [featuredProduct, catProducts] = await Promise.all([
+          Product.findOne({ category: cat._id, isActive: true, thumbnail: { $exists: true, $ne: '' } }).lean(),
+          Product.find({ category: cat._id, isActive: true }, 'name slug thumbnail images brand price salePrice stock ratings').limit(20).lean(),
+        ]);
         const ogImage = featuredProduct?.thumbnail || defaultOgImage;
 
         const breadcrumb = {
@@ -1033,7 +1221,11 @@ const seoRenderMiddleware = async (req, res) => {
           ],
         };
 
-        const out = injectMeta(html, { title, desc, canonical: catUrl, ogImage, ogType: 'website', keywords, schemas: [breadcrumb, orgSchema] });
+        const faqSchema      = buildCategoryFAQ(cat.name, siteUrl);
+        const itemListSchema = buildItemListSchema(catProducts, catUrl, `${cat.name} — Buy Online in Sri Lanka`);
+        const schemas = [breadcrumb, orgSchema, faqSchema, itemListSchema].filter(Boolean);
+
+        const out = injectMeta(html, { title, desc, canonical: catUrl, ogImage, ogType: 'website', keywords, schemas });
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.setHeader('Cache-Control', 'no-cache, must-revalidate');
         return res.status(200).send(out);
@@ -1069,7 +1261,15 @@ const seoRenderMiddleware = async (req, res) => {
         ],
       };
 
-      const out = injectMeta(html, { title, desc, canonical: brandUrl, ogImage, ogType: 'website', keywords, schemas: [breadcrumb, orgSchema] });
+      const [brandProductsForList] = await Promise.all([
+        Product.find({ brand: new RegExp(`^${brandName}$`, 'i'), isActive: true }, 'name slug thumbnail images brand price salePrice stock ratings').limit(20).lean(),
+      ]);
+
+      const faqSchema      = buildBrandFAQ(brandName, siteUrl, slug);
+      const itemListSchema = buildItemListSchema(brandProductsForList, brandUrl, `${brandName} Products in Sri Lanka`);
+      const schemas = [breadcrumb, orgSchema, faqSchema, itemListSchema].filter(Boolean);
+
+      const out = injectMeta(html, { title, desc, canonical: brandUrl, ogImage, ogType: 'website', keywords, schemas });
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.setHeader('Cache-Control', 'no-cache, must-revalidate');
       return res.status(200).send(out);
@@ -1098,17 +1298,49 @@ const seoRenderMiddleware = async (req, res) => {
         const websiteSchema = {
           '@context': 'https://schema.org', '@type': 'WebSite',
           name: storeName, url: siteUrl,
+          potentialAction: [
+            {
+              '@type': 'SearchAction',
+              target: { '@type': 'EntryPoint', urlTemplate: `${siteUrl}/shop?search={search_term_string}` },
+              'query-input': 'required name=search_term_string',
+            },
+          ],
+        };
+        // SiteLinksSearchBox — appears in Google's sitelinks search box in SERPs
+        const siteLinksSchema = {
+          '@context': 'https://schema.org',
+          '@type': 'WebSite',
+          name: storeName,
+          url: siteUrl,
           potentialAction: {
             '@type': 'SearchAction',
-            target: { '@type': 'EntryPoint', urlTemplate: `${siteUrl}/shop?search={search_term_string}` },
+            target: {
+              '@type': 'EntryPoint',
+              urlTemplate: `${siteUrl}/shop?search={search_term_string}`,
+            },
             'query-input': 'required name=search_term_string',
           },
+        };
+        // Store schema for Google Knowledge Panel
+        const storeSchema = {
+          '@context': 'https://schema.org',
+          '@type': 'Store',
+          name: storeName,
+          url: siteUrl,
+          description: meta.metaDesc,
+          priceRange: 'Rs.500 - Rs.500,000',
+          currenciesAccepted: 'LKR',
+          paymentAccepted: 'Cash, Credit Card, Bank Transfer',
+          areaServed: { '@type': 'Country', name: 'Sri Lanka' },
+          address: { '@type': 'PostalAddress', addressCountry: 'LK' },
+          hasMap: `${siteUrl}/page/contact`,
+          logo: { '@type': 'ImageObject', url: meta.ogImage },
         };
         const out = injectMeta(html, {
           title: meta.metaTitle, desc: meta.metaDesc, canonical: siteUrl,
           ogImage: meta.ogImage, ogType: 'website',
           verification: meta.verification,
-          schemas: [websiteSchema, orgSchema],
+          schemas: [websiteSchema, siteLinksSchema, storeSchema, orgSchema],
         });
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.setHeader('Cache-Control', 'no-cache, must-revalidate');

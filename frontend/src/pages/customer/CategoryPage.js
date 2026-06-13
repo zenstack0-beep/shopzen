@@ -18,6 +18,117 @@ import { useCart } from '../../context/CartContext';
 import { useTheme } from '../../context/ThemeContext';
 import useSEO from '../../hooks/useSEO';
 
+// ── FAQ content per category ──────────────────────────────────────────────────
+const CATEGORY_FAQS = {
+  audio: [
+    { q: 'What audio brands are available in Sri Lanka at ShopZen?', a: 'ShopZen stocks top audio brands including Sony, JBL, Bose, Philips, and more — all available online in Sri Lanka with island-wide delivery.' },
+    { q: 'Can I buy wireless headphones online in Sri Lanka?', a: 'Yes! ShopZen offers a wide range of wireless Bluetooth headphones and earbuds online in Sri Lanka. Browse our audio category for the latest models with fast delivery.' },
+    { q: 'What is the return policy for audio products at ShopZen?', a: 'All audio products at ShopZen come with a 14-day hassle-free return policy. Returns are free and processed promptly.' },
+    { q: 'Are audio products sold at ShopZen covered by warranty?', a: "Yes, all audio equipment at ShopZen is sourced from authorised channels and covered by the manufacturer's warranty." },
+  ],
+  electronics: [
+    { q: 'What electronics are available online in Sri Lanka at ShopZen?', a: 'ShopZen offers smartphones, laptops, tablets, smart home devices, accessories, and more from leading global brands — all available online in Sri Lanka with fast delivery.' },
+    { q: 'Can I buy genuine electronics online in Sri Lanka?', a: 'Yes. All electronics at ShopZen are 100% genuine, sourced from authorised distributors, and covered by manufacturer warranty.' },
+    { q: 'How fast is delivery for electronics in Sri Lanka?', a: 'ShopZen delivers electronics island-wide within 1–5 business days. Express delivery is available to Colombo and major cities.' },
+    { q: 'What payment methods are accepted for electronics at ShopZen?', a: 'ShopZen accepts credit/debit cards, bank transfers, and cash on delivery for electronics purchases in Sri Lanka.' },
+  ],
+  appliances: [
+    { q: 'What home appliances can I buy online in Sri Lanka at ShopZen?', a: 'ShopZen stocks a full range of home appliances including air fryers, washing machines, refrigerators, ACs, blenders, and more from Philips, Samsung, Panasonic, and other top brands.' },
+    { q: 'Are home appliances at ShopZen covered by warranty?', a: "Yes, all home appliances at ShopZen come with the manufacturer's warranty. We also offer a 14-day return policy for peace of mind." },
+    { q: 'How are large appliances delivered in Sri Lanka?', a: 'ShopZen delivers large appliances with careful packaging island-wide. Installation support is available for select products such as air conditioners and washing machines.' },
+    { q: 'Which are the best appliance brands available in Sri Lanka?', a: 'ShopZen stocks appliances from Philips, Samsung, Panasonic, LG, Tefal, Bajaj, Midea, and more — all available online in Sri Lanka.' },
+  ],
+};
+
+function getCategoryFAQs(slug, catName) {
+  const faqs = CATEGORY_FAQS[slug] || [
+    { q: `Where can I buy ${catName} online in Sri Lanka?`, a: `ShopZen is Sri Lanka's trusted online store for ${catName}. Browse our full range, compare prices, and enjoy fast island-wide delivery.` },
+    { q: `What is the delivery time for ${catName} in Sri Lanka?`, a: `ShopZen delivers ${catName} across Sri Lanka within 1–5 business days. Same-day dispatch available for orders placed before noon.` },
+    { q: `Are ${catName} products at ShopZen genuine?`, a: `Yes, all ${catName} at ShopZen are 100% authentic, sourced from authorised channels, and covered by manufacturer warranty.` },
+    { q: `What is the return policy for ${catName} at ShopZen?`, a: `ShopZen offers a 14-day hassle-free return policy on all ${catName}. Returns are free and processed promptly.` },
+  ];
+  return faqs;
+}
+
+// Inject FAQ + ItemList JSON-LD schemas into document head
+function injectCategorySchemas(faqs, products, catName, canonicalUrl, aggregateRating) {
+  // Remove old schemas injected by this function
+  ['cat-faq-schema', 'cat-itemlist-schema'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.remove();
+  });
+
+  const faqSchema = {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: faqs.map(f => ({
+      '@type': 'Question',
+      name: f.q,
+      acceptedAnswer: { '@type': 'Answer', text: f.a },
+    })),
+  };
+
+  const faqEl = document.createElement('script');
+  faqEl.type = 'application/ld+json';
+  faqEl.id = 'cat-faq-schema';
+  faqEl.textContent = JSON.stringify(faqSchema);
+  document.head.appendChild(faqEl);
+
+  if (products && products.length > 0) {
+    const itemListSchema = {
+      '@context': 'https://schema.org',
+      '@type': 'CollectionPage',
+      name: `${catName} — Buy Online in Sri Lanka | ShopZen`,
+      url: canonicalUrl,
+      ...(aggregateRating ? {
+        aggregateRating: {
+          '@type': 'AggregateRating',
+          ratingValue: aggregateRating.average,
+          reviewCount: aggregateRating.count,
+          bestRating: '5',
+          worstRating: '1',
+        },
+      } : {}),
+      mainEntity: {
+        '@type': 'ItemList',
+        name: catName,
+        numberOfItems: products.length,
+        itemListElement: products.slice(0, 20).map((p, i) => ({
+          '@type': 'ListItem',
+          position: i + 1,
+          item: {
+            '@type': 'Product',
+            name: p.name,
+            url: `${window.__SHOPZEN_SEO__?.siteUrl || window.location.origin}/product/${p.slug}`,
+            image: p.thumbnail || p.images?.[0] || undefined,
+            ...(p.brand ? { brand: { '@type': 'Brand', name: p.brand } } : {}),
+            offers: {
+              '@type': 'Offer',
+              priceCurrency: 'LKR',
+              price: String(p.salePrice || p.price || 0),
+              availability: (p.stock > 0) ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+            },
+            ...(p.ratings?.count > 0 ? {
+              aggregateRating: {
+                '@type': 'AggregateRating',
+                ratingValue: Number(p.ratings.average).toFixed(1),
+                reviewCount: p.ratings.count,
+                bestRating: '5',
+                worstRating: '1',
+              },
+            } : {}),
+          },
+        })),
+      },
+    };
+    const listEl = document.createElement('script');
+    listEl.type = 'application/ld+json';
+    listEl.id = 'cat-itemlist-schema';
+    listEl.textContent = JSON.stringify(itemListSchema);
+    document.head.appendChild(listEl);
+  }
+}
+
 // ── Category SEO content library ─────────────────────────────────────────────
 // 200-500 word descriptions keyed by category slug for Google ranking signals.
 const CATEGORY_DESCRIPTIONS = {
@@ -127,6 +238,45 @@ export default function CategoryPage() {
       .finally(() => setLoading(false));
   }, [page, sortBy, category]);
 
+  // ── SEO ───────────────────────────────────────────────────────────────────
+  const catName = category?.name || slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  const siteUrl = window.__SHOPZEN_SEO__?.siteUrl || window.location.origin;
+  const canonicalUrl = `${siteUrl}/category/${slug}`;
+
+  const seoTitle = category
+    ? `${category.name} — Buy Online in Sri Lanka | ShopZen`
+    : `${catName} | ShopZen Sri Lanka`;
+
+  const seoDesc = category?.description
+    ? category.description.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().slice(0, 160)
+    : `Shop the best ${catName} online in Sri Lanka. Top brands, best prices, fast delivery. Browse our full ${catName} range at ShopZen.`;
+
+  // Build aggregate rating across all loaded products for CollectionPage schema
+  const categoryAggregateRating = React.useMemo(() => {
+    const rated = products.filter(p => p.ratings?.count > 0);
+    if (!rated.length) return null;
+    const totalRatings = rated.reduce((sum, p) => sum + p.ratings.count, 0);
+    const weightedSum  = rated.reduce((sum, p) => sum + p.ratings.average * p.ratings.count, 0);
+    return {
+      count: totalRatings,
+      average: (weightedSum / totalRatings).toFixed(1),
+    };
+  }, [products]);
+
+  // Inject FAQ + ItemList schemas when products/category loads
+  useEffect(() => {
+    if (!category || products.length === 0) return;
+    const faqs = getCategoryFAQs(slug, catName);
+    injectCategorySchemas(faqs, products, catName, canonicalUrl, categoryAggregateRating);
+    return () => {
+      ['cat-faq-schema', 'cat-itemlist-schema'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.remove();
+      });
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products, category, categoryAggregateRating]);
+
   useEffect(() => { setPage(1); }, [sortBy, slug]);
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
 
@@ -147,23 +297,11 @@ export default function CategoryPage() {
     setTimeout(() => setAddedId(null), 1200);
   };
 
-  // ── SEO ───────────────────────────────────────────────────────────────────
-  const catName = category?.name || slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-  const siteUrl = window.__SHOPZEN_SEO__?.siteUrl || window.location.origin;
-  const canonicalUrl = `${siteUrl}/category/${slug}`;
-
-  const seoTitle = category
-    ? `${category.name} — Buy Online in Sri Lanka | ShopZen`
-    : `${catName} | ShopZen Sri Lanka`;
-
-  const seoDesc = category?.description
-    ? category.description.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().slice(0, 160)
-    : `Shop the best ${catName} online in Sri Lanka. Top brands, best prices, fast delivery. Browse our full ${catName} range at ShopZen.`;
-
   useSEO({
     title: seoTitle,
     description: seoDesc,
     url: canonicalUrl,
+    keywords: `${catName}, buy ${catName} online sri lanka, ${catName} price in sri lanka, best ${catName.toLowerCase()} brands, ${catName.toLowerCase()} delivery colombo, ${catName.toLowerCase()} online shopping, shopzen sri lanka`,
     breadcrumbs: [
       { name: 'Shop', url: '/shop' },
       { name: catName, url: `/category/${slug}` },
@@ -250,9 +388,11 @@ export default function CategoryPage() {
                   <div className="relative overflow-hidden aspect-square bg-gray-50">
                     <img
                       src={product.thumbnail || product.images?.[0]}
-                      alt={product.name}
+                      alt={`${product.brand ? product.brand + ' ' : ''}${product.name}${product.category?.name ? ' — ' + product.category.name : ''} — buy online Sri Lanka`}
                       className="w-full h-full object-contain p-3 transition-transform duration-500 group-hover:scale-105"
                       loading="lazy"
+                      width="300"
+                      height="300"
                     />
                     {hasDiscount && (
                       <span className="absolute top-2 left-2 text-white text-xs font-bold px-2 py-0.5 rounded-full"
@@ -337,14 +477,42 @@ export default function CategoryPage() {
           </div>
         </div>
 
-        {/* Related category links */}
-        <div className="mt-8 text-sm text-gray-400 text-center">
-          <span>Explore more: </span>
-          <Link to="/shop" style={{ color: 'var(--color-primary)' }} className="mx-1">All Products</Link>
-          <span>·</span>
-          <Link to="/shop?onSale=true" style={{ color: 'var(--color-primary)' }} className="mx-1">Sale</Link>
-          <span>·</span>
-          <Link to="/shop?featured=true" style={{ color: 'var(--color-primary)' }} className="mx-1">Featured</Link>
+        {/* Internal linking — related categories and brands for SEO + UX */}
+        <div className="mt-8 rounded-2xl p-5"
+          style={{ background: 'var(--card-bg)', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+          <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 mb-3">
+            Also explore
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Link to="/shop" className="text-xs px-3 py-1.5 rounded-full font-medium border transition-colors"
+              style={{ color: 'var(--color-primary)', borderColor: 'var(--color-primary)', background: 'transparent' }}>
+              All Products
+            </Link>
+            <Link to="/shop?onSale=true" className="text-xs px-3 py-1.5 rounded-full font-medium border transition-colors"
+              style={{ color: 'var(--color-primary)', borderColor: 'var(--color-primary)', background: 'transparent' }}>
+              Sale Items
+            </Link>
+            <Link to="/shop?featured=true" className="text-xs px-3 py-1.5 rounded-full font-medium border transition-colors"
+              style={{ color: 'var(--color-primary)', borderColor: 'var(--color-primary)', background: 'transparent' }}>
+              Featured
+            </Link>
+            {slug !== 'audio'       && <Link to="/category/audio"       className="text-xs px-3 py-1.5 rounded-full font-medium border transition-colors" style={{ color: 'var(--color-primary)', borderColor: 'var(--color-primary)', background: 'transparent' }}>Audio</Link>}
+            {slug !== 'electronics' && <Link to="/category/electronics" className="text-xs px-3 py-1.5 rounded-full font-medium border transition-colors" style={{ color: 'var(--color-primary)', borderColor: 'var(--color-primary)', background: 'transparent' }}>Electronics</Link>}
+            {slug !== 'appliances'  && <Link to="/category/appliances"  className="text-xs px-3 py-1.5 rounded-full font-medium border transition-colors" style={{ color: 'var(--color-primary)', borderColor: 'var(--color-primary)', background: 'transparent' }}>Appliances</Link>}
+          </div>
+          {/* Popular brand links — boosts brand page crawling & internal link equity */}
+          <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 mt-4 mb-3">
+            Shop by brand
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {['sony', 'philips', 'samsung', 'jbl'].map(brand => (
+              <Link key={brand} to={`/brand/${brand}`}
+                className="text-xs px-3 py-1.5 rounded-full font-medium border transition-colors capitalize"
+                style={{ color: 'var(--color-primary)', borderColor: 'var(--color-primary)', background: 'transparent' }}>
+                {brand.charAt(0).toUpperCase() + brand.slice(1)}
+              </Link>
+            ))}
+          </div>
         </div>
       </div>
     </div>

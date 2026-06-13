@@ -50,20 +50,6 @@ export function getSeoConfig() {
   return window.__SHOPZEN_SEO__ || {};
 }
 
-// ─── Cloudinary OG image helper ───────────────────────────────────────────────
-// Applies social-card transforms so the image is exactly 1200×630 for previews.
-function buildOgImage(rawUrl) {
-  if (!rawUrl) return rawUrl;
-  // Only transform Cloudinary URLs; leave everything else as-is.
-  if (!rawUrl.includes('res.cloudinary.com')) return rawUrl;
-  // Insert upload transforms after /upload/
-  // Remove any existing transform segment (e.g. v1780912292) if already present.
-  return rawUrl.replace(
-    /\/upload\/(v\d+\/)?/,
-    '/upload/w_1200,h_630,c_fill,f_jpg,q_auto/$1'
-  );
-}
-
 // ─── GA4 / analytics helpers ──────────────────────────────────────────────────
 export function trackPageView(url, title) {
   const { ga4Id } = getSeoConfig();
@@ -161,8 +147,8 @@ export default function useSEO({
   const defaultDesc   = cfg.defaultDescription || 'Premium online store — quality products, delivered fast.';
 
   // ── Build title ──────────────────────────────────────────────────────────────
-  // Product pages: "Product Name Price in Sri Lanka | ShopZen"
-  // This pattern captures "price in sri lanka" buying-intent searches.
+  // Product pages: "Product Name Price in Sri Lanka | ShopZen" — captures high-volume
+  // "X price in sri lanka" buying-intent queries directly in the <title> tag.
   let finalTitle;
   if (title && type === 'product') {
     const withPriceSuffix = `${title} Price in Sri Lanka | ShopZen`;
@@ -177,21 +163,20 @@ export default function useSEO({
   }
 
   // ── Build description ─────────────────────────────────────────────────────────
-  // Pattern: "<snippet>. <price>. Fast delivery across Sri Lanka. Shop at ShopZen."
-  // Matches Google's preferred snippet style and captures price/location signals.
+  // For products: rich buying-intent description with price and location signals
   let finalDesc;
   if (description) {
     finalDesc = description;
   } else if (type === 'product' && product) {
-    const price    = product.salePrice || product.price;
+    const price     = product.salePrice || product.price;
     const origPrice = product.isOnSale && product.price ? product.price : null;
-    const priceStr = price ? `Rs.${price.toLocaleString()}` : '';
-    const wasStr   = origPrice && origPrice !== price ? ` (was Rs.${origPrice.toLocaleString()})` : '';
-    const brand    = product.brand ? `${product.brand} ` : '';
-    const cat      = product.category?.name ? ` ${product.category.name}` : '';
-    const plain    = String(product.shortDescription || product.description || '')
-                       .replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
-    const snippet  = plain.slice(0, 80) || `${brand}${product.name}`;
+    const priceStr  = price ? `Rs.${price.toLocaleString()}` : '';
+    const wasStr    = origPrice && origPrice !== price ? ` (was Rs.${origPrice.toLocaleString()})` : '';
+    const brand     = product.brand ? `${product.brand} ` : '';
+    const cat       = product.category?.name ? ` ${product.category.name}` : '';
+    const plain     = String(product.shortDescription || product.description || '')
+                        .replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    const snippet   = plain.slice(0, 80) || `${brand}${product.name}`;
     finalDesc = priceStr
       ? `${snippet}. ${priceStr}${wasStr}. Fast delivery across Sri Lanka. Shop at ShopZen.`.slice(0, 165)
       : `${snippet}. Shop ${brand}${product.name}${cat} online in Sri Lanka. Fast delivery, best prices at ShopZen.`.slice(0, 165);
@@ -199,10 +184,13 @@ export default function useSEO({
     finalDesc = defaultDesc;
   }
 
-  // ── Build OG image with Cloudinary social transforms ──────────────────────────
-  const rawImage    = image || defaultImage;
-  const finalImage  = buildOgImage(rawImage);
-  const finalUrl    = url   || siteUrl + location.pathname;
+  // Apply Cloudinary social-card transforms for consistent 1200×630 OG images
+  function buildOgImage(rawUrl) {
+    if (!rawUrl || !rawUrl.includes('res.cloudinary.com')) return rawUrl;
+    return rawUrl.replace(/\/upload\/(v\d+\/)?/, '/upload/w_1200,h_630,c_fill,f_jpg,q_auto/$1');
+  }
+  const finalImage  = buildOgImage(image || defaultImage);
+  const finalUrl    = url         || siteUrl + location.pathname;
 
   useEffect(() => {
     document.title = finalTitle;
@@ -210,8 +198,7 @@ export default function useSEO({
     setMeta('description', finalDesc);
     setMeta('robots', noindex ? 'noindex,nofollow' : 'index,follow,max-image-preview:large');
 
-    // ── Keywords — rich buying-intent signals ──────────────────────────────────
-    // Pattern: exact product name, brand, category, slug variants, price + location intent
+    // Keywords meta — rich buying-intent signals for Google/Bing
     let kwString = keywords;
     if (!kwString && product) {
       const nameLc  = product.name.toLowerCase();
@@ -222,7 +209,7 @@ export default function useSEO({
       const intent  = [
         `${nameLc} price in sri lanka`,
         `buy ${brand} ${product.name}`.trim() + ' online sri lanka',
-        `${brand} ${slugLc}`.trim(),
+        `${brand.toLowerCase()} ${slugLc}`.trim(),
         `${nameLc} price`,
         `colombo delivery ${nameLc}`,
         `${nameLc} review`,
@@ -230,13 +217,12 @@ export default function useSEO({
         `best ${catName.toLowerCase()} for sri lankan`.trim(),
         `${nameLc} features and price`,
         `sri lankan rupee price ${nameLc}`,
-        brand ? `${brand.toLowerCase()} appliances sri lanka` : null,
+        brand ? `${brand.toLowerCase()} products sri lanka` : null,
         'sri lanka',
       ].filter(Boolean);
       kwString = [...base, ...intent].join(', ');
     }
     if (kwString) setMeta('keywords', kwString);
-
     setLink('canonical', finalUrl);
 
     // Open Graph
@@ -246,7 +232,7 @@ export default function useSEO({
     setMeta('og:image',       finalImage, 'property');
     setMeta('og:url',         finalUrl,   'property');
     setMeta('og:site_name',   siteName,   'property');
-    setMeta('og:locale',      'en_LK',    'property');
+    setMeta('og:locale', 'en_LK', 'property');
 
     // Twitter Cards
     setMeta('twitter:card',        finalImage ? 'summary_large_image' : 'summary');

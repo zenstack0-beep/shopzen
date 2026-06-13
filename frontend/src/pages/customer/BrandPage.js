@@ -18,6 +18,94 @@ import { useCart } from '../../context/CartContext';
 import { useTheme } from '../../context/ThemeContext';
 import useSEO from '../../hooks/useSEO';
 
+// ── Brand FAQ + ItemList schema injection ─────────────────────────────────────
+function injectBrandSchemas(brandName, slug, products, siteUrl) {
+  ['brand-faq-schema', 'brand-itemlist-schema'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.remove();
+  });
+
+  const brandUrl = `${siteUrl}/brand/${slug}`;
+
+  const faqSchema = {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: [
+      {
+        '@type': 'Question',
+        name: `Where can I buy genuine ${brandName} products in Sri Lanka?`,
+        acceptedAnswer: { '@type': 'Answer', text: `You can buy genuine ${brandName} products in Sri Lanka at ShopZen (${brandUrl}). All ${brandName} products are authentic and backed by the manufacturer's warranty.` },
+      },
+      {
+        '@type': 'Question',
+        name: `Does ShopZen deliver ${brandName} products across Sri Lanka?`,
+        acceptedAnswer: { '@type': 'Answer', text: `Yes, ShopZen delivers ${brandName} products island-wide across Sri Lanka within 1–5 business days. Fast delivery available to Colombo, Kandy, Galle, and all major cities.` },
+      },
+      {
+        '@type': 'Question',
+        name: `Are ${brandName} products at ShopZen covered by warranty?`,
+        acceptedAnswer: { '@type': 'Answer', text: `Yes, all ${brandName} products at ShopZen are covered by the manufacturer's warranty. ShopZen also offers a 14-day hassle-free return policy.` },
+      },
+      {
+        '@type': 'Question',
+        name: `What ${brandName} products are available in Sri Lanka at ShopZen?`,
+        acceptedAnswer: { '@type': 'Answer', text: `ShopZen stocks a wide range of ${brandName} products in Sri Lanka. Visit ${brandUrl} to browse the full collection including the latest models at competitive prices.` },
+      },
+    ],
+  };
+
+  const faqEl = document.createElement('script');
+  faqEl.type = 'application/ld+json';
+  faqEl.id = 'brand-faq-schema';
+  faqEl.textContent = JSON.stringify(faqSchema);
+  document.head.appendChild(faqEl);
+
+  if (products && products.length > 0) {
+    const itemListSchema = {
+      '@context': 'https://schema.org',
+      '@type': 'CollectionPage',
+      name: `${brandName} Products in Sri Lanka | ShopZen`,
+      url: brandUrl,
+      mainEntity: {
+        '@type': 'ItemList',
+        name: `${brandName} Products`,
+        numberOfItems: products.length,
+        itemListElement: products.slice(0, 20).map((p, i) => ({
+          '@type': 'ListItem',
+          position: i + 1,
+          item: {
+            '@type': 'Product',
+            name: p.name,
+            url: `${siteUrl}/product/${p.slug}`,
+            image: p.thumbnail || p.images?.[0] || undefined,
+            brand: { '@type': 'Brand', name: brandName },
+            offers: {
+              '@type': 'Offer',
+              priceCurrency: 'LKR',
+              price: String(p.salePrice || p.price || 0),
+              availability: (p.stock > 0) ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+            },
+            ...(p.ratings?.count > 0 ? {
+              aggregateRating: {
+                '@type': 'AggregateRating',
+                ratingValue: Number(p.ratings.average).toFixed(1),
+                reviewCount: p.ratings.count,
+                bestRating: '5',
+                worstRating: '1',
+              },
+            } : {}),
+          },
+        })),
+      },
+    };
+    const listEl = document.createElement('script');
+    listEl.type = 'application/ld+json';
+    listEl.id = 'brand-itemlist-schema';
+    listEl.textContent = JSON.stringify(itemListSchema);
+    document.head.appendChild(listEl);
+  }
+}
+
 // ── Brand content library ─────────────────────────────────────────────────────
 const BRAND_INFO = {
   sony: {
@@ -122,6 +210,21 @@ export default function BrandPage() {
       .finally(() => setLoading(false));
   }, [page, sortBy, brandName]);
 
+  const siteUrl = window.__SHOPZEN_SEO__?.siteUrl || window.location.origin;
+
+  // Inject FAQ + ItemList schemas when products load
+  useEffect(() => {
+    if (!products.length) return;
+    injectBrandSchemas(brandName, slug, products, siteUrl);
+    return () => {
+      ['brand-faq-schema', 'brand-itemlist-schema'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.remove();
+      });
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products]);
+
   useEffect(() => { setPage(1); }, [sortBy, slug]);
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
 
@@ -138,7 +241,6 @@ export default function BrandPage() {
   };
 
   // ── SEO ───────────────────────────────────────────────────────────────────
-  const siteUrl = window.__SHOPZEN_SEO__?.siteUrl || window.location.origin;
   const canonicalUrl = `${siteUrl}/brand/${slug}`;
 
   useSEO({
@@ -230,9 +332,11 @@ export default function BrandPage() {
                   <div className="relative overflow-hidden aspect-square bg-gray-50">
                     <img
                       src={product.thumbnail || product.images?.[0]}
-                      alt={`${product.name} - ${brandName}`}
+                      alt={`${brandName} ${product.name} — buy online Sri Lanka`}
                       className="w-full h-full object-contain p-3 transition-transform duration-500 group-hover:scale-105"
                       loading="lazy"
+                      width="300"
+                      height="300"
                     />
                     {hasDiscount && (
                       <span className="absolute top-2 left-2 text-white text-xs font-bold px-2 py-0.5 rounded-full"
@@ -310,6 +414,39 @@ export default function BrandPage() {
             {brandInfo.description.split('\n\n').map((para, i) => (
               <p key={i}>{para}</p>
             ))}
+          </div>
+        </div>
+
+        {/* Internal linking — related brands and categories */}
+        <div className="mt-6 rounded-2xl p-5"
+          style={{ background: 'var(--card-bg)', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+          <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 mb-3">
+            Shop other brands
+          </p>
+          <div className="flex flex-wrap gap-2 mb-4">
+            {['sony', 'philips', 'samsung', 'jbl'].filter(b => b !== slug.toLowerCase()).map(b => (
+              <Link key={b} to={`/brand/${b}`}
+                className="text-xs px-3 py-1.5 rounded-full font-medium border transition-colors capitalize"
+                style={{ color: 'var(--color-primary)', borderColor: 'var(--color-primary)', background: 'transparent' }}>
+                {b.charAt(0).toUpperCase() + b.slice(1)}
+              </Link>
+            ))}
+          </div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 mb-3">
+            Shop by category
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {[['audio', 'Audio'], ['electronics', 'Electronics'], ['appliances', 'Appliances']].map(([s, label]) => (
+              <Link key={s} to={`/category/${s}`}
+                className="text-xs px-3 py-1.5 rounded-full font-medium border transition-colors"
+                style={{ color: 'var(--color-primary)', borderColor: 'var(--color-primary)', background: 'transparent' }}>
+                {label}
+              </Link>
+            ))}
+            <Link to="/shop" className="text-xs px-3 py-1.5 rounded-full font-medium border transition-colors"
+              style={{ color: 'var(--color-primary)', borderColor: 'var(--color-primary)', background: 'transparent' }}>
+              All Products
+            </Link>
           </div>
         </div>
       </div>
