@@ -937,6 +937,68 @@ function injectMeta(html, { title, desc, canonical, ogTitle, ogDesc, ogImage, og
   return out;
 }
 
+// Insert pre-rendered static HTML (H1-H3 + category/bestseller links) into
+// <div id="root"> so Google can index meaningful content without executing
+// JS. React's render call replaces #root's children on mount, so this does
+// not affect the live app UI — it only exists in the initial HTML response.
+function injectHomeContent(html, contentHtml) {
+  if (!contentHtml) return html;
+  if (html.includes('<div id="root"></div>')) {
+    return html.replace('<div id="root"></div>', `<div id="root">${contentHtml}</div>`);
+  }
+  return html.replace('<div id="root">', `<div id="root">${contentHtml}`);
+}
+
+function he(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// Builds a semantic, keyword-rich static content block for the homepage:
+// H1 (brand intro), H2 category grid, H2 best-sellers grid with H3 product
+// names — all real anchor links Googlebot can crawl without JS.
+function buildHomeSeoContent({ storeName, siteUrl, categories = [], bestSellers = [] }) {
+  const catLinks = categories.map(c =>
+    `<li><a href="${he(siteUrl)}/category/${he(c.slug)}">${he(c.name)}</a></li>`
+  ).join('');
+
+  const productCards = bestSellers.map(p => {
+    const price = p.salePrice || p.price;
+    const img   = p.thumbnail || (p.images && p.images[0]) || '';
+    return `<li>
+      <a href="${he(siteUrl)}/product/${he(p.slug)}">
+        ${img ? `<img src="${he(img)}" alt="${he(p.name)}" width="200" height="200" loading="lazy"/>` : ''}
+        <h3>${he(p.name)}</h3>
+        <p>${he(p.brand || '')} ${price ? `— Rs.${Number(price).toLocaleString()}` : ''}</p>
+      </a>
+    </li>`;
+  }).join('');
+
+  return `
+<header>
+  <h1>${he(storeName)} — Shop Online in Sri Lanka | Electronics, Fashion &amp; More</h1>
+  <p>${he(storeName)} is Sri Lanka's online store for genuine electronics, fashion, home appliances and
+  more — with fast island-wide delivery, secure payments and the best prices in Colombo and beyond.</p>
+</header>
+<nav aria-label="Shop by category">
+  <h2>Shop by Category</h2>
+  <ul>${catLinks}</ul>
+</nav>
+<section aria-label="Best selling products">
+  <h2>Best Selling Products in Sri Lanka</h2>
+  <ul>${productCards}</ul>
+</section>
+<section>
+  <h2>Why Shop at ${he(storeName)}?</h2>
+  <h3>Island-Wide Fast Delivery</h3>
+  <p>Get your orders delivered across Sri Lanka, including Colombo, Kandy, Galle and Jaffna, within 1-5 business days.</p>
+  <h3>Genuine Products &amp; Warranty</h3>
+  <p>Every product sold at ${he(storeName)} is 100% authentic and backed by manufacturer warranty.</p>
+  <h3>Easy 14-Day Returns</h3>
+  <p>Not satisfied? Return your order within 14 days for a hassle-free refund.</p>
+</section>`;
+}
+
 async function getSeoMeta() {
   try {
     const rows = await Settings.find({
@@ -1336,11 +1398,28 @@ const seoRenderMiddleware = async (req, res) => {
           hasMap: `${siteUrl}/page/contact`,
           logo: { '@type': 'ImageObject', url: meta.ogImage },
         };
-        const out = injectMeta(html, {
+        // Fetch categories + best sellers for static, crawlable homepage content
+        const [homeCategories, bestSellers] = await Promise.all([
+          Category.find({ isActive: true }, 'name slug').limit(12).lean(),
+          Product.find({ isActive: true }, 'name slug thumbnail images brand price salePrice stock ratings')
+            .sort({ isFeatured: -1, 'ratings.count': -1, createdAt: -1 })
+            .limit(12)
+            .lean(),
+        ]);
+
+        const bestSellersItemListSchema = buildItemListSchema(
+          bestSellers, `${siteUrl}/shop`, `Best Selling Products — ${storeName} Sri Lanka`
+        );
+
+        const homeContentHtml = buildHomeSeoContent({
+          storeName, siteUrl, categories: homeCategories, bestSellers,
+        });
+
+        const out = injectMeta(injectHomeContent(html, homeContentHtml), {
           title: meta.metaTitle, desc: meta.metaDesc, canonical: siteUrl,
           ogImage: meta.ogImage, ogType: 'website',
           verification: meta.verification,
-          schemas: [websiteSchema, siteLinksSchema, storeSchema, orgSchema],
+          schemas: [websiteSchema, siteLinksSchema, storeSchema, orgSchema, bestSellersItemListSchema].filter(Boolean),
         });
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.setHeader('Cache-Control', 'no-cache, must-revalidate');
