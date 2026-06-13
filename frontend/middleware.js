@@ -1,23 +1,26 @@
 // frontend/middleware.js
 //
-// Vercel Edge Middleware — routes crawler/bot/link-preview requests to the
-// Railway backend's seoRenderMiddleware (which injects per-page <title>,
-// meta description, OG/Twitter tags, canonical and JSON-LD into index.html),
-// while normal human visitors continue to get the static, CDN-cached SPA shell.
+// Vercel Edge Middleware — proxies HTML page requests to the Railway
+// backend's seoRenderMiddleware (backend/routes/seo.js), which injects
+// per-page <title>, meta description, canonical, OG/Twitter tags, and
+// JSON-LD (Product/Breadcrumb/Review/AggregateRating/Organization, etc.)
+// into index.html before it's returned.
 //
-// ── REGRESSION FIX ───────────────────────────────────────────────────────────
-// The previous version used a single regex `matcher` with a negative lookahead
-// (`(?!api|static|...).*`). Vercel compiles `matcher` patterns with
-// path-to-regexp, which does NOT reliably support that pattern for nested
-// paths — so the middleware silently failed to run for `/product/:slug` (and
-// other multi-segment routes). Result: bots/crawlers requesting product pages
-// fell through to Vercel's static `index.html`, which still carries the
-// HOMEPAGE's <title>, meta description, canonical, OG tags, and
-// WebSite/Organization JSON-LD instead of product-specific data.
+// ── HISTORY OF THIS FILE ─────────────────────────────────────────────────
+// v1: matcher used a negative-lookahead regex Vercel's path-to-regexp
+//     couldn't compile for nested routes -> /product/:slug never proxied,
+//     so it fell back to the static homepage shell.
+// v2: fixed the matcher, but only proxied requests whose User-Agent matched
+//     a hardcoded bot/crawler list. Result: `view-source:` in a real browser
+//     (and any crawler/tool NOT on that list) still got the generic static
+//     homepage shell for /product/:slug, /category/:slug, etc.
 //
-// Fix: match EVERYTHING (a pattern Vercel always compiles correctly), and do
-// all exclusion logic (assets, /api, bots-only) inside the function body using
-// plain string checks on `pathname` — no regex-in-matcher ambiguity.
+// ── THIS VERSION ─────────────────────────────────────────────────────────
+// Proxy ALL HTML page requests (everyone — humans, browsers, every crawler)
+// to Railway's SSR endpoint. This removes the entire "is this UA a bot?"
+// guessing game: every visitor, tool, and crawler sees the same correct,
+// page-specific <head>. seoRenderMiddleware is a lightweight DB lookup +
+// string substitution, so the per-request cost is small.
 
 export const config = {
     matcher: '/:path*',
@@ -32,22 +35,6 @@ export const config = {
   const SKIP_EXACT = new Set(['/robots.txt', '/sitemap.xml']);
   const SKIP_EXTENSION_RE = /\.(?:ico|png|jpg|jpeg|gif|webp|svg|css|js|map|json|xml|txt|woff2?|ttf)$/i;
   
-  // User-agent substrings for crawlers, search bots, and link-preview/unfurl
-  // services that do NOT execute JavaScript before reading <head> tags.
-  const BOT_UA_REGEX = new RegExp(
-    [
-      'bot', 'crawl', 'spider', 'slurp', 'crawler',
-      'facebookexternalhit', 'facebookcatalog', 'whatsapp',
-      'telegrambot', 'slackbot', 'discordbot', 'linkedinbot',
-      'twitterbot', 'pinterest', 'pinterestbot', 'redditbot',
-      'embedly', 'quora link preview', 'tumblr', 'vkshare',
-      'skypeuripreview', 'w3c_validator', 'applebot',
-      'googlebot', 'bingbot', 'yandex', 'baiduspider', 'duckduckbot',
-      'mj12bot', 'ahrefsbot', 'semrushbot', 'screaming frog',
-    ].join('|'),
-    'i'
-  );
-  
   function shouldSkip(pathname) {
     if (SKIP_EXACT.has(pathname)) return true;
     if (SKIP_EXTENSION_RE.test(pathname)) return true;
@@ -60,36 +47,32 @@ export const config = {
     // Static assets, API routes, and already-handled SEO files: never touch.
     if (shouldSkip(pathname)) return;
   
+    // Only proxy GET/HEAD navigations that accept HTML. This avoids
+    // interfering with prefetch requests for JS chunks, etc. that don't carry
+    // an Accept header indicating an HTML document.
+    const accept = request.headers.get('accept') || '';
+    if (request.method !== 'GET' && request.method !== 'HEAD') return;
+    if (accept && !accept.includes('text/html') && !accept.includes('*/*')) return;
+  
     const ua = request.headers.get('user-agent') || '';
-  
-    // Human visitors keep getting the default static index.html shell from
-    // Vercel's edge cache — including on /product/:slug, /category/:slug, etc.
-    if (!BOT_UA_REGEX.test(ua)) return;
-  
-    // Bot/crawler/link-preview request on a page route (/, /product/:slug,
-    // /category/:slug, /brand/:slug, /shop, /page/:slug, ...) — proxy to the
-    // Railway SSR endpoint, which injects per-page meta + JSON-LD.
     const target = new URL(pathname + search, SSR_ORIGIN);
   
     try {
       const upstream = await fetch(target.toString(), {
-        method: 'GET',
+        method: request.method,
         headers: {
           'user-agent': ua,
-          accept: request.headers.get('accept') || 'text/html',
+          accept: accept || 'text/html',
         },
         redirect: 'follow',
       });
   
       const headers = new Headers(upstream.headers);
-      // IMPORTANT: do NOT let Vercel's edge cache this response. These SSR
-      // passthroughs are bot-only (low volume), and Railway already sets its
-      // own correct per-route Cache-Control (no-cache, must-revalidate).
-      // Caching here at the edge risks a product response being served back
-      // for "/" (or vice versa) if cache keys are ever normalized/collapsed
-      // across paths during propagation.
+      // Never let Vercel's edge cache this — Railway already sets its own
+      // correct per-route Cache-Control (no-cache, must-revalidate), and
+      // caching here risks cross-path pollution (one page's HTML served for
+      // another's URL).
       headers.set('Cache-Control', 'private, no-store, max-age=0, must-revalidate');
-      headers.set('Vary', 'User-Agent');
       headers.set('X-SEO-SSR', 'railway');
   
       return new Response(upstream.body, {
@@ -97,8 +80,8 @@ export const config = {
         headers,
       });
     } catch (err) {
-      // If the SSR backend is down, don't break crawling — fall back to the
-      // static shell rather than returning an error to the bot.
+      // If the SSR backend is down, fail open to the static shell rather than
+      // breaking the site for visitors.
       return;
     }
   }
