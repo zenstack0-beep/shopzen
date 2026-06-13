@@ -26,13 +26,59 @@ function proxyImage(imageUrl, res, fallbackContentType = 'image/png') {
 // ── Favicon proxy — served from shopzen.lk/api/settings/favicon.ico ──────────
 // vercel.json rewrites /favicon.ico → /api/settings/favicon.ico
 // so Google always gets the current logo as a proper ICO/PNG
+// Build a proper multi-size ICO by fetching PNGs and combining manually
+async function fetchBuffer(url) {
+  return new Promise((resolve, reject) => {
+    const lib = url.startsWith('https') ? https : http;
+    const chunks = [];
+    lib.get(url, (r) => {
+      r.on('data', c => chunks.push(c));
+      r.on('end', () => resolve(Buffer.concat(chunks)));
+      r.on('error', reject);
+    }).on('error', reject);
+  });
+}
+
 router.get('/favicon.ico', async (req, res) => {
   try {
     const logoUrl = await getLogoUrl();
     if (!logoUrl) return res.status(404).send('No favicon configured');
-    // Ask Cloudinary for a 48x48 ICO (covers 16, 32, 48 sizes)
-    const url = logoUrl.replace('/upload/', '/upload/w_48,h_48,c_fit,f_ico/');
-    proxyImage(url, res, 'image/x-icon');
+
+    // Fetch 16, 32, 48 px PNG versions from Cloudinary
+    const sizes = [16, 32, 48];
+    const pngBuffers = await Promise.all(
+      sizes.map(s => fetchBuffer(logoUrl.replace('/upload/', `/upload/w_${s},h_${s},c_fit,f_png/`)))
+    );
+
+    // Build ICO manually: ICONDIR + ICONDIRENTRY * n + PNG data
+    const num = sizes.length;
+    const header = Buffer.alloc(6);
+    header.writeUInt16LE(0, 0);   // reserved
+    header.writeUInt16LE(1, 2);   // type: ICO
+    header.writeUInt16LE(num, 4); // count
+
+    let offset = 6 + num * 16;
+    const entries = [];
+    for (let i = 0; i < num; i++) {
+      const s = sizes[i];
+      const entry = Buffer.alloc(16);
+      entry.writeUInt8(s === 256 ? 0 : s, 0);  // width
+      entry.writeUInt8(s === 256 ? 0 : s, 1);  // height
+      entry.writeUInt8(0, 2);                   // color count
+      entry.writeUInt8(0, 3);                   // reserved
+      entry.writeUInt16LE(1, 4);                // planes
+      entry.writeUInt16LE(32, 6);               // bit count
+      entry.writeUInt32LE(pngBuffers[i].length, 8);  // size
+      entry.writeUInt32LE(offset, 12);               // offset
+      entries.push(entry);
+      offset += pngBuffers[i].length;
+    }
+
+    const ico = Buffer.concat([header, ...entries, ...pngBuffers]);
+
+    res.setHeader('Content-Type', 'image/x-icon');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(ico);
   } catch (err) {
     res.status(500).send(err.message);
   }
