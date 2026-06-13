@@ -25,56 +25,48 @@
       "dest": "https://shopzen-production.up.railway.app/api/seo/robots.txt"
     },
     {
-      "src": "/api/(.*)",
-      "dest": "https://shopzen-production.up.railway.app/api/$1"
-    },
-    {
       "src": "/favicon.ico",
       "headers": {
-        "Cache-Control": "public, max-age=86400",
+        "Cache-Control": "public, max-age=3600",
         "Content-Type": "image/x-icon"
       },
-      "dest": "https://res.cloudinary.com/dn7tvazaw/image/upload/w_32,h_32,c_fit,f_ico/v1779758903/shopzen/1779758893538-714817024.png"
+      "dest": "https://shopzen-production.up.railway.app/api/settings/favicon.ico"
     },
     {
       "src": "/favicon.png",
       "headers": {
-        "Cache-Control": "public, max-age=86400",
+        "Cache-Control": "public, max-age=3600",
         "Content-Type": "image/png"
       },
-      "dest": "https://res.cloudinary.com/dn7tvazaw/image/upload/w_192,h_192,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png"
+      "dest": "https://shopzen-production.up.railway.app/api/settings/favicon.png"
     },
     {
       "src": "/favicon-32x32.png",
       "headers": {
-        "Cache-Control": "public, max-age=86400",
+        "Cache-Control": "public, max-age=3600",
         "Content-Type": "image/png"
       },
-      "dest": "https://res.cloudinary.com/dn7tvazaw/image/upload/w_32,h_32,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png"
+      "dest": "https://shopzen-production.up.railway.app/api/settings/favicon.png"
     },
     {
       "src": "/favicon-96x96.png",
       "headers": {
-        "Cache-Control": "public, max-age=86400",
+        "Cache-Control": "public, max-age=3600",
         "Content-Type": "image/png"
       },
-      "dest": "https://res.cloudinary.com/dn7tvazaw/image/upload/w_96,h_96,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png"
-    },
-    {
-      "src": "/favicon-16x16.png",
-      "headers": {
-        "Cache-Control": "public, max-age=86400",
-        "Content-Type": "image/png"
-      },
-      "dest": "https://res.cloudinary.com/dn7tvazaw/image/upload/w_16,h_16,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png"
+      "dest": "https://shopzen-production.up.railway.app/api/settings/favicon.png"
     },
     {
       "src": "/apple-touch-icon.png",
       "headers": {
-        "Cache-Control": "public, max-age=86400",
+        "Cache-Control": "public, max-age=3600",
         "Content-Type": "image/png"
       },
-      "dest": "https://res.cloudinary.com/dn7tvazaw/image/upload/w_180,h_180,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png"
+      "dest": "https://shopzen-production.up.railway.app/api/settings/favicon.png"
+    },
+    {
+      "src": "/api/(.*)",
+      "dest": "https://shopzen-production.up.railway.app/api/$1"
     },
     {
       "src": "/static/(.*)",
