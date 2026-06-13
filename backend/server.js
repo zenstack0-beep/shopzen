@@ -107,9 +107,20 @@ if (fs.existsSync(frontendBuildPath)) {
 // or fallback index.html for any other request that reaches Railway.
 app.get('*', seoRenderMiddleware);
 
+// ── MongoDB connection event logging ──────────────────────────────────────────
+mongoose.connection.on('disconnected', () => console.warn('⚠️  MongoDB disconnected — schedulers will skip until reconnected'));
+mongoose.connection.on('reconnected',  () => console.log('✅ MongoDB reconnected'));
+mongoose.connection.on('error',        (err) => console.error('❌ MongoDB connection error:', err.message));
+
 async function startServer() {
   try {
-    await mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 8000 });
+    await mongoose.connect(process.env.MONGODB_URI, {
+      serverSelectionTimeoutMS: 8000,
+      socketTimeoutMS: 45000,
+      heartbeatFrequencyMS: 10000,  // probe idle connections every 10s to keep them alive
+      maxPoolSize: 10,
+      family: 4,                    // force IPv4 — avoids IPv6 resolution delays on Railway
+    });
     console.log('✅ MongoDB Connected');
 
     // Start proactive Facebook/Instagram token refresh scheduler

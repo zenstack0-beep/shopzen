@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -788,6 +789,8 @@ const gcSlipExpiredHtml = async (card) => {
 
 // ── Slip expiry cron (runs every 15 min) ──────────────────────────────────────
 const runSlipExpiryCron = async () => {
+  // Skip tick if MongoDB is not connected — avoids spamming error logs during Atlas blips
+  if (mongoose.connection.readyState !== 1) return;
   try {
     const now = new Date();
     const expired = await GiftCard.find({

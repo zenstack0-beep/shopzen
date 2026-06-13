@@ -130,14 +130,37 @@ router.get('/apple-touch-icon.png', async (req, res) => {
   } catch (err) { res.status(500).send(err.message); }
 });
 
+// ── In-memory settings cache (30s TTL) ───────────────────────────────────────
+// Prevents a DB hit on every frontend poll of GET /api/settings,
+// and returns the last-known value gracefully during brief Atlas blips.
+let _settingsCache = null;
+let _settingsCacheAt = 0;
+const SETTINGS_CACHE_TTL = 30 * 1000; // 30 seconds
+
+function invalidateSettingsCache() {
+  _settingsCache = null;
+  _settingsCacheAt = 0;
+}
+
 // Get all settings as a flat key→value object (public — needed for store name etc.)
 router.get('/', async (req, res) => {
   try {
+    const now = Date.now();
+    if (_settingsCache && now - _settingsCacheAt < SETTINGS_CACHE_TTL) {
+      return res.json(_settingsCache);
+    }
     const settings = await Settings.find();
     const obj = {};
     settings.forEach(s => { obj[s.key] = s.value; });
+    _settingsCache = obj;
+    _settingsCacheAt = now;
     res.json(obj);
   } catch (err) {
+    // If DB is temporarily down but we have a cached value, serve it
+    if (_settingsCache) {
+      console.warn('[Settings] DB error, serving cached settings:', err.message);
+      return res.json(_settingsCache);
+    }
     res.status(500).json({ message: err.message });
   }
 });
@@ -160,7 +183,8 @@ router.put('/', adminAuth, async (req, res) => {
     }));
 
     await Settings.bulkWrite(ops, { ordered: false });
-    clearThemeCache(); // invalidate email theme cache so next mail uses new colours
+    clearThemeCache();       // invalidate email theme cache so next mail uses new colours
+    invalidateSettingsCache(); // invalidate GET /api/settings in-memory cache
     res.json({ success: true });
   } catch (err) {
     console.error('Settings save error:', err);
@@ -169,3 +193,4 @@ router.put('/', adminAuth, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.invalidateSettingsCache = invalidateSettingsCache;
