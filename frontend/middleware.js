@@ -82,8 +82,14 @@ export const config = {
       });
   
       const headers = new Headers(upstream.headers);
-      // Let bots see fresh per-page meta on every crawl.
-      headers.set('Cache-Control', 'public, max-age=0, s-maxage=120, stale-while-revalidate=600');
+      // IMPORTANT: do NOT let Vercel's edge cache this response. These SSR
+      // passthroughs are bot-only (low volume), and Railway already sets its
+      // own correct per-route Cache-Control (no-cache, must-revalidate).
+      // Caching here at the edge risks a product response being served back
+      // for "/" (or vice versa) if cache keys are ever normalized/collapsed
+      // across paths during propagation.
+      headers.set('Cache-Control', 'private, no-store, max-age=0, must-revalidate');
+      headers.set('Vary', 'User-Agent');
       headers.set('X-SEO-SSR', 'railway');
   
       return new Response(upstream.body, {
