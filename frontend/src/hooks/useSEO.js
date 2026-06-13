@@ -50,6 +50,20 @@ export function getSeoConfig() {
   return window.__SHOPZEN_SEO__ || {};
 }
 
+// ─── Cloudinary OG image helper ───────────────────────────────────────────────
+// Applies social-card transforms so the image is exactly 1200×630 for previews.
+function buildOgImage(rawUrl) {
+  if (!rawUrl) return rawUrl;
+  // Only transform Cloudinary URLs; leave everything else as-is.
+  if (!rawUrl.includes('res.cloudinary.com')) return rawUrl;
+  // Insert upload transforms after /upload/
+  // Remove any existing transform segment (e.g. v1780912292) if already present.
+  return rawUrl.replace(
+    /\/upload\/(v\d+\/)?/,
+    '/upload/w_1200,h_630,c_fill,f_jpg,q_auto/$1'
+  );
+}
+
 // ─── GA4 / analytics helpers ──────────────────────────────────────────────────
 export function trackPageView(url, title) {
   const { ga4Id } = getSeoConfig();
@@ -147,38 +161,48 @@ export default function useSEO({
   const defaultDesc   = cfg.defaultDescription || 'Premium online store — quality products, delivered fast.';
 
   // ── Build title ──────────────────────────────────────────────────────────────
-  // For products: include buying intent and Sri Lanka for local SEO (max 65 chars)
+  // Product pages: "Product Name Price in Sri Lanka | ShopZen"
+  // This pattern captures "price in sri lanka" buying-intent searches.
   let finalTitle;
   if (title && type === 'product') {
-    const withSite  = title + ' | ShopZen Sri Lanka';
-    const withShort = title + ' | ShopZen';
-    finalTitle = withSite.length <= 65 ? withSite : withShort.length <= 65 ? withShort : title.slice(0, 50) + ' | ShopZen';
+    const withPriceSuffix = `${title} Price in Sri Lanka | ShopZen`;
+    const withShort       = `${title} | ShopZen`;
+    finalTitle = withPriceSuffix.length <= 65
+      ? withPriceSuffix
+      : withShort.length <= 65
+        ? withShort
+        : title.slice(0, 50) + ' | ShopZen';
   } else {
-    finalTitle = title ? title + ' | ' + siteName : siteName;
+    finalTitle = title ? `${title} | ${siteName}` : siteName;
   }
 
   // ── Build description ─────────────────────────────────────────────────────────
-  // For products: rich buying-intent description with price and location signals
+  // Pattern: "<snippet>. <price>. Fast delivery across Sri Lanka. Shop at ShopZen."
+  // Matches Google's preferred snippet style and captures price/location signals.
   let finalDesc;
   if (description) {
     finalDesc = description;
   } else if (type === 'product' && product) {
     const price    = product.salePrice || product.price;
-    const priceStr = price ? 'Rs.' + price.toLocaleString() : '';
-    const brand    = product.brand ? product.brand + ' ' : '';
-    const cat      = product.category && product.category.name ? ' ' + product.category.name : '';
+    const origPrice = product.isOnSale && product.price ? product.price : null;
+    const priceStr = price ? `Rs.${price.toLocaleString()}` : '';
+    const wasStr   = origPrice && origPrice !== price ? ` (was Rs.${origPrice.toLocaleString()})` : '';
+    const brand    = product.brand ? `${product.brand} ` : '';
+    const cat      = product.category?.name ? ` ${product.category.name}` : '';
     const plain    = String(product.shortDescription || product.description || '')
                        .replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
-    const snippet  = plain.slice(0, 80) || (brand + product.name);
+    const snippet  = plain.slice(0, 80) || `${brand}${product.name}`;
     finalDesc = priceStr
-      ? (snippet + '. Buy ' + brand + product.name + cat + ' for ' + priceStr + ' in Sri Lanka. Fast delivery. Best price at ShopZen.').slice(0, 165)
-      : (snippet + '. Shop ' + brand + product.name + cat + ' online in Sri Lanka. Fast delivery, best prices at ShopZen.').slice(0, 165);
+      ? `${snippet}. ${priceStr}${wasStr}. Fast delivery across Sri Lanka. Shop at ShopZen.`.slice(0, 165)
+      : `${snippet}. Shop ${brand}${product.name}${cat} online in Sri Lanka. Fast delivery, best prices at ShopZen.`.slice(0, 165);
   } else {
     finalDesc = defaultDesc;
   }
 
-  const finalImage  = image       || defaultImage;
-  const finalUrl    = url         || siteUrl + location.pathname;
+  // ── Build OG image with Cloudinary social transforms ──────────────────────────
+  const rawImage    = image || defaultImage;
+  const finalImage  = buildOgImage(rawImage);
+  const finalUrl    = url   || siteUrl + location.pathname;
 
   useEffect(() => {
     document.title = finalTitle;
@@ -186,21 +210,33 @@ export default function useSEO({
     setMeta('description', finalDesc);
     setMeta('robots', noindex ? 'noindex,nofollow' : 'index,follow,max-image-preview:large');
 
-    // Keywords meta — rich buying-intent signals for Google/Bing
+    // ── Keywords — rich buying-intent signals ──────────────────────────────────
+    // Pattern: exact product name, brand, category, slug variants, price + location intent
     let kwString = keywords;
     if (!kwString && product) {
-      const base = [product.name, product.brand, product.sku, product.category?.name, ...(product.tags || [])].filter(Boolean);
-      const intent = [
-        'buy ' + product.name,
-        product.name + ' price sri lanka',
-        product.name + ' online',
-        product.brand ? product.brand + ' ' + (product.category?.name || '') : null,
-        'online shopping sri lanka',
-        'shopzen',
+      const nameLc  = product.name.toLowerCase();
+      const slugLc  = (product.slug || product.name).toLowerCase().replace(/[^a-z0-9]+/g, '');
+      const brand   = product.brand || '';
+      const catName = product.category?.name || '';
+      const base    = [product.name, brand, product.sku, catName, ...(product.tags || [])].filter(Boolean);
+      const intent  = [
+        `${nameLc} price in sri lanka`,
+        `buy ${brand} ${product.name}`.trim() + ' online sri lanka',
+        `${brand} ${slugLc}`.trim(),
+        `${nameLc} price`,
+        `colombo delivery ${nameLc}`,
+        `${nameLc} review`,
+        `buy ${brand.toLowerCase()} ${product.name.toLowerCase()} in sri lanka`.trim(),
+        `best ${catName.toLowerCase()} for sri lankan`.trim(),
+        `${nameLc} features and price`,
+        `sri lankan rupee price ${nameLc}`,
+        brand ? `${brand.toLowerCase()} appliances sri lanka` : null,
+        'sri lanka',
       ].filter(Boolean);
       kwString = [...base, ...intent].join(', ');
     }
     if (kwString) setMeta('keywords', kwString);
+
     setLink('canonical', finalUrl);
 
     // Open Graph

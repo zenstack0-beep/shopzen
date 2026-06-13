@@ -115,32 +115,45 @@ export default function ProductDetail() {
   const sym = settings?.currencySymbol || 'Rs.';
 
   // ── SEO: dynamic meta for this product ─────────────────────────────────────
-  // Build a rich buying-intent description for Google ranking
+  // Build a rich buying-intent description — pattern matches target page source:
+  // "<snippet>. Rs.<price> (was Rs.<orig>). Fast delivery across Sri Lanka. Shop at ShopZen."
   const seoDescription = React.useMemo(() => {
     if (!product) return undefined;
-    const price    = product.salePrice || product.price;
-    const priceStr = price ? 'Rs.' + price.toLocaleString() : '';
-    const brand    = product.brand ? product.brand + ' ' : '';
-    const cat      = product.category?.name ? ' ' + product.category.name : '';
-    const plain    = String(product.shortDescription || product.description || '')
-                       .replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
-    const snippet  = plain.slice(0, 80) || (brand + product.name);
+    const price     = product.salePrice || product.price;
+    const origPrice = product.isOnSale && product.price ? product.price : null;
+    const priceStr  = price ? `Rs.${price.toLocaleString()}` : '';
+    const wasStr    = origPrice && origPrice !== price ? ` (was Rs.${origPrice.toLocaleString()})` : '';
+    const brand     = product.brand ? `${product.brand} ` : '';
+    const cat       = product.category?.name ? ` ${product.category.name}` : '';
+    const plain     = String(product.shortDescription || product.description || '')
+                        .replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    const snippet   = plain.slice(0, 80) || `${brand}${product.name}`;
     return priceStr
-      ? (snippet + '. Buy ' + brand + product.name + cat + ' for ' + priceStr + ' in Sri Lanka. Fast delivery. Best price at ShopZen.').slice(0, 165)
-      : (snippet + '. Shop ' + brand + product.name + cat + ' online in Sri Lanka. Fast delivery, best prices at ShopZen.').slice(0, 165);
+      ? `${snippet}. ${priceStr}${wasStr}. Fast delivery across Sri Lanka. Shop at ShopZen.`.slice(0, 165)
+      : `${snippet}. Shop ${brand}${product.name}${cat} online in Sri Lanka. Fast delivery, best prices at ShopZen.`.slice(0, 165);
   }, [product]);
 
-  // Build rich keywords with buying intent
+  // Build rich keywords — slug-variant pattern matching target page source
   const seoKeywords = React.useMemo(() => {
     if (!product) return undefined;
-    const base = [product.name, product.brand, product.sku, product.category?.name, ...(product.tags || [])].filter(Boolean);
-    const intent = [
-      'buy ' + product.name,
-      product.name + ' price sri lanka',
-      product.name + ' online',
-      product.brand ? product.brand + ' ' + (product.category?.name || '') : null,
-      'online shopping sri lanka',
-      'shopzen',
+    const nameLc  = product.name.toLowerCase();
+    const slugLc  = (product.slug || product.name).toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const brand   = product.brand || '';
+    const catName = product.category?.name || '';
+    const base    = [product.name, brand, product.sku, catName, ...(product.tags || [])].filter(Boolean);
+    const intent  = [
+      `${nameLc} price in sri lanka`,
+      `buy ${brand} ${product.name}`.trim() + ' online sri lanka',
+      `${brand} ${slugLc}`.trim(),
+      `${nameLc} price`,
+      `colombo delivery ${nameLc}`,
+      `${nameLc} review`,
+      `buy ${brand.toLowerCase()} ${product.name.toLowerCase()} in sri lanka`.trim(),
+      `best ${catName.toLowerCase()} for sri lankan`.trim(),
+      `${nameLc} features and price`,
+      `sri lankan rupee price ${nameLc}`,
+      brand ? `${brand.toLowerCase()} appliances sri lanka` : null,
+      'sri lanka',
     ].filter(Boolean);
     return [...base, ...intent].join(', ');
   }, [product]);
@@ -148,7 +161,7 @@ export default function ProductDetail() {
   useSEO({
     title:       product?.name,
     description: seoDescription,
-    image:       product?.images?.[0] || product?.thumbnail,
+    image:       product?.thumbnail || product?.images?.[0],
     type:        'product',
     product,
     reviews,
