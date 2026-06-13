@@ -5,21 +5,32 @@
 // meta description, OG/Twitter tags, canonical and JSON-LD into index.html),
 // while normal human visitors continue to get the static, CDN-cached SPA shell.
 //
-// Without this, every page (product/category/brand) served to bots and
-// social-link-preview scrapers returns the generic homepage <head> tags,
-// causing duplicate title/meta warnings in Search Console and broken
-// WhatsApp/Facebook/Twitter share previews for product links.
+// ── REGRESSION FIX ───────────────────────────────────────────────────────────
+// The previous version used a single regex `matcher` with a negative lookahead
+// (`(?!api|static|...).*`). Vercel compiles `matcher` patterns with
+// path-to-regexp, which does NOT reliably support that pattern for nested
+// paths — so the middleware silently failed to run for `/product/:slug` (and
+// other multi-segment routes). Result: bots/crawlers requesting product pages
+// fell through to Vercel's static `index.html`, which still carries the
+// HOMEPAGE's <title>, meta description, canonical, OG tags, and
+// WebSite/Organization JSON-LD instead of product-specific data.
+//
+// Fix: match EVERYTHING (a pattern Vercel always compiles correctly), and do
+// all exclusion logic (assets, /api, bots-only) inside the function body using
+// plain string checks on `pathname` — no regex-in-matcher ambiguity.
 
 export const config = {
-    // Run on every request except static assets, the API (already proxied by
-    // vercel.json), and common file extensions.
-    matcher: [
-      '/((?!api|static|_next|favicon|manifest|robots\\.txt|sitemap|.*\\.(?:ico|png|jpg|jpeg|gif|webp|svg|css|js|map|json|xml|txt|woff|woff2|ttf)$).*)',
-    ],
+    matcher: '/:path*',
   };
   
   // Backend that hosts seoRenderMiddleware (backend/routes/seo.js).
   const SSR_ORIGIN = 'https://shopzen-production.up.railway.app';
+  
+  // Paths/prefixes that must NEVER be proxied — these are served directly by
+  // Vercel (static assets) or already proxied to Railway via vercel.json (/api).
+  const SKIP_PREFIXES = ['/api/', '/static/', '/_next/', '/favicon', '/manifest'];
+  const SKIP_EXACT = new Set(['/robots.txt', '/sitemap.xml']);
+  const SKIP_EXTENSION_RE = /\.(?:ico|png|jpg|jpeg|gif|webp|svg|css|js|map|json|xml|txt|woff2?|ttf)$/i;
   
   // User-agent substrings for crawlers, search bots, and link-preview/unfurl
   // services that do NOT execute JavaScript before reading <head> tags.
@@ -37,17 +48,28 @@ export const config = {
     'i'
   );
   
+  function shouldSkip(pathname) {
+    if (SKIP_EXACT.has(pathname)) return true;
+    if (SKIP_EXTENSION_RE.test(pathname)) return true;
+    return SKIP_PREFIXES.some((p) => pathname.startsWith(p));
+  }
+  
   export default async function middleware(request) {
+    const { pathname, search } = new URL(request.url);
+  
+    // Static assets, API routes, and already-handled SEO files: never touch.
+    if (shouldSkip(pathname)) return;
+  
     const ua = request.headers.get('user-agent') || '';
   
-    // Human visitors (and anything we don't recognize as a bot) keep getting
-    // the default static index.html shell from Vercel's edge cache.
-    if (!BOT_UA_REGEX.test(ua)) {
-      return; // fall through to normal Vercel routing
-    }
+    // Human visitors keep getting the default static index.html shell from
+    // Vercel's edge cache — including on /product/:slug, /category/:slug, etc.
+    if (!BOT_UA_REGEX.test(ua)) return;
   
-    const incoming = new URL(request.url);
-    const target = new URL(incoming.pathname + incoming.search, SSR_ORIGIN);
+    // Bot/crawler/link-preview request on a page route (/, /product/:slug,
+    // /category/:slug, /brand/:slug, /shop, /page/:slug, ...) — proxy to the
+    // Railway SSR endpoint, which injects per-page meta + JSON-LD.
+    const target = new URL(pathname + search, SSR_ORIGIN);
   
     try {
       const upstream = await fetch(target.toString(), {
