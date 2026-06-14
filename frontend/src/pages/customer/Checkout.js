@@ -17,102 +17,140 @@ const COUNTRIES   = ['Sri Lanka','Australia','Bangladesh','Canada','China','Fran
 const SL_CITIES   = ['Colombo 1','Colombo 2','Colombo 3','Colombo 4','Colombo 5','Colombo 6','Colombo 7','Colombo 8','Colombo 9','Colombo 10','Akarawitia','Angoda','Athurugiriya','Attidiya','Avissawella','Battaramulla','Boralesgamuwa','Dehiwala','Homagama','Kaduwela','Kesbewa','Kottawa','Kotte','Maharagama','Malabe','Moratuwa','Mount Lavinia','Nugegoda','Pannipitiya','Piliyandala','Rajagiriya','Ratmalana','Sri Jayawardenepura Kotte','Wattala','Wellampitiya','Gampaha','Kalutara','Kandy','Matale','Nuwara Eliya','Galle','Matara','Hambantota','Jaffna','Trincomalee','Batticaloa','Kurunegala','Anuradhapura','Polonnaruwa','Badulla','Ratnapura','Kegalle','Other'];
 
 // ── PayHere popup launcher ───────────────────────────────────────────────────
-// Submits to a popup window so the main app tab is never navigated away.
 const PayHereForm = ({ data, onCancel, onSuccess }) => {
-  const formRef    = useRef();
-  const popupRef   = useRef(null);
-  const pollRef    = useRef(null);
-  const [popupBlocked, setPopupBlocked] = useState(false);
-  const [launched,     setLaunched]     = useState(false);
+  const formRef        = useRef(null);
+  const popupRef       = useRef(null);
+  const pollRef        = useRef(null);
+  const didLaunchRef   = useRef(false);          // guard against double-launch (React strict mode)
+  const [status, setStatus] = useState('launching'); // 'launching' | 'open' | 'blocked'
 
-  const launchPopup = () => {
-    // Open blank popup first (must be synchronous / user-gesture context)
-    const width  = 700;
-    const height = 600;
-    const left   = Math.max(0, (window.screen.width  - width)  / 2);
-    const top    = Math.max(0, (window.screen.height - height) / 2);
-    const popup  = window.open('', 'payhere_checkout',
-      `width=${width},height=${height},top=${top},left=${left},resizable=yes,scrollbars=yes`
+  // Stop polling helper
+  const stopPoll = () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
+
+  // Start polling only after a safe delay so the popup has time to load
+  const startPoll = (popup) => {
+    stopPoll();
+    // Wait 3 seconds before we start watching — gives PayHere time to fully load
+    setTimeout(() => {
+      pollRef.current = setInterval(() => {
+        if (popup.closed) {
+          stopPoll();
+          onSuccess();
+        }
+      }, 800);
+    }, 3000);
+  };
+
+  const openPopup = () => {
+    const width  = 750;
+    const height = 620;
+    const left   = Math.round((window.screen.width  - width)  / 2);
+    const top    = Math.round((window.screen.height - height) / 2);
+
+    const popup = window.open(
+      'about:blank',
+      'payhere_popup',
+      `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=yes`
     );
 
+    // Popup blocked
     if (!popup || popup.closed || typeof popup.closed === 'undefined') {
-      setPopupBlocked(true);
+      setStatus('blocked');
       return;
     }
 
     popupRef.current = popup;
-    setLaunched(true);
 
-    // Submit form into popup
+    // Submit the hidden form into the popup
     if (formRef.current) {
-      formRef.current.target = 'payhere_checkout';
+      formRef.current.target = 'payhere_popup';
       formRef.current.submit();
     }
 
-    // Poll: when popup closes, treat as payment attempted → navigate to orders
-    pollRef.current = setInterval(() => {
-      if (popup.closed) {
-        clearInterval(pollRef.current);
-        // PayHere redirects to our returnUrl which closes the popup.
-        // We navigate to my-orders; the backend notify webhook will have
-        // already updated the order status.
-        onSuccess();
-      }
-    }, 500);
+    setStatus('open');
+    startPoll(popup);
   };
 
   useEffect(() => {
-    launchPopup();
-    return () => { clearInterval(pollRef.current); };
+    // Strict-mode guard: only launch once
+    if (didLaunchRef.current) return;
+    didLaunchRef.current = true;
+    openPopup();
+    return () => stopPoll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const focusPopup = () => {
+    if (popupRef.current && !popupRef.current.closed) popupRef.current.focus();
+  };
+
+  const handleCancel = () => {
+    stopPoll();
+    if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
+    onCancel();
+  };
+
   return (
-    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center">
-      <div className="bg-white rounded-2xl p-8 max-w-sm w-full mx-4 text-center shadow-2xl">
+    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl p-8 max-w-sm w-full text-center shadow-2xl">
         <div className="text-4xl mb-3">💳</div>
 
-        {popupBlocked ? (
+        {status === 'blocked' && (
           <>
             <h3 className="font-bold text-gray-900 text-lg mb-2">Popup Blocked</h3>
             <p className="text-gray-500 text-sm mb-5">
-              Your browser blocked the PayHere popup. Please allow popups for this site and try again.
+              Your browser blocked the PayHere window.<br />
+              Allow popups for this site, then click below.
             </p>
             <button
-              onClick={() => { setPopupBlocked(false); launchPopup(); }}
+              onClick={() => { didLaunchRef.current = false; openPopup(); }}
               className="w-full py-3 rounded-xl bg-indigo-600 text-white font-bold text-sm mb-3 hover:bg-indigo-700 transition-colors"
             >
-              Open PayHere Payment
+              Open Payment Window
             </button>
-            <button onClick={onCancel} className="text-sm text-gray-400 hover:text-gray-600 underline">Cancel</button>
+            <button onClick={handleCancel} className="text-sm text-gray-400 hover:text-gray-600 underline">Cancel</button>
           </>
-        ) : launched ? (
-          <>
-            <h3 className="font-bold text-gray-900 text-lg mb-2">Complete Your Payment</h3>
-            <p className="text-gray-500 text-sm mb-4">
-              A PayHere window has opened. Complete your payment there — <strong>do not close this tab</strong>.
-            </p>
-            <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-5" />
-            <button
-              onClick={() => { if (popupRef.current && !popupRef.current.closed) popupRef.current.focus(); }}
-              className="w-full py-2.5 rounded-xl bg-indigo-600 text-white font-semibold text-sm mb-3 hover:bg-indigo-700 transition-colors"
-            >
-              Bring PayHere to Front
-            </button>
-            <button onClick={onCancel} className="text-sm text-gray-400 hover:text-gray-600 underline">Cancel payment</button>
-          </>
-        ) : (
+        )}
+
+        {status === 'launching' && (
           <>
             <h3 className="font-bold text-gray-900 text-lg mb-2">Opening PayHere…</h3>
             <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
           </>
         )}
 
-        {/* Hidden form — submits into popup window via target="payhere_checkout" */}
-        <form ref={formRef} method="POST" action={data.checkoutUrl} target="payhere_checkout" style={{ display: 'none' }}>
-          {Object.entries(data).filter(([k]) => k !== 'checkoutUrl').map(([k, v]) => (
-            <input key={k} type="hidden" name={k} value={v} />
-          ))}
+        {status === 'open' && (
+          <>
+            <h3 className="font-bold text-gray-900 text-lg mb-2">Complete Your Payment</h3>
+            <p className="text-gray-500 text-sm mb-5">
+              PayHere is open in a separate window.<br />
+              <strong className="text-gray-700">Keep this tab open</strong> while you pay.
+            </p>
+            <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-5" />
+            <button
+              onClick={focusPopup}
+              className="w-full py-2.5 rounded-xl bg-indigo-600 text-white font-semibold text-sm mb-3 hover:bg-indigo-700 transition-colors"
+            >
+              Bring Payment Window to Front
+            </button>
+            <button onClick={handleCancel} className="text-sm text-gray-400 hover:text-gray-600 underline">
+              Cancel payment
+            </button>
+          </>
+        )}
+
+        {/* Hidden form — rendered once, submitted into popup */}
+        <form
+          ref={formRef}
+          method="POST"
+          action={data.checkoutUrl}
+          target="payhere_popup"
+          style={{ display: 'none' }}
+        >
+          {Object.entries(data)
+            .filter(([k]) => k !== 'checkoutUrl')
+            .map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)
+          }
         </form>
       </div>
     </div>
