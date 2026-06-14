@@ -62,37 +62,67 @@ router.post('/payhere/init', async (req, res) => {
     if (!gw || !gw.config?.merchantId) return res.status(400).json({ message: 'PayHere not configured' });
 
     const crypto = require('crypto');
+    const Order  = require('../models/Order');
     const { orderId, amount, currency = 'LKR', customerName, email, phone, address, city, country } = req.body;
-    const merchantId = gw.config.merchantId;
-    const merchantSecret = gw.config.merchantSecret;
+
+    const merchantId     = (gw.config.merchantId     || '').trim();
+    const merchantSecret = (gw.config.merchantSecret || '').trim();
+
+    if (!merchantId || !merchantSecret) {
+      return res.status(400).json({ message: 'PayHere merchant credentials are incomplete' });
+    }
+
+    // Use a simple short order id — PayHere requires alphanumeric, recommended < 20 chars
+    const payhereOrderId = 'ORD' + String(orderId).slice(-12);
+
+    // Amount: no commas, exactly 2 decimal places — matches PHP number_format($amount, 2, '.', '')
     const amountFormatted = parseFloat(amount).toFixed(2);
+
+    // Hash = MD5( merchantId + orderId + amount + currency + MD5(secret).toUpperCase() ).toUpperCase()
     const hashedSecret = crypto.createHash('md5').update(merchantSecret).digest('hex').toUpperCase();
-    const hash = crypto.createHash('md5').update(`${merchantId}${orderId}${amountFormatted}${currency}${hashedSecret}`).digest('hex').toUpperCase();
+    const hashInput    = merchantId + payhereOrderId + amountFormatted + currency + hashedSecret;
+    const hash         = crypto.createHash('md5').update(hashInput).digest('hex').toUpperCase();
+
+    // Log for debugging — check Railway logs to confirm hash input is correct
+    console.log('[PayHere] merchantId    :', JSON.stringify(merchantId));
+    console.log('[PayHere] payhereOrderId:', JSON.stringify(payhereOrderId));
+    console.log('[PayHere] amount        :', JSON.stringify(amountFormatted));
+    console.log('[PayHere] currency      :', JSON.stringify(currency));
+    console.log('[PayHere] hashedSecret  :', hashedSecret);
+    console.log('[PayHere] hashInput     :', hashInput);
+    console.log('[PayHere] hash          :', hash);
+
+    // Store the short payhereOrderId on the order so the notify webhook can find it
+    await Order.findByIdAndUpdate(orderId, { payhereOrderId }).catch(() => {});
 
     const backendUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5001}`;
 
     res.json({
+      sandbox:     !gw.isLive,
       merchantId,
-      orderId,
-      items: `Order ${orderId}`,
-      amount: amountFormatted,
+      orderId:     payhereOrderId,
+      _shopOrderId: orderId,
+      items:       `Order ${payhereOrderId}`,
+      amount:      amountFormatted,
       currency,
       hash,
-      firstName: customerName?.split(' ')[0] || '',
-      lastName:  customerName?.split(' ').slice(1).join(' ') || '',
-      email:   email   || '',
-      phone:   phone   || '',
-      address: address || '',
-      city:    city    || '',
-      country: country || 'Sri Lanka',
-      returnUrl:  `${backendUrl}/api/payments/payhere/return`,
-      cancelUrl:  `${backendUrl}/api/payments/payhere/return?cancelled=1`,
-      notifyUrl:  `${backendUrl}/api/payments/payhere/notify`,
-      checkoutUrl: gw.isLive
-        ? 'https://www.payhere.lk/pay/checkout'
-        : 'https://sandbox.payhere.lk/pay/checkout',
+      firstName:   (customerName || '').split(' ')[0]            || '',
+      lastName:    (customerName || '').split(' ').slice(1).join(' ') || '',
+      email:       email   || '',
+      phone:       phone   || '',
+      address:     address || '',
+      city:        city    || '',
+      country:     country || 'Sri Lanka',
+      // For JS SDK, return_url and cancel_url should be undefined per PayHere docs
+      // We use notify_url (webhook) to track payment status
+      returnUrl:   undefined,
+      cancelUrl:   undefined,
+      notifyUrl:   `${backendUrl}/api/payments/payhere/notify`,
     });
-  } catch (err) { res.status(500).json({ message: err.message }); }
+  } catch (err) {
+    console.error('[PayHere] init error:', err);
+    res.status(500).json({ message: err.message });
+  }
 });
 
 // ── PayHere Return (browser redirect after payment — runs in popup) ──────────
@@ -132,12 +162,16 @@ router.post('/payhere/notify', async (req, res) => {
     }
 
     if (status_code === '2') { // Success
-      const order = await Order.findByIdAndUpdate(order_id, {
-        paymentStatus: 'paid',
-        orderStatus: 'confirmed',
-        paymentReference: payment_id,
-        $push: { statusHistory: { status: 'confirmed', note: `Payment confirmed via PayHere (${payment_id})`, updatedBy: 'payhere' } }
-      }, { new: true });
+      const order = await Order.findOneAndUpdate(
+        { $or: [{ payhereOrderId: order_id }, { _id: order_id.length === 24 ? order_id : undefined }] },
+        {
+          paymentStatus: 'paid',
+          orderStatus: 'confirmed',
+          paymentReference: payment_id,
+          $push: { statusHistory: { status: 'confirmed', note: `Payment confirmed via PayHere (${payment_id})`, updatedBy: 'payhere' } }
+        },
+        { new: true }
+      );
 
       if (order) {
         await Notification.create({
@@ -147,13 +181,19 @@ router.post('/payhere/notify', async (req, res) => {
         });
       }
     } else if (status_code === '0') {
-      await Order.findByIdAndUpdate(order_id, { paymentStatus: 'pending' });
+      await Order.findOneAndUpdate(
+        { $or: [{ payhereOrderId: order_id }, { _id: order_id.length === 24 ? order_id : undefined }] },
+        { paymentStatus: 'pending' }
+      );
     } else if (status_code === '-1' || status_code === '-2' || status_code === '-3') {
-      await Order.findByIdAndUpdate(order_id, {
-        paymentStatus: 'failed',
-        orderStatus: 'cancelled',
-        $push: { statusHistory: { status: 'cancelled', note: `Payment failed/cancelled via PayHere`, updatedBy: 'payhere' } }
-      });
+      await Order.findOneAndUpdate(
+        { $or: [{ payhereOrderId: order_id }, { _id: order_id.length === 24 ? order_id : undefined }] },
+        {
+          paymentStatus: 'failed',
+          orderStatus: 'cancelled',
+          $push: { statusHistory: { status: 'cancelled', note: `Payment failed/cancelled via PayHere`, updatedBy: 'payhere' } }
+        }
+      );
     }
 
     res.sendStatus(200);

@@ -16,87 +16,75 @@ import {
 const COUNTRIES   = ['Sri Lanka','Australia','Bangladesh','Canada','China','France','Germany','India','Indonesia','Italy','Japan','Malaysia','Maldives','Nepal','Netherlands','Pakistan','Philippines','Saudi Arabia','Singapore','South Korea','Spain','Thailand','UAE','United Kingdom','United States','Vietnam','Other'];
 const SL_CITIES   = ['Colombo 1','Colombo 2','Colombo 3','Colombo 4','Colombo 5','Colombo 6','Colombo 7','Colombo 8','Colombo 9','Colombo 10','Akarawitia','Angoda','Athurugiriya','Attidiya','Avissawella','Battaramulla','Boralesgamuwa','Dehiwala','Homagama','Kaduwela','Kesbewa','Kottawa','Kotte','Maharagama','Malabe','Moratuwa','Mount Lavinia','Nugegoda','Pannipitiya','Piliyandala','Rajagiriya','Ratmalana','Sri Jayawardenepura Kotte','Wattala','Wellampitiya','Gampaha','Kalutara','Kandy','Matale','Nuwara Eliya','Galle','Matara','Hambantota','Jaffna','Trincomalee','Batticaloa','Kurunegala','Anuradhapura','Polonnaruwa','Badulla','Ratnapura','Kegalle','Other'];
 
-// ── PayHere JS SDK modal ─────────────────────────────────────────────────────
-// Uses PayHere's official JS SDK which renders their checkout as an overlay
-// on YOUR page — no popup, no redirect, no tab navigation.
-// Sandbox SDK: https://www.payhere.lk/downloads/payhere.js  (auto sandbox when merchantId starts with 12...)
-// Live SDK:    https://www.payhere.lk/downloads/payhere.js
-const PayHereModal = ({ data, onSuccess, onCancel, isLive }) => {
+// ── PayHere JS SDK launcher ──────────────────────────────────────────────────
+// Loads PayHere's official SDK and calls startPayment().
+// The SDK renders their own overlay on top of your page — no popup, no redirect.
+// onSuccess / onDismissed / onError callbacks are set before startPayment().
+const PayHereModal = ({ data, isLive, onSuccess, onCancel }) => {
   const didInit = useRef(false);
 
   useEffect(() => {
     if (didInit.current) return;
     didInit.current = true;
 
-    const sdkUrl = isLive
-      ? 'https://www.payhere.lk/downloads/payhere.js'
-      : 'https://sandbox.payhere.lk/downloads/payhere.js';
+    // PayHere uses ONE sdk url for both sandbox and live.
+    // sandbox mode is controlled by the `sandbox: true` field in startPayment()
+    const sdkUrl = 'https://www.payhere.lk/lib/payhere.js';
 
     const boot = () => {
       const ph = window.payhere;
-      if (!ph) { console.error('PayHere SDK not loaded'); return; }
-
-      // Payment completed handler
-      ph.onCompleted = (orderId) => {
-        onSuccess(orderId);
-      };
-
-      // Payment dismissed / cancelled
-      ph.onDismissed = () => {
-        onCancel('dismissed');
-      };
-
-      // Payment error
-      ph.onError = (error) => {
-        console.error('PayHere error:', error);
-        onCancel('error');
-      };
-
-      // Build payment object — all fields PayHere expects
-      const payment = {
-        sandbox:      !isLive,
-        merchant_id:  data.merchantId,
-        return_url:   data.returnUrl,
-        cancel_url:   data.cancelUrl,
-        notify_url:   data.notifyUrl,
-        order_id:     data.orderId,
-        items:        data.items,
-        amount:       data.amount,
-        currency:     data.currency,
-        hash:         data.hash,
-        first_name:   data.firstName,
-        last_name:    data.lastName,
-        email:        data.email,
-        phone:        data.phone,
-        address:      data.address,
-        city:         data.city,
-        country:      data.country,
-      };
-
-      ph.startPayment(payment);
-    };
-
-    // Load SDK if not already present
-    if (window.payhere) {
-      boot();
-    } else {
-      const existing = document.getElementById('payhere-sdk');
-      if (existing) {
-        existing.addEventListener('load', boot);
+      if (!ph) {
+        console.error('PayHere SDK missing after load');
+        onCancel('sdk-load-failed');
         return;
       }
-      const script = document.createElement('script');
-      script.id = 'payhere-sdk';
-      script.src = sdkUrl;
-      script.onload = boot;
-      script.onerror = () => onCancel('sdk-load-failed');
-      document.head.appendChild(script);
+
+      ph.onCompleted  = (orderId) => onSuccess(orderId);
+      ph.onDismissed  = ()        => onCancel('dismissed');
+      ph.onError      = (err)     => { console.error('PayHere error', err); onCancel('error'); };
+
+      ph.startPayment({
+        sandbox:     data.sandbox === true,
+        merchant_id: data.merchantId,
+        return_url:  undefined,
+        cancel_url:  undefined,
+        notify_url:  data.notifyUrl,
+        order_id:    data.orderId,
+        items:       data.items,
+        amount:      data.amount,
+        currency:    data.currency,
+        hash:        data.hash,
+        first_name:  data.firstName,
+        last_name:   data.lastName,
+        email:       data.email,
+        phone:       data.phone,
+        address:     data.address,
+        city:        data.city,
+        country:     data.country,
+      });
+    };
+
+    if (window.payhere) {
+      boot();
+      return;
     }
+
+    // Remove any stale SDK script so we always get a fresh one
+    const old = document.getElementById('payhere-sdk');
+    if (old) old.remove();
+    delete window.payhere;
+
+    const script   = document.createElement('script');
+    script.id      = 'payhere-sdk';
+    script.src     = sdkUrl;
+    script.onload  = boot;
+    script.onerror = () => onCancel('sdk-load-failed');
+    document.head.appendChild(script);
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // This component renders nothing visible — PayHere SDK injects its own overlay
-  return null;
+  return null; // PayHere SDK injects its own overlay DOM
 };
 
 // ── Stripe Card Modal ────────────────────────────────────────────────────────
@@ -640,23 +628,28 @@ export default function Checkout() {
         }).catch(() => {});
       }
 
-      // ── Handle PayHere ───────────────────────────────────────────────────────
+      // ── Handle PayHere — init payment data, show SDK overlay ────────────────
+      // Order is created in the backend now (pending payment),
+      // cart is only cleared AFTER onCompleted fires.
       if (effectivePaymentMethod === 'payhere') {
         const gwInfo = gateways.find(g => g.gateway === 'payhere');
         const phRes = await API.post('/payments/payhere/init', {
-          orderId: data.orderId,
-          amount:  data.total,
-          currency: settings?.currency || 'LKR',
+          orderId:      data.orderId,
+          amount:       data.total,
+          currency:     settings?.currency || 'LKR',
           customerName: `${billing.firstName} ${billing.lastName}`,
-          email: billing.email, phone: billing.phone,
-          address: billing.street, city: billing.city, country: billing.country,
+          email:   billing.email,
+          phone:   billing.phone,
+          address: billing.street,
+          city:    billing.city,
+          country: billing.country,
         });
-        orderPlaced.current = true;
-        clearCart();
-        sessionStorage.removeItem('checkout_state');
-        setPayHereData({ ...phRes.data, isLive: gwInfo?.isLive || false });
+        // Store orderId separately so onSuccess can use it after cart is cleared
+        phRes.data._shopOrderId = data.orderId;
+        phRes.data.isLive       = !(phRes.data.sandbox === true);
+        setPayHereData(phRes.data);
         setLoading(false);
-        return;
+        return;  // ← do NOT clearCart() or set orderPlaced here
       }
 
       // ── Handle Stripe — show card input modal ────────────────────────────────
@@ -852,21 +845,26 @@ export default function Checkout() {
         <PayHereModal
           data={payHereData}
           isLive={payHereData.isLive}
-          onSuccess={(orderId) => {
+          onSuccess={(phOrderId) => {
+            // Payment confirmed — now safe to clear cart and mark order placed
+            orderPlaced.current = true;
+            clearCart();
+            sessionStorage.removeItem('checkout_state');
             setPayHereData(null);
             toast.success('✅ Payment successful!');
-            navigate(`/my-orders?new=${payHereData.orderId}&payment=payhere`);
+            navigate(`/my-orders?new=${payHereData._shopOrderId}&payment=payhere`);
           }}
           onCancel={(reason) => {
             setPayHereData(null);
             if (reason === 'dismissed') {
-              toast('Payment cancelled. Your order is saved — complete payment from My Orders.', { icon: 'ℹ️' });
+              toast('Payment cancelled. Your order is saved — you can retry payment from My Orders.', { icon: 'ℹ️' });
             } else if (reason === 'error') {
               toast.error('Payment failed. Please try again from My Orders.');
             } else {
               toast.error('Could not load PayHere. Check your connection and try again.');
             }
-            navigate(`/my-orders?new=${payHereData.orderId}`);
+            // Order exists in DB as pending — user can retry from My Orders
+            navigate(`/my-orders?new=${payHereData._shopOrderId}`);
           }}
         />
       )}
