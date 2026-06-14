@@ -73,7 +73,7 @@ const DEFAULTS = {
       : `💥 Now *${v.price}*`;
     const brandLine = v.brand ? `\n🏷️ Brand: ${v.brand}` : '';
     return (
-      `🔥 ${v.discount} OFF — Today Only!\n\n` +
+      `🔥 ${v.discount} OFF — Limited Offer!\n\n` +
       `🛍️ *${v.productName}*${brandLine}\n\n` +
       `${saveLine}\n` +
       `⏰ Limited time deal — stock is running out!\n\n` +
