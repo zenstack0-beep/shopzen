@@ -16,7 +16,7 @@ import {
 const COUNTRIES   = ['Sri Lanka','Australia','Bangladesh','Canada','China','France','Germany','India','Indonesia','Italy','Japan','Malaysia','Maldives','Nepal','Netherlands','Pakistan','Philippines','Saudi Arabia','Singapore','South Korea','Spain','Thailand','UAE','United Kingdom','United States','Vietnam','Other'];
 const SL_CITIES   = ['Colombo 1','Colombo 2','Colombo 3','Colombo 4','Colombo 5','Colombo 6','Colombo 7','Colombo 8','Colombo 9','Colombo 10','Akarawitia','Angoda','Athurugiriya','Attidiya','Avissawella','Battaramulla','Boralesgamuwa','Dehiwala','Homagama','Kaduwela','Kesbewa','Kottawa','Kotte','Maharagama','Malabe','Moratuwa','Mount Lavinia','Nugegoda','Pannipitiya','Piliyandala','Rajagiriya','Ratmalana','Sri Jayawardenepura Kotte','Wattala','Wellampitiya','Gampaha','Kalutara','Kandy','Matale','Nuwara Eliya','Galle','Matara','Hambantota','Jaffna','Trincomalee','Batticaloa','Kurunegala','Anuradhapura','Polonnaruwa','Badulla','Ratnapura','Kegalle','Other'];
 
-// PayHere form submitter
+// ── PayHere form submitter ───────────────────────────────────────────────────
 const PayHereForm = ({ data, onCancel }) => {
   const formRef = useRef();
   useEffect(() => { if (formRef.current) formRef.current.submit(); }, []);
@@ -33,6 +33,304 @@ const PayHereForm = ({ data, onCancel }) => {
           ))}
         </form>
         <button onClick={onCancel} className="text-sm text-gray-400 hover:text-gray-600 underline">Cancel</button>
+      </div>
+    </div>
+  );
+};
+
+// ── Stripe Card Modal ────────────────────────────────────────────────────────
+// Uses Stripe.js loaded via CDN (no npm package needed)
+const StripeCardModal = ({ clientSecret, publicKey, amount, currency, onSuccess, onCancel }) => {
+  const cardRef      = useRef(null);
+  const stripeRef    = useRef(null);
+  const elementsRef  = useRef(null);
+  const cardElRef    = useRef(null);
+  const [cardError,  setCardError]  = useState('');
+  const [processing, setProcessing] = useState(false);
+  const [ready,      setReady]      = useState(false);
+
+  useEffect(() => {
+    // Load Stripe.js dynamically if not already present
+    const loadStripe = () => {
+      if (window.Stripe) return initStripe();
+      const script = document.createElement('script');
+      script.src = 'https://js.stripe.com/v3/';
+      script.onload = initStripe;
+      script.onerror = () => setCardError('Failed to load Stripe.js. Check your internet connection.');
+      document.head.appendChild(script);
+    };
+
+    const initStripe = () => {
+      try {
+        stripeRef.current   = window.Stripe(publicKey);
+        elementsRef.current = stripeRef.current.elements();
+        const style = {
+          base: {
+            color: '#1a1a1a',
+            fontFamily: 'system-ui, -apple-system, sans-serif',
+            fontSize: '16px',
+            '::placeholder': { color: '#9ca3af' },
+          },
+          invalid: { color: '#ef4444' },
+        };
+        cardElRef.current = elementsRef.current.create('card', { style, hidePostalCode: true });
+        cardElRef.current.mount(cardRef.current);
+        cardElRef.current.on('ready', () => setReady(true));
+        cardElRef.current.on('change', (e) => setCardError(e.error ? e.error.message : ''));
+      } catch (err) {
+        setCardError('Could not initialize Stripe. Please refresh and try again.');
+      }
+    };
+
+    loadStripe();
+
+    return () => {
+      if (cardElRef.current) {
+        try { cardElRef.current.unmount(); } catch {}
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handlePay = async () => {
+    if (!stripeRef.current || !cardElRef.current) return;
+    setProcessing(true);
+    setCardError('');
+    try {
+      const { error, paymentIntent } = await stripeRef.current.confirmCardPayment(clientSecret, {
+        payment_method: { card: cardElRef.current },
+      });
+      if (error) {
+        setCardError(error.message);
+        setProcessing(false);
+      } else if (paymentIntent && paymentIntent.status === 'succeeded') {
+        onSuccess(paymentIntent.id);
+      } else {
+        setCardError('Payment not completed. Please try again.');
+        setProcessing(false);
+      }
+    } catch (err) {
+      setCardError('An unexpected error occurred. Please try again.');
+      setProcessing(false);
+    }
+  };
+
+  const sym = currency === 'LKR' ? 'Rs.' : currency;
+
+  return (
+    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 border-b border-gray-100">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center">
+              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="font-bold text-gray-900">Pay with Card</h3>
+              <p className="text-xs text-gray-400">Secured by Stripe</p>
+            </div>
+          </div>
+          <button onClick={onCancel} disabled={processing}
+            className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 transition-colors disabled:opacity-50">
+            ✕
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="p-6 space-y-5">
+          {/* Amount */}
+          <div className="bg-indigo-50 rounded-xl px-4 py-3 flex items-center justify-between">
+            <span className="text-sm text-indigo-700 font-medium">Amount due</span>
+            <span className="text-lg font-bold text-indigo-900">{sym} {Number(amount).toLocaleString()}</span>
+          </div>
+
+          {/* Card element */}
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">Card details</label>
+            <div
+              ref={cardRef}
+              className="border-2 border-gray-200 rounded-xl px-4 py-3.5 focus-within:border-indigo-500 transition-colors min-h-[50px]"
+              style={{ background: ready ? '#fff' : '#f9fafb' }}
+            />
+            {!ready && (
+              <div className="flex items-center gap-2 mt-2">
+                <div className="w-3 h-3 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+                <span className="text-xs text-gray-400">Loading secure card form…</span>
+              </div>
+            )}
+            {cardError && (
+              <p className="text-red-500 text-sm mt-2 flex items-center gap-1">
+                <span>⚠️</span> {cardError}
+              </p>
+            )}
+          </div>
+
+          {/* Test mode hint */}
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs text-amber-700">
+            🧪 <strong>Test mode:</strong> Use card <span className="font-mono font-bold">4242 4242 4242 4242</span>, any future date, any CVC.
+          </div>
+
+          {/* Pay button */}
+          <button
+            onClick={handlePay}
+            disabled={!ready || processing}
+            className="w-full py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm transition-colors disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            {processing ? (
+              <>
+                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Processing…
+              </>
+            ) : (
+              <>🔒 Pay {sym} {Number(amount).toLocaleString()}</>
+            )}
+          </button>
+
+          {/* Stripe branding */}
+          <div className="flex items-center justify-center gap-2 text-xs text-gray-400">
+            <svg viewBox="0 0 60 25" className="h-5 fill-gray-400">
+              <path d="M59.64 14.28h-8.06c.19 1.93 1.6 2.55 3.2 2.55 1.64 0 2.96-.37 4.05-.95v3.32a8.33 8.33 0 0 1-4.56 1.1c-4.01 0-6.83-2.5-6.83-7.48 0-4.19 2.39-7.52 6.3-7.52 3.92 0 5.96 3.28 5.96 7.5 0 .4-.04 1.26-.06 1.48zm-5.92-5.62c-1.03 0-2.17.73-2.17 2.58h4.25c0-1.85-1.07-2.58-2.08-2.58zM40.95 20.3c-1.44 0-2.32-.6-2.9-1.04l-.02 4.63-4.12.87V5.57h3.76l.08 1.02a4.7 4.7 0 0 1 3.23-1.29c2.9 0 5.62 2.6 5.62 7.4 0 5.23-2.7 7.6-5.65 7.6zM40 8.95c-.95 0-1.54.34-1.97.81l.02 6.12c.4.44.98.78 1.95.78 1.52 0 2.54-1.65 2.54-3.87 0-2.15-1.04-3.84-2.54-3.84zM28.24 5.57h4.13v14.44h-4.13V5.57zm0-4.7L32.37 0v3.36l-4.13.88V.87zm-4.32 9.35v9.79H19.8V5.57h3.7l.12 1.22c1-1.77 3.07-1.41 3.62-1.22v3.79c-.52-.17-2.29-.43-3.32.86zm-8.55 4.72c0 2.43 2.6 1.68 3.12 1.46v3.36c-.55.3-1.54.54-2.89.54a4.15 4.15 0 0 1-4.27-4.24l.01-13.17 4.02-.86v3.54h3.14V9.1h-3.13v5.85zm-4.91.7c0 2.97-2.31 4.66-5.73 4.66a11.2 11.2 0 0 1-4.46-.93v-3.93c1.38.75 3.1 1.31 4.46 1.31.92 0 1.53-.24 1.53-1C6.26 13.77 0 14.51 0 9.95 0 7.04 2.28 5.3 5.62 5.3c1.36 0 2.72.2 4.09.75v3.88a9.23 9.23 0 0 0-4.1-1.06c-.86 0-1.44.25-1.44.9 0 1.85 6.29.97 6.29 5.88z"/>
+            </svg>
+            Your payment is encrypted and secure
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ── PayPal Modal ─────────────────────────────────────────────────────────────
+// Uses PayPal JS SDK loaded via CDN
+const PayPalModal = ({ clientId, amount, currency, orderId, onSuccess, onCancel }) => {
+  const containerRef = useRef(null);
+  const [sdkReady,   setSdkReady]   = useState(false);
+  const [sdkError,   setSdkError]   = useState('');
+  const [rendered,   setRendered]   = useState(false);
+
+  const currencyCode = currency || 'USD';
+  const amountValue  = parseFloat(amount).toFixed(2);
+
+  useEffect(() => {
+    const existingScript = document.getElementById('paypal-sdk');
+    const initButtons = () => {
+      setSdkReady(true);
+    };
+
+    if (window.paypal) {
+      setSdkReady(true);
+      return;
+    }
+
+    if (existingScript) {
+      existingScript.addEventListener('load', initButtons);
+      return () => existingScript.removeEventListener('load', initButtons);
+    }
+
+    const script = document.createElement('script');
+    script.id = 'paypal-sdk';
+    script.src = `https://www.paypal.com/sdk/js?client-id=${clientId}&currency=${currencyCode}&intent=capture`;
+    script.onload  = initButtons;
+    script.onerror = () => setSdkError('Failed to load PayPal SDK. Check your internet connection.');
+    document.head.appendChild(script);
+
+    return () => script.removeEventListener('load', initButtons);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Render PayPal buttons once SDK is ready and container is mounted
+  useEffect(() => {
+    if (!sdkReady || !containerRef.current || rendered) return;
+    setRendered(true);
+
+    try {
+      window.paypal.Buttons({
+        style: { layout: 'vertical', color: 'gold', shape: 'rect', label: 'pay' },
+        createOrder: (data, actions) => {
+          return actions.order.create({
+            purchase_units: [{
+              reference_id: orderId,
+              amount: { value: amountValue, currency_code: currencyCode },
+            }],
+          });
+        },
+        onApprove: async (data, actions) => {
+          try {
+            const details = await actions.order.capture();
+            onSuccess(details.id);
+          } catch (err) {
+            setSdkError('Payment capture failed. Please try again.');
+          }
+        },
+        onError: (err) => {
+          console.error('PayPal error:', err);
+          setSdkError('PayPal encountered an error. Please try again.');
+        },
+        onCancel: () => {
+          onCancel();
+        },
+      }).render(containerRef.current);
+    } catch (err) {
+      setSdkError('Could not render PayPal buttons. Please refresh and try again.');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sdkReady]);
+
+  const sym = currencyCode === 'LKR' ? 'Rs.' : currencyCode;
+
+  return (
+    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 border-b border-gray-100">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-[#003087] flex items-center justify-center">
+              <span className="text-white font-bold text-sm">PP</span>
+            </div>
+            <div>
+              <h3 className="font-bold text-gray-900">Pay with PayPal</h3>
+              <p className="text-xs text-gray-400">Secure PayPal checkout</p>
+            </div>
+          </div>
+          <button onClick={onCancel}
+            className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 transition-colors">
+            ✕
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="p-6 space-y-5">
+          {/* Amount */}
+          <div className="bg-blue-50 rounded-xl px-4 py-3 flex items-center justify-between">
+            <span className="text-sm text-blue-700 font-medium">Amount due</span>
+            <span className="text-lg font-bold text-blue-900">{sym} {Number(amount).toLocaleString()}</span>
+          </div>
+
+          {sdkError && (
+            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">
+              ⚠️ {sdkError}
+            </div>
+          )}
+
+          {!sdkReady && !sdkError && (
+            <div className="flex items-center justify-center gap-3 py-8">
+              <div className="w-5 h-5 border-3 border-blue-400 border-t-transparent rounded-full animate-spin" />
+              <span className="text-sm text-gray-500">Loading PayPal…</span>
+            </div>
+          )}
+
+          {/* PayPal buttons container */}
+          <div ref={containerRef} className={sdkReady && !sdkError ? '' : 'hidden'} />
+
+          <p className="text-xs text-center text-gray-400">
+            You'll be redirected within the PayPal popup to complete payment.
+          </p>
+        </div>
       </div>
     </div>
   );
@@ -75,6 +373,11 @@ export default function Checkout() {
   const [slipFile,         setSlipFile]         = useState(null);
   const [slipPreview,      setSlipPreview]      = useState(null);
   const [slipUploading,    setSlipUploading]    = useState(false);
+
+  // ── NEW: Stripe / PayPal modal state ────────────────────────────────────────
+  const [stripeModal,   setStripeModal]   = useState(null); // { clientSecret, publicKey, amount, currency, orderId }
+  const [paypalModal,   setPaypalModal]   = useState(null); // { clientId, amount, currency, orderId }
+  // ────────────────────────────────────────────────────────────────────────────
 
   const [billing, setBilling] = useState(() => {
     try {
@@ -195,7 +498,6 @@ export default function Checkout() {
       });
       setCouponData(data);
 
-      // Coupon is always active when valid — gift card stacks on top
       if (giftCardData) {
         toast.success(`✅ Coupon applied! ${sym} ${data.discount.toLocaleString()} off — gift card will cover the rest`);
       } else {
@@ -215,7 +517,6 @@ export default function Checkout() {
       const { data } = await API.post('/gift-cards/validate', { code: giftCardCode.toUpperCase() });
       setGiftCardData(data);
 
-      // Gift card always active when valid — stacks with coupon
       if (couponData) {
         const remaining = Math.max(0, subtotal - (couponData.discount || 0) + deliveryFee);
         const covered   = Math.min(data.balance, remaining);
@@ -258,7 +559,6 @@ export default function Checkout() {
     try {
       const effectivePaymentMethod = total === 0 ? 'free' : paymentMethod;
 
-      // Send both codes — backend applies coupon as discount, gift card as payment
       const orderData = {
         items: items.map(i => ({ productId: i._id, name: i.name, quantity: i.quantity })),
         billing,
@@ -279,7 +579,7 @@ export default function Checkout() {
         }).catch(() => {});
       }
 
-      // Handle PayHere
+      // ── Handle PayHere ───────────────────────────────────────────────────────
       if (effectivePaymentMethod === 'payhere') {
         const phData = await API.post('/payments/payhere/init', {
           orderId: data.orderId,
@@ -297,14 +597,55 @@ export default function Checkout() {
         return;
       }
 
+      // ── Handle Stripe — show card input modal ────────────────────────────────
       if (effectivePaymentMethod === 'stripe') {
+        try {
+          const intentRes = await API.post('/payments/stripe/create-intent', {
+            orderId:  data.orderId,
+            amount:   data.total,
+            currency: (settings?.currency || 'USD').toLowerCase(),
+          });
+          orderPlaced.current = true;
+          clearCart();
+          sessionStorage.removeItem('checkout_state');
+          setStripeModal({
+            clientSecret: intentRes.data.clientSecret,
+            publicKey:    intentRes.data.publicKey,
+            amount:       data.total,
+            currency:     settings?.currency || 'USD',
+            orderId:      data.orderId,
+          });
+          setLoading(false);
+          return;
+        } catch (intentErr) {
+          toast.error(intentErr.response?.data?.message || 'Could not initialize Stripe payment. Please try again.');
+          setLoading(false);
+          return;
+        }
+      }
+
+      // ── Handle PayPal — show PayPal buttons modal ────────────────────────────
+      if (effectivePaymentMethod === 'paypal') {
+        const gwInfo = gateways.find(g => g.gateway === 'paypal');
+        if (!gwInfo?.publicKey) {
+          toast.error('PayPal is not properly configured. Please contact the store admin.');
+          setLoading(false);
+          return;
+        }
         orderPlaced.current = true;
         clearCart();
         sessionStorage.removeItem('checkout_state');
-        navigate(`/my-orders?new=${data.orderId}`);
+        setPaypalModal({
+          clientId: gwInfo.publicKey,
+          amount:   data.total,
+          currency: settings?.currency || 'USD',
+          orderId:  data.orderId,
+        });
+        setLoading(false);
         return;
       }
 
+      // ── All other methods (COD, bank_transfer, free) ─────────────────────────
       orderPlaced.current = true;
       clearCart();
       sessionStorage.removeItem('checkout_state');
@@ -319,6 +660,35 @@ export default function Checkout() {
     } catch (err) {
       toast.error(err.response?.data?.message || 'Order failed. Please try again.');
     } finally { setLoading(false); }
+  };
+
+  // ── Stripe payment success ───────────────────────────────────────────────────
+  const handleStripeSuccess = async (paymentIntentId) => {
+    try {
+      // Notify backend that payment succeeded (webhook may also do this)
+      await API.post('/orders/payment-success', {
+        orderId:          stripeModal.orderId,
+        paymentReference: paymentIntentId,
+        gateway:          'stripe',
+      }).catch(() => {}); // Non-fatal — webhook handles it too
+    } catch {}
+    setStripeModal(null);
+    toast.success('✅ Payment successful!');
+    navigate(`/my-orders?new=${stripeModal.orderId}&payment=stripe`);
+  };
+
+  // ── PayPal payment success ───────────────────────────────────────────────────
+  const handlePayPalSuccess = async (captureId) => {
+    try {
+      await API.post('/orders/payment-success', {
+        orderId:          paypalModal.orderId,
+        paymentReference: captureId,
+        gateway:          'paypal',
+      }).catch(() => {});
+    } catch {}
+    setPaypalModal(null);
+    toast.success('✅ PayPal payment successful!');
+    navigate(`/my-orders?new=${paypalModal.orderId}&payment=paypal`);
   };
 
   const hasAnyPayment = settings?.bankTransferEnabled !== false || settings?.codEnabled !== false || gateways.length > 0;
@@ -367,7 +737,7 @@ export default function Checkout() {
             </p>
           </div>
 
-          <div className="rounded-2xl p-4 mb-6 text-sm space-y-1" style={{ background: 'var(--body-bg)', border: '1px solid var(--border-color)' }}>
+          <div className="rounded-2xl p-4 mb-6 text-sm space-y-1.5" style={{ background: 'var(--body-bg)', border: '1px solid var(--border-color)' }}>
             <p className="font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>📋 Bank Transfer Details</p>
             {settings?.bankName          && <p style={{ color: 'var(--text-secondary)' }}><span className="font-medium" style={{ color: 'var(--text-primary)' }}>Bank:</span> {settings.bankName}</p>}
             {settings?.bankAccountName   && <p style={{ color: 'var(--text-secondary)' }}><span className="font-medium" style={{ color: 'var(--text-primary)' }}>Account:</span> {settings.bankAccountName}</p>}
@@ -415,7 +785,36 @@ export default function Checkout() {
   // ── Main checkout form ────────────────────────────────────────────────────────
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8" style={{ background: 'var(--body-bg)' }}>
+      {/* Payment modals */}
       {payHereData && <PayHereForm data={payHereData} onCancel={() => setPayHereData(null)} />}
+      {stripeModal && (
+        <StripeCardModal
+          clientSecret={stripeModal.clientSecret}
+          publicKey={stripeModal.publicKey}
+          amount={stripeModal.amount}
+          currency={stripeModal.currency}
+          onSuccess={handleStripeSuccess}
+          onCancel={() => {
+            setStripeModal(null);
+            toast('Payment cancelled. Your order is saved — complete payment from My Orders.', { icon: 'ℹ️' });
+            navigate(`/my-orders?new=${stripeModal.orderId}`);
+          }}
+        />
+      )}
+      {paypalModal && (
+        <PayPalModal
+          clientId={paypalModal.clientId}
+          amount={paypalModal.amount}
+          currency={paypalModal.currency}
+          orderId={paypalModal.orderId}
+          onSuccess={handlePayPalSuccess}
+          onCancel={() => {
+            setPaypalModal(null);
+            toast('Payment cancelled. Your order is saved — complete payment from My Orders.', { icon: 'ℹ️' });
+            navigate(`/my-orders?new=${paypalModal.orderId}`);
+          }}
+        />
+      )}
 
       <nav className="text-sm text-gray-500 flex items-center gap-2 mb-2">
         <Link to="/" style={{ color: 'var(--color-primary)' }}>Home</Link><span>/</span>
@@ -519,7 +918,7 @@ export default function Checkout() {
                 ))}
               </div>
 
-              {/* Price breakdown — all from computeTotals() */}
+              {/* Price breakdown */}
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between text-gray-600">
                   <span>Subtotal</span>
@@ -685,8 +1084,8 @@ export default function Checkout() {
                         </div>
                         <div className="pay-method-desc">
                           {gw.gateway === 'payhere' && 'Redirected to PayHere secure checkout'}
-                          {gw.gateway === 'stripe'  && 'Pay securely with your card via Stripe'}
-                          {gw.gateway === 'paypal'  && 'Pay via your PayPal account'}
+                          {gw.gateway === 'stripe'  && 'Enter your card details securely via Stripe'}
+                          {gw.gateway === 'paypal'  && 'Complete payment via PayPal'}
                         </div>
                       </div>
                     </div>

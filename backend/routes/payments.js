@@ -149,9 +149,6 @@ router.post('/payhere/notify', async (req, res) => {
   }
 });
 
-// ── PayHere Return (frontend redirect after payment) ───────────────────────
-// Frontend handles this via /order-success/:id?gateway=payhere
-
 // ── Stripe Payment Intent ───────────────────────────────────────────────────
 router.post('/stripe/create-intent', async (req, res) => {
   try {
@@ -208,6 +205,93 @@ router.post('/stripe/webhook', express.raw({ type: 'application/json' }), async 
 
     res.json({ received: true });
   } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+// ── PayPal Capture ──────────────────────────────────────────────────────────
+// Called by frontend after PayPal JS SDK approves the order, to verify
+// the capture server-side and mark the order as paid.
+router.post('/paypal/capture', async (req, res) => {
+  try {
+    const Order = require('../models/Order');
+    const { Notification } = require('../models/index');
+    const gw = await PaymentGateway.findOne({ gateway: 'paypal', isEnabled: true });
+    if (!gw || !gw.config?.clientId || !gw.config?.clientSecret) {
+      return res.status(400).json({ message: 'PayPal not configured' });
+    }
+
+    const { captureId, orderId } = req.body;
+    if (!captureId || !orderId) {
+      return res.status(400).json({ message: 'captureId and orderId are required' });
+    }
+
+    // Verify the capture with PayPal REST API
+    const baseUrl = gw.isLive
+      ? 'https://api-m.paypal.com'
+      : 'https://api-m.sandbox.paypal.com';
+
+    // Get PayPal access token
+    const tokenRes = await fetch(`${baseUrl}/v1/oauth2/token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': 'Basic ' + Buffer.from(`${gw.config.clientId}:${gw.config.clientSecret}`).toString('base64'),
+      },
+      body: 'grant_type=client_credentials',
+    });
+    if (!tokenRes.ok) {
+      const tokenErr = await tokenRes.text();
+      console.error('PayPal token error:', tokenErr);
+      return res.status(400).json({ message: 'Could not authenticate with PayPal' });
+    }
+    const tokenData = await tokenRes.json();
+    const accessToken = tokenData.access_token;
+
+    // Verify the capture
+    const captureRes = await fetch(`${baseUrl}/v2/payments/captures/${captureId}`, {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    if (!captureRes.ok) {
+      const captureErr = await captureRes.text();
+      console.error('PayPal capture verify error:', captureErr);
+      return res.status(400).json({ message: 'Could not verify PayPal capture' });
+    }
+    const capture = await captureRes.json();
+
+    if (capture.status !== 'COMPLETED') {
+      return res.status(400).json({ message: `PayPal capture status: ${capture.status}` });
+    }
+
+    // Mark order as paid
+    const order = await Order.findByIdAndUpdate(orderId, {
+      paymentStatus: 'paid',
+      orderStatus: 'confirmed',
+      paymentReference: captureId,
+      $push: {
+        statusHistory: {
+          status: 'confirmed',
+          note: `Payment confirmed via PayPal (${captureId})`,
+          updatedBy: 'paypal',
+        }
+      }
+    }, { new: true });
+
+    if (order) {
+      await Notification.create({
+        type: 'new_order',
+        title: '✅ PayPal Payment Confirmed',
+        message: `Order ${order.orderNumber}`,
+        link: `/admin/orders/${order._id}`,
+      });
+    }
+
+    res.json({ success: true, orderId });
+  } catch (err) {
+    console.error('PayPal capture error:', err);
+    res.status(500).json({ message: err.message });
+  }
 });
 
 module.exports = router;
