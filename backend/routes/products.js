@@ -694,10 +694,22 @@ router.post('/:id/publish', adminAuth, async (req, res) => {
       platform: platforms[i],
       status:   r.value?.status ?? 'failed',
       message:  r.value?.errorMessage || (r.reason?.message ?? ''),
+      errorCode: r.value?.errorCode || '',
     }));
 
-    const allFailed = logs.every(l => l.status === 'failed');
-    res.status(allFailed ? 500 : 200).json({ logs });
+    // Log every result to server console so errors are visible in Railway/local terminal
+    logs.forEach(l => {
+      if (l.status === 'success') {
+        console.log(`[Publish] ✅ ${l.platform} — success`);
+      } else {
+        console.error(`[Publish] ❌ ${l.platform} — ${l.errorCode}: ${l.message}`);
+      }
+    });
+
+    // Always return 200 with the logs array so the frontend can read
+    // per-platform error messages from data.logs — returning 500 causes
+    // axios to throw and the catch block shows only a generic message.
+    res.status(200).json({ logs });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
