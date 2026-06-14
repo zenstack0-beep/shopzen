@@ -16,145 +16,87 @@ import {
 const COUNTRIES   = ['Sri Lanka','Australia','Bangladesh','Canada','China','France','Germany','India','Indonesia','Italy','Japan','Malaysia','Maldives','Nepal','Netherlands','Pakistan','Philippines','Saudi Arabia','Singapore','South Korea','Spain','Thailand','UAE','United Kingdom','United States','Vietnam','Other'];
 const SL_CITIES   = ['Colombo 1','Colombo 2','Colombo 3','Colombo 4','Colombo 5','Colombo 6','Colombo 7','Colombo 8','Colombo 9','Colombo 10','Akarawitia','Angoda','Athurugiriya','Attidiya','Avissawella','Battaramulla','Boralesgamuwa','Dehiwala','Homagama','Kaduwela','Kesbewa','Kottawa','Kotte','Maharagama','Malabe','Moratuwa','Mount Lavinia','Nugegoda','Pannipitiya','Piliyandala','Rajagiriya','Ratmalana','Sri Jayawardenepura Kotte','Wattala','Wellampitiya','Gampaha','Kalutara','Kandy','Matale','Nuwara Eliya','Galle','Matara','Hambantota','Jaffna','Trincomalee','Batticaloa','Kurunegala','Anuradhapura','Polonnaruwa','Badulla','Ratnapura','Kegalle','Other'];
 
-// ── PayHere popup launcher ───────────────────────────────────────────────────
-const PayHereForm = ({ data, onCancel, onSuccess }) => {
-  const formRef        = useRef(null);
-  const popupRef       = useRef(null);
-  const pollRef        = useRef(null);
-  const didLaunchRef   = useRef(false);          // guard against double-launch (React strict mode)
-  const [status, setStatus] = useState('launching'); // 'launching' | 'open' | 'blocked'
-
-  // Stop polling helper
-  const stopPoll = () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
-
-  // Start polling only after a safe delay so the popup has time to load
-  const startPoll = (popup) => {
-    stopPoll();
-    // Wait 3 seconds before we start watching — gives PayHere time to fully load
-    setTimeout(() => {
-      pollRef.current = setInterval(() => {
-        if (popup.closed) {
-          stopPoll();
-          onSuccess();
-        }
-      }, 800);
-    }, 3000);
-  };
-
-  const openPopup = () => {
-    const width  = 750;
-    const height = 620;
-    const left   = Math.round((window.screen.width  - width)  / 2);
-    const top    = Math.round((window.screen.height - height) / 2);
-
-    const popup = window.open(
-      'about:blank',
-      'payhere_popup',
-      `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=yes`
-    );
-
-    // Popup blocked
-    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
-      setStatus('blocked');
-      return;
-    }
-
-    popupRef.current = popup;
-
-    // Submit the hidden form into the popup
-    if (formRef.current) {
-      formRef.current.target = 'payhere_popup';
-      formRef.current.submit();
-    }
-
-    setStatus('open');
-    startPoll(popup);
-  };
+// ── PayHere JS SDK modal ─────────────────────────────────────────────────────
+// Uses PayHere's official JS SDK which renders their checkout as an overlay
+// on YOUR page — no popup, no redirect, no tab navigation.
+// Sandbox SDK: https://www.payhere.lk/downloads/payhere.js  (auto sandbox when merchantId starts with 12...)
+// Live SDK:    https://www.payhere.lk/downloads/payhere.js
+const PayHereModal = ({ data, onSuccess, onCancel, isLive }) => {
+  const didInit = useRef(false);
 
   useEffect(() => {
-    // Strict-mode guard: only launch once
-    if (didLaunchRef.current) return;
-    didLaunchRef.current = true;
-    openPopup();
-    return () => stopPoll();
+    if (didInit.current) return;
+    didInit.current = true;
+
+    const sdkUrl = isLive
+      ? 'https://www.payhere.lk/downloads/payhere.js'
+      : 'https://sandbox.payhere.lk/downloads/payhere.js';
+
+    const boot = () => {
+      const ph = window.payhere;
+      if (!ph) { console.error('PayHere SDK not loaded'); return; }
+
+      // Payment completed handler
+      ph.onCompleted = (orderId) => {
+        onSuccess(orderId);
+      };
+
+      // Payment dismissed / cancelled
+      ph.onDismissed = () => {
+        onCancel('dismissed');
+      };
+
+      // Payment error
+      ph.onError = (error) => {
+        console.error('PayHere error:', error);
+        onCancel('error');
+      };
+
+      // Build payment object — all fields PayHere expects
+      const payment = {
+        sandbox:      !isLive,
+        merchant_id:  data.merchantId,
+        return_url:   data.returnUrl,
+        cancel_url:   data.cancelUrl,
+        notify_url:   data.notifyUrl,
+        order_id:     data.orderId,
+        items:        data.items,
+        amount:       data.amount,
+        currency:     data.currency,
+        hash:         data.hash,
+        first_name:   data.firstName,
+        last_name:    data.lastName,
+        email:        data.email,
+        phone:        data.phone,
+        address:      data.address,
+        city:         data.city,
+        country:      data.country,
+      };
+
+      ph.startPayment(payment);
+    };
+
+    // Load SDK if not already present
+    if (window.payhere) {
+      boot();
+    } else {
+      const existing = document.getElementById('payhere-sdk');
+      if (existing) {
+        existing.addEventListener('load', boot);
+        return;
+      }
+      const script = document.createElement('script');
+      script.id = 'payhere-sdk';
+      script.src = sdkUrl;
+      script.onload = boot;
+      script.onerror = () => onCancel('sdk-load-failed');
+      document.head.appendChild(script);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const focusPopup = () => {
-    if (popupRef.current && !popupRef.current.closed) popupRef.current.focus();
-  };
-
-  const handleCancel = () => {
-    stopPoll();
-    if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
-    onCancel();
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl p-8 max-w-sm w-full text-center shadow-2xl">
-        <div className="text-4xl mb-3">💳</div>
-
-        {status === 'blocked' && (
-          <>
-            <h3 className="font-bold text-gray-900 text-lg mb-2">Popup Blocked</h3>
-            <p className="text-gray-500 text-sm mb-5">
-              Your browser blocked the PayHere window.<br />
-              Allow popups for this site, then click below.
-            </p>
-            <button
-              onClick={() => { didLaunchRef.current = false; openPopup(); }}
-              className="w-full py-3 rounded-xl bg-indigo-600 text-white font-bold text-sm mb-3 hover:bg-indigo-700 transition-colors"
-            >
-              Open Payment Window
-            </button>
-            <button onClick={handleCancel} className="text-sm text-gray-400 hover:text-gray-600 underline">Cancel</button>
-          </>
-        )}
-
-        {status === 'launching' && (
-          <>
-            <h3 className="font-bold text-gray-900 text-lg mb-2">Opening PayHere…</h3>
-            <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          </>
-        )}
-
-        {status === 'open' && (
-          <>
-            <h3 className="font-bold text-gray-900 text-lg mb-2">Complete Your Payment</h3>
-            <p className="text-gray-500 text-sm mb-5">
-              PayHere is open in a separate window.<br />
-              <strong className="text-gray-700">Keep this tab open</strong> while you pay.
-            </p>
-            <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-5" />
-            <button
-              onClick={focusPopup}
-              className="w-full py-2.5 rounded-xl bg-indigo-600 text-white font-semibold text-sm mb-3 hover:bg-indigo-700 transition-colors"
-            >
-              Bring Payment Window to Front
-            </button>
-            <button onClick={handleCancel} className="text-sm text-gray-400 hover:text-gray-600 underline">
-              Cancel payment
-            </button>
-          </>
-        )}
-
-        {/* Hidden form — rendered once, submitted into popup */}
-        <form
-          ref={formRef}
-          method="POST"
-          action={data.checkoutUrl}
-          target="payhere_popup"
-          style={{ display: 'none' }}
-        >
-          {Object.entries(data)
-            .filter(([k]) => k !== 'checkoutUrl')
-            .map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)
-          }
-        </form>
-      </div>
-    </div>
-  );
+  // This component renders nothing visible — PayHere SDK injects its own overlay
+  return null;
 };
 
 // ── Stripe Card Modal ────────────────────────────────────────────────────────
@@ -700,7 +642,8 @@ export default function Checkout() {
 
       // ── Handle PayHere ───────────────────────────────────────────────────────
       if (effectivePaymentMethod === 'payhere') {
-        const phData = await API.post('/payments/payhere/init', {
+        const gwInfo = gateways.find(g => g.gateway === 'payhere');
+        const phRes = await API.post('/payments/payhere/init', {
           orderId: data.orderId,
           amount:  data.total,
           currency: settings?.currency || 'LKR',
@@ -711,7 +654,7 @@ export default function Checkout() {
         orderPlaced.current = true;
         clearCart();
         sessionStorage.removeItem('checkout_state');
-        setPayHereData(phData.data);
+        setPayHereData({ ...phRes.data, isLive: gwInfo?.isLive || false });
         setLoading(false);
         return;
       }
@@ -906,12 +849,24 @@ export default function Checkout() {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8" style={{ background: 'var(--body-bg)' }}>
       {/* Payment modals */}
       {payHereData && (
-        <PayHereForm
+        <PayHereModal
           data={payHereData}
-          onCancel={() => setPayHereData(null)}
-          onSuccess={() => {
+          isLive={payHereData.isLive}
+          onSuccess={(orderId) => {
             setPayHereData(null);
-            navigate(`/my-orders?payment=payhere`);
+            toast.success('✅ Payment successful!');
+            navigate(`/my-orders?new=${payHereData.orderId}&payment=payhere`);
+          }}
+          onCancel={(reason) => {
+            setPayHereData(null);
+            if (reason === 'dismissed') {
+              toast('Payment cancelled. Your order is saved — complete payment from My Orders.', { icon: 'ℹ️' });
+            } else if (reason === 'error') {
+              toast.error('Payment failed. Please try again from My Orders.');
+            } else {
+              toast.error('Could not load PayHere. Check your connection and try again.');
+            }
+            navigate(`/my-orders?new=${payHereData.orderId}`);
           }}
         />
       )}

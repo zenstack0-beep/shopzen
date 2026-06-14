@@ -69,7 +69,6 @@ router.post('/payhere/init', async (req, res) => {
     const hashedSecret = crypto.createHash('md5').update(merchantSecret).digest('hex').toUpperCase();
     const hash = crypto.createHash('md5').update(`${merchantId}${orderId}${amountFormatted}${currency}${hashedSecret}`).digest('hex').toUpperCase();
 
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
     const backendUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5001}`;
 
     res.json({
@@ -80,18 +79,18 @@ router.post('/payhere/init', async (req, res) => {
       currency,
       hash,
       firstName: customerName?.split(' ')[0] || '',
-      lastName: customerName?.split(' ').slice(1).join(' ') || '',
-      email: email || '',
-      phone: phone || '',
+      lastName:  customerName?.split(' ').slice(1).join(' ') || '',
+      email:   email   || '',
+      phone:   phone   || '',
       address: address || '',
-      city: city || '',
+      city:    city    || '',
       country: country || 'Sri Lanka',
-      returnUrl: `${backendUrl}/api/payments/payhere/return?orderId=${orderId}`,
-      cancelUrl: `${backendUrl}/api/payments/payhere/return?orderId=${orderId}&cancelled=1`,
-      notifyUrl: `${backendUrl}/api/payments/payhere/notify`,
+      returnUrl:  `${backendUrl}/api/payments/payhere/return`,
+      cancelUrl:  `${backendUrl}/api/payments/payhere/return?cancelled=1`,
+      notifyUrl:  `${backendUrl}/api/payments/payhere/notify`,
       checkoutUrl: gw.isLive
         ? 'https://www.payhere.lk/pay/checkout'
-        : 'https://sandbox.payhere.lk/pay/checkout'
+        : 'https://sandbox.payhere.lk/pay/checkout',
     });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
