@@ -86,14 +86,29 @@ router.post('/payhere/init', async (req, res) => {
       address: address || '',
       city: city || '',
       country: country || 'Sri Lanka',
-      returnUrl: `${frontendUrl}/order-success/${orderId}?gateway=payhere`,
-      cancelUrl: `${frontendUrl}/checkout`,
+      returnUrl: `${backendUrl}/api/payments/payhere/return?orderId=${orderId}`,
+      cancelUrl: `${backendUrl}/api/payments/payhere/return?orderId=${orderId}&cancelled=1`,
       notifyUrl: `${backendUrl}/api/payments/payhere/notify`,
       checkoutUrl: gw.isLive
         ? 'https://www.payhere.lk/pay/checkout'
         : 'https://sandbox.payhere.lk/pay/checkout'
     });
   } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+// ── PayHere Return (browser redirect after payment — runs in popup) ──────────
+// PayHere redirects the popup tab here after success or cancel.
+// We just close the popup; the parent tab polls for popup.closed and navigates.
+router.get('/payhere/return', (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>Payment Complete</title></head><body>
+    <p style="font-family:sans-serif;text-align:center;margin-top:40px">
+      Payment complete. This window will close shortly…
+    </p>
+    <script>
+      try { window.close(); } catch(e) {}
+      setTimeout(function(){ window.close(); }, 1000);
+    </script>
+  </body></html>`);
 });
 
 // ── PayHere Notify (webhook from PayHere server) ────────────────────────────
