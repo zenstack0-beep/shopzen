@@ -665,6 +665,49 @@ export default function Checkout() {
         }
       }
 
+      // ── Stripe — get payment intent WITHOUT creating order yet ─────────────
+      if (effectivePaymentMethod === 'stripe') {
+        try {
+          // Get amount estimate from totals (already computed in frontend)
+          const intentRes = await API.post('/payments/stripe/create-intent', {
+            amount:   total,
+            currency: (settings?.currency || 'USD').toLowerCase(),
+          });
+          setStripeModal({
+            clientSecret:    intentRes.data.clientSecret,
+            publicKey:       intentRes.data.publicKey,
+            amount:          total,
+            currency:        settings?.currency || 'USD',
+            pendingOrderData: orderData,
+          });
+          setLoading(false);
+          return;
+        } catch (intentErr) {
+          toast.error(intentErr.response?.data?.message || 'Could not initialise Stripe. Please try again.');
+          setLoading(false);
+          return;
+        }
+      }
+
+      // ── PayPal — show buttons WITHOUT creating order yet ─────────────────────
+      if (effectivePaymentMethod === 'paypal') {
+        const gwInfo = gateways.find(g => g.gateway === 'paypal');
+        if (!gwInfo?.publicKey) {
+          toast.error('PayPal is not properly configured. Please contact the store admin.');
+          setLoading(false);
+          return;
+        }
+        setPaypalModal({
+          clientId:         gwInfo.publicKey,
+          amount:           total,
+          currency:         settings?.currency || 'USD',
+          pendingOrderData: orderData,
+        });
+        setLoading(false);
+        return;
+      }
+
+      // ── COD / bank_transfer / free — create order now ────────────────────────
       const { data } = await API.post('/orders', orderData);
 
       if (user) {
@@ -673,55 +716,6 @@ export default function Checkout() {
         }).catch(() => {});
       }
 
-      // ── Handle Stripe — show card input modal ────────────────────────────────
-      if (effectivePaymentMethod === 'stripe') {
-        try {
-          const intentRes = await API.post('/payments/stripe/create-intent', {
-            orderId:  data.orderId,
-            amount:   data.total,
-            currency: (settings?.currency || 'USD').toLowerCase(),
-          });
-          orderPlaced.current = true;
-          clearCart();
-          sessionStorage.removeItem('checkout_state');
-          setStripeModal({
-            clientSecret: intentRes.data.clientSecret,
-            publicKey:    intentRes.data.publicKey,
-            amount:       data.total,
-            currency:     settings?.currency || 'USD',
-            orderId:      data.orderId,
-          });
-          setLoading(false);
-          return;
-        } catch (intentErr) {
-          toast.error(intentErr.response?.data?.message || 'Could not initialize Stripe payment. Please try again.');
-          setLoading(false);
-          return;
-        }
-      }
-
-      // ── Handle PayPal — show PayPal buttons modal ────────────────────────────
-      if (effectivePaymentMethod === 'paypal') {
-        const gwInfo = gateways.find(g => g.gateway === 'paypal');
-        if (!gwInfo?.publicKey) {
-          toast.error('PayPal is not properly configured. Please contact the store admin.');
-          setLoading(false);
-          return;
-        }
-        orderPlaced.current = true;
-        clearCart();
-        sessionStorage.removeItem('checkout_state');
-        setPaypalModal({
-          clientId: gwInfo.publicKey,
-          amount:   data.total,
-          currency: settings?.currency || 'USD',
-          orderId:  data.orderId,
-        });
-        setLoading(false);
-        return;
-      }
-
-      // ── All other methods (COD, bank_transfer, free) ─────────────────────────
       orderPlaced.current = true;
       clearCart();
       sessionStorage.removeItem('checkout_state');
@@ -738,33 +732,46 @@ export default function Checkout() {
     } finally { setLoading(false); }
   };
 
-  // ── Stripe payment success ───────────────────────────────────────────────────
+  // ── Stripe success — create order with paymentReference ──────────────────────
   const handleStripeSuccess = async (paymentIntentId) => {
-    try {
-      // Notify backend that payment succeeded (webhook may also do this)
-      await API.post('/orders/payment-success', {
-        orderId:          stripeModal.orderId,
-        paymentReference: paymentIntentId,
-        gateway:          'stripe',
-      }).catch(() => {}); // Non-fatal — webhook handles it too
-    } catch {}
+    const pendingData = stripeModal.pendingOrderData;
     setStripeModal(null);
-    toast.success('✅ Payment successful!');
-    navigate(`/my-orders?new=${stripeModal.orderId}&payment=stripe`);
+    try {
+      const { data } = await API.post('/orders', {
+        ...pendingData,
+        paymentReference: paymentIntentId,
+      });
+      if (user) API.put('/auth/profile', { defaultAddress: { country: billing.country, street: billing.street, city: billing.city } }).catch(() => {});
+      orderPlaced.current = true;
+      clearCart();
+      sessionStorage.removeItem('checkout_state');
+      toast.success('✅ Payment successful!');
+      navigate(`/my-orders?new=${data.orderId}&payment=stripe`);
+    } catch (err) {
+      toast.error('Payment received but order failed. Please contact support.');
+      navigate('/my-orders');
+    }
   };
 
-  // ── PayPal payment success ───────────────────────────────────────────────────
+  // ── PayPal success — create order with paymentReference ──────────────────────
   const handlePayPalSuccess = async (captureId) => {
-    try {
-      await API.post('/orders/payment-success', {
-        orderId:          paypalModal.orderId,
-        paymentReference: captureId,
-        gateway:          'paypal',
-      }).catch(() => {});
-    } catch {}
+    const pendingData = paypalModal.pendingOrderData;
     setPaypalModal(null);
-    toast.success('✅ PayPal payment successful!');
-    navigate(`/my-orders?new=${paypalModal.orderId}&payment=paypal`);
+    try {
+      const { data } = await API.post('/orders', {
+        ...pendingData,
+        paymentReference: captureId,
+      });
+      if (user) API.put('/auth/profile', { defaultAddress: { country: billing.country, street: billing.street, city: billing.city } }).catch(() => {});
+      orderPlaced.current = true;
+      clearCart();
+      sessionStorage.removeItem('checkout_state');
+      toast.success('✅ PayPal payment successful!');
+      navigate(`/my-orders?new=${data.orderId}&payment=paypal`);
+    } catch (err) {
+      toast.error('Payment received but order failed. Please contact support.');
+      navigate('/my-orders');
+    }
   };
 
   const hasAnyPayment = settings?.bankTransferEnabled !== false || settings?.codEnabled !== false || gateways.length > 0;
@@ -912,8 +919,8 @@ export default function Checkout() {
           onSuccess={handleStripeSuccess}
           onCancel={() => {
             setStripeModal(null);
-            toast('Payment cancelled. Your order is saved — complete payment from My Orders.', { icon: 'ℹ️' });
-            navigate(`/my-orders?new=${stripeModal.orderId}`);
+            toast('Payment cancelled. Nothing was charged.', { icon: 'ℹ️' });
+            // No order was created — just stay on checkout
           }}
         />
       )}
@@ -922,12 +929,12 @@ export default function Checkout() {
           clientId={paypalModal.clientId}
           amount={paypalModal.amount}
           currency={paypalModal.currency}
-          orderId={paypalModal.orderId}
+          orderId={null}
           onSuccess={handlePayPalSuccess}
           onCancel={() => {
             setPaypalModal(null);
-            toast('Payment cancelled. Your order is saved — complete payment from My Orders.', { icon: 'ℹ️' });
-            navigate(`/my-orders?new=${paypalModal.orderId}`);
+            toast('Payment cancelled. Nothing was charged.', { icon: 'ℹ️' });
+            // No order was created — just stay on checkout
           }}
         />
       )}

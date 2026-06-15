@@ -229,7 +229,7 @@ router.post('/stripe/create-intent', async (req, res) => {
     const paymentIntent = await stripe.paymentIntents.create({
       amount:   Math.round(parseFloat(amount) * 100),
       currency,
-      metadata: { orderId },
+      metadata: orderId ? { orderId } : {},
     });
 
     res.json({ clientSecret: paymentIntent.client_secret, publicKey: gw.config.publicKey });

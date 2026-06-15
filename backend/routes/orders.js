@@ -494,6 +494,7 @@ router.post('/', async (req, res) => {
     const {
       items, billing, shipping, shipToDifferentAddress,
       paymentMethod, couponCode, giftCard, notes, deliveryService,
+      paymentReference,   // provided by frontend after gateway payment succeeds
     } = req.body;
 
     if (!items || items.length === 0)
@@ -594,8 +595,32 @@ router.post('/', async (req, res) => {
       shipping: shipToDifferentAddress ? shipping : billing,
       shipToDifferentAddress,
       paymentMethod,
-      paymentStatus: paymentMethod === 'free' ? 'paid' : 'pending',
-      orderStatus:   'pending',
+
+      // ── Payment status logic ────────────────────────────────────────────────
+      // Gateway payments (payhere/stripe/paypal): frontend sends paymentReference
+      // ONLY after the gateway confirms success. We trust it here because:
+      //   1. preflight/create-intent never creates an order
+      //   2. onCompleted/confirmCardPayment/onApprove are gateway-verified events
+      //   3. Webhook (notify_url) will also confirm independently
+      // Declined / insufficient funds → gateway never calls onCompleted →
+      //   frontend never reaches this route → no order created at all.
+      paymentStatus: (() => {
+        if (paymentMethod === 'free')                                   return 'paid';
+        if (paymentMethod === 'cod')                                    return 'pending';
+        if (paymentMethod === 'bank_transfer')                          return 'pending';
+        // Gateway methods — paid only when paymentReference is present
+        if (['payhere','stripe','paypal'].includes(paymentMethod) && paymentReference) return 'paid';
+        return 'pending';
+      })(),
+
+      orderStatus: (() => {
+        if (paymentMethod === 'free')                                   return 'confirmed';
+        if (['payhere','stripe','paypal'].includes(paymentMethod) && paymentReference) return 'confirmed';
+        return 'pending';
+      })(),
+
+      paymentReference: paymentReference || undefined,
+
       // Coupon — discount applied to subtotal
       couponCode:      hasCoupon   ? couponCode : undefined,
       couponDiscount:  hasCoupon   ? totals.couponDiscount : 0,
@@ -611,7 +636,15 @@ router.post('/', async (req, res) => {
       notes,
       deliveryService:     deliveryService || 'standard',
       deliveryServiceName,
-      statusHistory: [{ status: 'pending', note: 'Order placed', updatedBy: billing.email }],
+      statusHistory: [{
+        status: (['payhere','stripe','paypal'].includes(paymentMethod) && paymentReference)
+          ? 'confirmed'
+          : 'pending',
+        note: (['payhere','stripe','paypal'].includes(paymentMethod) && paymentReference)
+          ? `Payment confirmed via ${paymentMethod} (${paymentReference})`
+          : 'Order placed',
+        updatedBy: billing.email,
+      }],
     };
 
     if (userId) orderData.customer = userId;
