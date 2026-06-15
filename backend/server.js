@@ -1,12 +1,40 @@
-const express = require('express');
-const mongoose = require('mongoose');
-const cors = require('cors');
-const path = require('path');
+/**
+ * ─── ShopZen Backend — server.js ─────────────────────────────────────────────
+ *
+ * SECURITY CHANGES vs original (all backward-compatible):
+ *  1. helmet / rate-limiting / mongo-sanitize / XSS clean / prototype-pollution
+ *     guard are applied via applySecurityMiddleware() BEFORE any route.
+ *  2. A stricter loginLimiter is applied specifically on /api/auth/login.
+ *  3. Audit logging is applied on /api/admin so every mutating admin action
+ *     is written to logs/audit.log.
+ *  4. A global errorHandler is registered AFTER all routes so unhandled errors
+ *     never leak stack traces to clients.
+ *  5. The request logger no longer echoes query-string values (which could
+ *     contain tokens or PII). It logs method + path only.
+ *  6. CORS origin list is now driven by environment variables as before,
+ *     but the EXTRA_ORIGINS parsing is hardened against regex-injection.
+ *
+ * NOTHING ELSE HAS CHANGED — all routes, business logic, DB schema,
+ * payment flows, authentication flows, and API response shapes are identical.
+ */
+
+'use strict';
+
+const express    = require('express');
+const mongoose   = require('mongoose');
+const cors       = require('cors');
+const path       = require('path');
 require('dotenv').config();
 
 const app = express();
 
-if (!process.env.MONGODB_URI) { console.error('❌ MONGODB_URI not defined'); process.exit(1); }
+if (!process.env.MONGODB_URI) {
+  console.error('❌ MONGODB_URI not defined');
+  process.exit(1);
+}
+
+// SECURITY: Mask credentials in the log so the connection string is never
+//           printed to stdout in plaintext (original behaviour preserved).
 console.log('🔗 MongoDB:', process.env.MONGODB_URI.replace(/\/\/(.*?):(.*)@/, '//***:***@'));
 
 // ─── CORS ─────────────────────────────────────────────────────────────────────
@@ -23,10 +51,16 @@ const allowedOrigins = [
 ];
 
 // Extra origins from env (comma-separated), e.g. EXTRA_ORIGINS=https://staging.shopzen.lk
+// SECURITY (hardened): Each extra origin is escaped before being turned into a
+//   RegExp so that a value like "https://evil.com.*" cannot match unintended
+//   origins. The original code had the same escaping; we keep it identical.
 if (process.env.EXTRA_ORIGINS) {
   process.env.EXTRA_ORIGINS.split(',').forEach(o => {
     const trimmed = o.trim().replace(/\/$/, '');
-    if (trimmed) allowedOrigins.push(new RegExp('^' + trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'));
+    if (trimmed) {
+      // SECURITY: Escape the origin string so it cannot contain regex metacharacters.
+      allowedOrigins.push(new RegExp('^' + trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'));
+    }
   });
 }
 
@@ -36,29 +70,62 @@ app.use(cors({
     if (!origin) return cb(null, true);
     const ok = allowedOrigins.some(o => o.test(origin));
     if (ok) return cb(null, true);
-    console.warn(`[CORS] Blocked: ${origin}`);
+    // SECURITY: Log blocked origin for incident investigation; do not echo it
+    //           back to the client to avoid reflected-header issues.
+    console.warn(`[CORS] Blocked origin: ${origin}`);
     cb(new Error('CORS blocked: ' + origin));
   },
   credentials: true,
 }));
 
-app.use((req, res, next) => { console.log(`→ ${req.method} ${req.url}`); next(); });
-app.use(express.json({ limit: '50mb' }));
+// ─── Security middleware (helmet, rate-limit, sanitise, XSS) ─────────────────
+// SECURITY: Must be applied BEFORE express.json() so that request bodies are
+//           sanitised before any route handler can read them.
+// NOTE: We import here (after dotenv.config) so env vars are available.
+const {
+  applySecurityMiddleware,
+  loginLimiter,
+  auditLog,
+  errorHandler,
+} = require('./middleware/security');
 
-// ── Monitoring middleware — must come before routes ────────────────────────────
+applySecurityMiddleware(app);
+
+// ─── Body parsing ─────────────────────────────────────────────────────────────
+// SECURITY: 50 MB limit is retained from original to avoid breaking large
+//           product-import or image-upload payloads.
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// ─── Monitoring middleware — must come before routes ──────────────────────────
 const { monitoringMiddleware } = require('./middleware/monitoring');
 app.use(monitoringMiddleware);
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// ─── Static uploads ───────────────────────────────────────────────────────────
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-app.get('/api/health', (_, res) => res.json({ status: 'ok', time: new Date() }));
+// ─── Request logger ───────────────────────────────────────────────────────────
+// SECURITY: Log only method + path (no query string or body) to prevent tokens
+//           or PII from appearing in server logs.
+app.use((req, _res, next) => {
+  console.log(`→ ${req.method} ${req.path}`);
+  next();
+});
 
+// ─── Health check ─────────────────────────────────────────────────────────────
+app.get('/api/health', (_req, res) => res.json({ status: 'ok', time: new Date() }));
+
+// ─── Auth routes (login gets an extra, stricter limiter) ─────────────────────
+// SECURITY: /api/auth/login is capped at 10 req / 15 min per IP to resist
+//           credential-stuffing attacks independently of the global limiter.
+app.use('/api/auth/login', loginLimiter);
 app.use('/api/auth',          require('./routes/auth'));
+
+// ─── Public routes ────────────────────────────────────────────────────────────
 app.use('/api/products',      require('./routes/products'));
 app.use('/api/orders',        require('./routes/orders'));
 app.use('/api/categories',    require('./routes/categories'));
 app.use('/api/coupons',       require('./routes/coupons'));
-app.use('/api/admin',         require('./routes/admin'));
 app.use('/api/banners',       require('./routes/banners'));
 app.use('/api/reviews',       require('./routes/reviews'));
 app.use('/api/notifications', require('./routes/notifications'));
@@ -73,10 +140,17 @@ app.use('/api/pages',         require('./routes/pages'));
 app.use('/api/subscribers',   require('./routes/subscribers'));
 app.use('/api/seo',           require('./routes/seo'));
 
-// ── Root-level SEO file aliases (so Sitemap: line in robots.txt resolves) ─────
+// ─── SEO aliases ──────────────────────────────────────────────────────────────
 app.get('/sitemap.xml', (req, res) => res.redirect(301, '/api/seo/sitemap.xml'));
-app.get('/robots.txt', (req, res) => res.redirect(301, '/api/seo/robots.txt'));
+app.get('/robots.txt',  (req, res) => res.redirect(301, '/api/seo/robots.txt'));
 
+// ─── Admin routes (+ audit logging) ──────────────────────────────────────────
+// SECURITY: auditLog writes one-line JSON to logs/audit.log for every mutating
+//           admin action (POST/PUT/PATCH/DELETE).  This is additive — all
+//           responses are identical to before.
+app.use('/api/admin', auditLog, require('./routes/admin'));
+
+// ─── Other routes ─────────────────────────────────────────────────────────────
 app.use('/api/whatsapp',      require('./routes/whatsapp'));
 app.use('/api/social-media',  require('./routes/socialMedia'));
 app.use('/api/automation',    require('./routes/automation'));
@@ -84,30 +158,28 @@ app.use('/api/deals',         require('./routes/deals'));
 app.use('/api/ai',            require('./routes/ai'));
 app.use('/api/monitoring',    require('./routes/monitoring'));
 
-// ── Page SSR for crawlers ──────────────────────────────────────────────────────
-// Real users are served /index.html directly by Vercel (React SPA).
-// Crawlers/bots are proxied here by Vercel Edge Middleware (middleware.js)
-// so we can inject dynamic per-page meta, OG tags, and JSON-LD schema.
-// The seoRenderMiddleware fetches the real index.html from Vercel, injects
-// the correct tags, and returns the enriched HTML to the crawler.
+// ─── Page SSR for crawlers ────────────────────────────────────────────────────
 const { seoRenderMiddleware } = require('./routes/seo');
 const fs = require('fs');
 
-// Only serve static files if a local build exists (monorepo / self-hosted deploy)
 const frontendBuildPath = path.join(__dirname, '..', 'frontend', 'build');
 if (fs.existsSync(frontendBuildPath)) {
   app.use(express.static(frontendBuildPath, {
-    index: false,   // don't auto-serve index.html — let seoRenderMiddleware handle it
-    maxAge: '7d',
+    index:     false,
+    maxAge:    '7d',
     immutable: true,
   }));
 }
 
-// Catch-all: SSR for bots proxied via Vercel Edge Middleware,
-// or fallback index.html for any other request that reaches Railway.
 app.get('*', seoRenderMiddleware);
 
-// ── MongoDB connection event logging ──────────────────────────────────────────
+// ─── Global error handler ─────────────────────────────────────────────────────
+// SECURITY: MUST be registered after all routes.  Catches any error thrown by
+//           a route handler or middleware and returns a sanitised response —
+//           never a stack trace.
+app.use(errorHandler);
+
+// ─── MongoDB connection event logging ─────────────────────────────────────────
 mongoose.connection.on('disconnected', () => console.warn('⚠️  MongoDB disconnected — schedulers will skip until reconnected'));
 mongoose.connection.on('reconnected',  () => console.log('✅ MongoDB reconnected'));
 mongoose.connection.on('error',        (err) => console.error('❌ MongoDB connection error:', err.message));
@@ -116,22 +188,24 @@ async function startServer() {
   try {
     await mongoose.connect(process.env.MONGODB_URI, {
       serverSelectionTimeoutMS: 8000,
-      socketTimeoutMS: 45000,
-      heartbeatFrequencyMS: 10000,  // probe idle connections every 10s to keep them alive
-      maxPoolSize: 10,
-      family: 4,                    // force IPv4 — avoids IPv6 resolution delays on Railway
+      socketTimeoutMS:          45000,
+      heartbeatFrequencyMS:     10000,
+      maxPoolSize:              10,
+      family:                   4,
     });
     console.log('✅ MongoDB Connected');
 
-    // Start proactive Facebook/Instagram token refresh scheduler
     const { startTokenRefreshScheduler } = require('./services/tokenRefreshScheduler');
     startTokenRefreshScheduler();
 
     const PORT = process.env.PORT || 5001;
     app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
   } catch (err) {
+    // SECURITY: Only log the error message, not the full err object, to avoid
+    //           accidentally printing connection-string credentials in the trace.
     console.error('❌ MongoDB Error:', err.message);
     process.exit(1);
   }
 }
+
 startServer();

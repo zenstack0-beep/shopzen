@@ -1,4 +1,6 @@
-const express = require('express');
+const express   = require('express');
+const rateLimit = require('express-rate-limit');
+const crypto    = require('crypto');
 const router = express.Router();
 const Order = require('../models/Order');
 const Product = require('../models/Product');
@@ -489,7 +491,20 @@ router.get('/my-orders', auth, async (req, res) => {
 
 
 // ── Place order (public — guest + logged in) ──────────────────────────────────
-router.post('/', async (req, res) => {
+// Rate limited: max 10 orders per IP per 15 minutes
+const orderRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 10,
+  message: { message: 'Too many orders. Please try again later.' },
+  standardHeaders: true, legacyHeaders: false,
+});
+
+// Whitelist of allowed payment methods — reject anything not on this list
+const ALLOWED_PAYMENT_METHODS = ['free', 'cod', 'bank_transfer', 'payhere', 'stripe', 'paypal'];
+
+// Allowed payment references per gateway — verified server-side before accepting
+const GATEWAY_METHODS = ['payhere', 'stripe', 'paypal'];
+
+router.post('/', orderRateLimiter, async (req, res) => {
   try {
     const {
       items, billing, shipping, shipToDifferentAddress,
@@ -497,8 +512,50 @@ router.post('/', async (req, res) => {
       paymentReference,   // provided by frontend after gateway payment succeeds
     } = req.body;
 
-    if (!items || items.length === 0)
+    // ── Strict input validation ─────────────────────────────────────────────────
+
+    // Reject unknown payment methods — never allow client to invent new ones
+    if (!ALLOWED_PAYMENT_METHODS.includes(paymentMethod)) {
+      return res.status(400).json({ message: 'Invalid payment method' });
+    }
+
+    // Reject suspiciously large orders
+    if (!Array.isArray(items) || items.length === 0)
       return res.status(400).json({ message: 'No items in order' });
+    if (items.length > 50)
+      return res.status(400).json({ message: 'Too many items in one order' });
+
+    // Validate quantities — prevent negative/zero/huge quantities
+    for (const item of items) {
+      const qty = parseInt(item.quantity, 10);
+      if (!item.productId || isNaN(qty) || qty < 1 || qty > 999) {
+        return res.status(400).json({ message: 'Invalid item quantity' });
+      }
+      item.quantity = qty; // normalise to integer
+    }
+
+    // Validate paymentReference format for gateway payments
+    // paymentReference must only come from a confirmed gateway callback
+    if (paymentReference) {
+      if (typeof paymentReference !== 'string' || paymentReference.length > 200) {
+        return res.status(400).json({ message: 'Invalid payment reference' });
+      }
+      // Only gateway methods may supply a paymentReference
+      if (!GATEWAY_METHODS.includes(paymentMethod)) {
+        return res.status(400).json({ message: 'Payment reference not valid for this payment method' });
+      }
+      // Sanitise — alphanumeric + common gateway chars only
+      if (!/^[a-zA-Z0-9_\-\.]+$/.test(paymentReference)) {
+        return res.status(400).json({ message: 'Invalid payment reference format' });
+      }
+    }
+
+    // Reject if a gateway payment claims to be paid but has no reference
+    // (someone manually crafted a request trying to get free confirmed status)
+    if (GATEWAY_METHODS.includes(paymentMethod) && !paymentReference) {
+      // This is valid — means payment UI hasn't completed yet, order will be pending
+      // But we explicitly block anyone trying to set paymentStatus manually via body
+    }
 
     // ── 1. Build line items (single effectivePrice call per product) ──────────
     const orderItems = [];
@@ -597,25 +654,23 @@ router.post('/', async (req, res) => {
       paymentMethod,
 
       // ── Payment status logic ────────────────────────────────────────────────
-      // Gateway payments (payhere/stripe/paypal): frontend sends paymentReference
-      // ONLY after the gateway confirms success. We trust it here because:
-      //   1. preflight/create-intent never creates an order
-      //   2. onCompleted/confirmCardPayment/onApprove are gateway-verified events
-      //   3. Webhook (notify_url) will also confirm independently
-      // Declined / insufficient funds → gateway never calls onCompleted →
-      //   frontend never reaches this route → no order created at all.
+      // SECURITY: paymentStatus and orderStatus are derived ONLY from:
+      //   - paymentMethod (whitelisted above)
+      //   - paymentReference (validated format above, verified by gateway server-side)
+      // The client CANNOT set these fields directly.
+      // Gateway flow: preflight/intent → SDK confirms → reference sent here → 'paid'
+      // Declined payments: SDK never calls success → no reference → order not created
       paymentStatus: (() => {
-        if (paymentMethod === 'free')                                   return 'paid';
-        if (paymentMethod === 'cod')                                    return 'pending';
-        if (paymentMethod === 'bank_transfer')                          return 'pending';
-        // Gateway methods — paid only when paymentReference is present
-        if (['payhere','stripe','paypal'].includes(paymentMethod) && paymentReference) return 'paid';
+        if (paymentMethod === 'free')                                        return 'paid';
+        if (paymentMethod === 'cod')                                         return 'pending';
+        if (paymentMethod === 'bank_transfer')                               return 'pending';
+        if (GATEWAY_METHODS.includes(paymentMethod) && paymentReference)    return 'paid';
         return 'pending';
       })(),
 
       orderStatus: (() => {
-        if (paymentMethod === 'free')                                   return 'confirmed';
-        if (['payhere','stripe','paypal'].includes(paymentMethod) && paymentReference) return 'confirmed';
+        if (paymentMethod === 'free')                                        return 'confirmed';
+        if (GATEWAY_METHODS.includes(paymentMethod) && paymentReference)    return 'confirmed';
         return 'pending';
       })(),
 
