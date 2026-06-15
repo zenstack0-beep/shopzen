@@ -28,6 +28,10 @@ require('dotenv').config();
 
 const app = express();
 
+// Trust the Railway/Vercel proxy so express-rate-limit sees the real client IP
+// from X-Forwarded-For rather than the proxy's internal address.
+app.set('trust proxy', 1);
+
 if (!process.env.MONGODB_URI) {
   console.error('❌ MONGODB_URI not defined');
   process.exit(1);
@@ -157,6 +161,7 @@ app.use('/api/automation',    require('./routes/automation'));
 app.use('/api/deals',         require('./routes/deals'));
 app.use('/api/ai',            require('./routes/ai'));
 app.use('/api/monitoring',    require('./routes/monitoring'));
+app.use('/api/backup',        require('./routes/backup'));
 
 // ─── Page SSR for crawlers ────────────────────────────────────────────────────
 const { seoRenderMiddleware } = require('./routes/seo');
@@ -197,6 +202,9 @@ async function startServer() {
 
     const { startTokenRefreshScheduler } = require('./services/tokenRefreshScheduler');
     startTokenRefreshScheduler();
+
+    const { startBackupScheduler } = require('./services/backupScheduler');
+    startBackupScheduler();
 
     const PORT = process.env.PORT || 5001;
     app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));

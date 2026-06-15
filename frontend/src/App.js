@@ -53,6 +53,7 @@ const AdminLayout        = lazy(() => import('./pages/admin/AdminLayout'));
 const Monitoring         = lazy(() => import('./pages/admin/Monitoring'));
 const SocialMediaSettings = lazy(() => import('./pages/admin/SocialMedia'));
 const AutomationRules    = lazy(() => import('./pages/admin/AutomationRules'));
+const BackupCenter       = lazy(() => import('./pages/admin/BackupCenter'));
 const AdminDeals         = lazy(() => import('./pages/admin/Deals'));
 
 // ─── Lazy wrapper helpers for named exports ───────────────────────────────────
@@ -253,6 +254,7 @@ export default function App() {
                       <Route path="automation"       element={<AutomationRules/>}/>
                       <Route path="deals"            element={<AdminDeals/>}/>
                       <Route path="monitoring"       element={<Monitoring/>}/>
+                      <Route path="backup"           element={<BackupCenter/>}/>
                     </Route>
                   </Routes>
                 </Suspense>
