@@ -10,10 +10,11 @@
  *   {{productName}} {{price}} {{salePrice}} {{discount}}
  *   {{url}} {{brand}} {{category}} {{offerName}}
  *
- * FIX: imageUrls (array) now passed alongside imageUrl (first image) so
- *      publishers that support multi-photo carousels can use all images.
- * FIX: manual trigger auto-upgrades to 'product_discount' when salePrice exists.
- * FIX: Default templates are more attractive and show discount pricing.
+ * FIXES:
+ *   - productUrl is now a dedicated field in the returned payload so Facebook/
+ *     Instagram publishers can pass it as `link` param — not just embedded in text.
+ *   - imageUrls (array) now correctly collects ALL product images (thumbnail + images[]).
+ *   - manual trigger auto-upgrades to 'product_discount' when salePrice exists.
  */
 
 const { getOrCreate } = require('./socialMediaService');
@@ -59,8 +60,8 @@ const DEFAULTS = {
     const catLine   = v.category ? `\n📂 ${v.category}` : '';
     return (
       `✨ Just Landed at ShopZen!\n\n` +
-      `🛍️ *${v.productName}*${brandLine}${catLine}\n\n` +
-      `💰 Price: *${v.price}*\n\n` +
+      `🛍️ ${v.productName}${brandLine}${catLine}\n\n` +
+      `💰 Price: ${v.price}\n\n` +
       `Don't miss out — this one won't last long! Tap the link below to grab yours now 👇\n\n` +
       `🔗 ${v.url}\n\n` +
       `#ShopZen #NewArrival #ShopNow #SriLanka`
@@ -69,12 +70,12 @@ const DEFAULTS = {
 
   product_discount: v => {
     const saveLine = v.salePrice
-      ? `💥 Was ${v.price} → Now only *${v.salePrice}*`
-      : `💥 Now *${v.price}*`;
+      ? `💥 Was ${v.price} → Now only ${v.salePrice}`
+      : `💥 Now ${v.price}`;
     const brandLine = v.brand ? `\n🏷️ Brand: ${v.brand}` : '';
     return (
       `🔥 ${v.discount} OFF — Limited Offer!\n\n` +
-      `🛍️ *${v.productName}*${brandLine}\n\n` +
+      `🛍️ ${v.productName}${brandLine}\n\n` +
       `${saveLine}\n` +
       `⏰ Limited time deal — stock is running out!\n\n` +
       `Shop now before it's gone 👇\n` +
@@ -84,10 +85,10 @@ const DEFAULTS = {
   },
 
   offer_active: v => {
-    const discLine = v.discount ? `\n🏷️ Up to *${v.discount}* off!` : '';
+    const discLine = v.discount ? `\n🏷️ Up to ${v.discount} off!` : '';
     return (
       `🎉 Special Offer Alert!\n\n` +
-      `✨ *${v.offerName}*${discLine}\n\n` +
+      `✨ ${v.offerName}${discLine}\n\n` +
       `This is your chance to save big on your favourite products.\n` +
       `⏳ Hurry — limited time only!\n\n` +
       `Shop the offer now 👇\n` +
@@ -109,6 +110,10 @@ async function compose(platform, trigger, entity, customMsg = '') {
   const isOffer = trigger === 'offer_active';
   const vars    = isOffer ? offerVars(entity) : productVars(entity);
 
+  // ── The product/offer URL — passed as dedicated field so publishers can use
+  //    it as a `link` param (Facebook link preview) without parsing the text ──
+  const productUrl = vars.url;
+
   // ── Auto-upgrade 'manual' trigger when product has a sale price ────────────
   let effectiveTrigger = trigger;
   if (!isOffer && (trigger === 'manual' || trigger === 'new_product')) {
@@ -117,22 +122,20 @@ async function compose(platform, trigger, entity, customMsg = '') {
     }
   }
 
-  // ── Collect ALL product images (not just the first) ────────────────────────
+  // ── Collect ALL product images (thumbnail first, then images array) ─────────
   const imageUrls = [];
-  // Thumbnail / primary image first
   const primary = entity.thumbnail || entity.bannerImage || entity.pageBannerImage || entity.image || '';
   if (primary) imageUrls.push(primary);
-  // Additional images array
   if (Array.isArray(entity.images)) {
     entity.images.forEach(url => {
       if (url && !imageUrls.includes(url)) imageUrls.push(url);
     });
   }
-  const imageUrl = imageUrls[0] || '';   // kept for backward compat with single-image publishers
+  const imageUrl = imageUrls[0] || '';   // backward compat for single-image publishers
 
   // 1. Custom message from rule
   if (customMsg && customMsg.trim()) {
-    return { text: interpolate(customMsg, vars), imageUrl, imageUrls };
+    return { text: interpolate(customMsg, vars), imageUrl, imageUrls, productUrl };
   }
 
   // 2. Platform template
@@ -142,13 +145,13 @@ async function compose(platform, trigger, entity, customMsg = '') {
     if (tpl && tpl.template) {
       let text = interpolate(tpl.template, vars);
       if (tpl.hashtags?.length) text += '\n\n' + tpl.hashtags.map(h => `#${h.replace(/^#/, '')}`).join(' ');
-      return { text, imageUrl, imageUrls };
+      return { text, imageUrl, imageUrls, productUrl };
     }
   } catch { /* fall through */ }
 
   // 3. Built-in default
   const fn = DEFAULTS[effectiveTrigger] || DEFAULTS.new_product;
-  return { text: fn(vars), imageUrl, imageUrls };
+  return { text: fn(vars), imageUrl, imageUrls, productUrl };
 }
 
 module.exports = { compose };

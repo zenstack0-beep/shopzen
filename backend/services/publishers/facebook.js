@@ -3,13 +3,39 @@
  *
  * Posts to a Facebook PAGE via the Graph API.
  *
- * STRATEGY FOR FEED VISIBILITY:
- * - Single image: POST to /{pageId}/feed with `link` = image URL.
- *   Facebook will embed the image inline AND show it in the main feed.
- *   (The attached_media staging approach fails silently when FB can't
- *    fetch the image server-side, causing a text-only fallback.)
- * - Multiple images: Stage each as unpublished photo → /feed with attached_media[].
- * - No image: plain /feed text post with optional link preview.
+ * ── HOW FACEBOOK FEED VISIBILITY WORKS ────────────────────────────────────────
+ *
+ * There are 3 ways to post with an image to a Facebook Page:
+ *
+ *   A) POST /{pageId}/feed  { link: imageUrl }
+ *      → Facebook creates a "link card" preview using the image URL.
+ *      → PROBLEM: only appears in Photos tab, NOT in the main All Posts feed.
+ *        This was the bug causing posts to be invisible to followers.
+ *
+ *   B) POST /{pageId}/photos  { url, published: true }
+ *      → Creates a native photo post visible in Photos tab.
+ *      → PROBLEM: no way to attach a separate product link preview below it.
+ *
+ *   C) POST /{pageId}/photos  { url, published: false }  (stage)
+ *      then POST /{pageId}/feed  { attached_media: [{ media_fbid }], link: productUrl }
+ *      → Creates a FEED POST with the image displayed inline + a clickable
+ *        product link preview card below it.
+ *      → ✅ Appears in ALL Posts feed, Photos tab, and followers' News Feed.
+ *      → ✅ Product URL is a real clickable link, not plain text.
+ *
+ * STRATEGY (fixed):
+ *   Single image  → stage image + /feed with attached_media, product URL
+ *                    appended as plain text to `message` (NOT `link`)
+ *   Multi-image   → stage all images + /feed with attached_media[], product
+ *                    URL appended as plain text to `message` (NOT `link`)
+ *   No image      → plain /feed with product URL appended to `message`
+ *
+ * IMPORTANT: Do NOT set `feedBody.link` when `attached_media` is present.
+ * Facebook mishandles that combination — the post ends up visible only in
+ * the Photos tab and not in "All Posts". Appending the URL to `message`
+ * instead (Facebook auto-links plain URLs in text) fixes this.
+ *
+ * The productUrl comes from payload.productUrl (set by postComposer.js).
  */
 
 const GRAPH = 'https://graph.facebook.com/v21.0';
@@ -49,10 +75,8 @@ async function publish(creds, payload) {
                : [];
 
   if (images.length > 1) {
-    // Multi-image: must use the staging + attached_media approach
     return postMultipleImages(accountId, accessToken, payload, images);
   } else if (images.length === 1) {
-    // Single image: post directly to /feed — avoids staging failure
     return postSingleImage(accountId, accessToken, payload, images[0]);
   } else {
     return postTextOnly(accountId, accessToken, payload);
@@ -60,90 +84,94 @@ async function publish(creds, payload) {
 }
 
 /**
- * Single image post via /feed directly.
+ * Stage the image as an unpublished photo, then publish a /feed post that has:
+ *   - The image visible inline (via attached_media)
+ *   - A clickable product link preview card below (via link param)
  *
- * WHY NOT use /photos + attached_media for single image:
- * The staging step (POST /{pageId}/photos?published=false) requires Facebook's
- * servers to fetch the image URL. If the URL redirects, requires auth, or is
- * a Cloudinary transformation URL, the staging silently fails (returns no id)
- * and we fall back to text-only. The /feed approach with `link` embeds the
- * image directly from the URL without server-side prefetch.
+ * This is the only approach that makes posts appear in ALL feed sections AND
+ * renders the product URL as a real clickable link rather than plain text.
  *
- * Posts appear in the main "All" feed AND in the Photos tab (this is
- * Facebook's normal behaviour for any post that contains an image).
+ * Fallback chain:
+ *   1. Stage → /feed with attached_media + link  ← correct (primary)
+ *   2. /feed with link only (image won't show but link works)
+ *   3. /feed text-only (last resort)
  */
 async function postSingleImage(pageId, accessToken, payload, imageUrl) {
-  // Only use the `link` approach for real public HTTPS URLs.
-  // Facebook rejects localhost/http URLs with code 1500 "invalid url".
-  const isPublicUrl = imageUrl && imageUrl.startsWith('https://') &&
-    !imageUrl.includes('localhost') && !imageUrl.includes('127.0.0.1');
+  const isPublicUrl = imageUrl &&
+    imageUrl.startsWith('https://') &&
+    !imageUrl.includes('localhost') &&
+    !imageUrl.includes('127.0.0.1');
+
+  // The product page URL — used as `link` param for a clickable link preview
+  const productUrl = getProductUrl(payload);
 
   if (isPublicUrl) {
-    // Primary attempt: POST to /feed with the image URL as `link`
-    // Facebook embeds the image inline AND shows it in the main feed.
-    const body = {
-      message:      payload.text,
-      link:         imageUrl,
-      access_token: accessToken,
-    };
-
-    const res  = await fetch(`${GRAPH}/${pageId}/feed`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(body),
-    });
-    const json = await res.json();
-
-    if (!json.error) {
-      console.log(`[Facebook] Single image feed post OK: ${json.id}`);
-      return { platformPostId: json.id || '' };
-    }
-
-    console.warn(`[Facebook] /feed with link failed (${json.error.message}), trying /photos staging…`);
-  } else {
-    console.warn(`[Facebook] Image URL is not a public HTTPS URL, skipping link approach: ${imageUrl}`);
-  }
-
-  // Fallback: try the staging approach
-  const stageRes  = await fetch(`${GRAPH}/${pageId}/photos`, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ url: imageUrl, access_token: accessToken, published: false }),
-  });
-  const stageJson = await stageRes.json();
-
-  if (stageJson.id) {
-    // Staging worked — post to /feed with attached_media
-    const feedRes  = await fetch(`${GRAPH}/${pageId}/feed`, {
+    // Step 1: Stage image as unpublished photo
+    console.log(`[Facebook] Staging image for feed post…`);
+    const stageRes  = await fetch(`${GRAPH}/${pageId}/photos`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({
-        message:        payload.text,
-        attached_media: [{ media_fbid: stageJson.id }],
-        access_token:   accessToken,
+        url:          imageUrl,
+        published:    false,
+        access_token: accessToken,
       }),
     });
-    const feedJson = await feedRes.json();
-    if (!feedJson.error) {
-      console.log(`[Facebook] Single image staged+feed post OK: ${feedJson.id}`);
-      return { platformPostId: feedJson.id || '' };
+    const stageJson = await stageRes.json();
+
+    if (stageJson.id) {
+      // Step 2: Publish feed post with image attached.
+      // NOTE: Facebook mishandles `attached_media` combined with `link` —
+      // the resulting post often only appears in the Photos tab, not in
+      // "All Posts". FIX: do NOT set `link`. Instead append the product
+      // URL as plain text to `message` (Facebook auto-links URLs in text).
+      let message = payload.text || '';
+      if (productUrl && !message.includes(productUrl)) {
+        message = message ? `${message}\n\n${productUrl}` : productUrl;
+      }
+
+      const feedBody = {
+        message:        message,
+        attached_media: [{ media_fbid: stageJson.id }],
+        access_token:   accessToken,
+      };
+
+      const feedRes  = await fetch(`${GRAPH}/${pageId}/feed`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(feedBody),
+      });
+      const feedJson = await feedRes.json();
+
+      if (!feedJson.error) {
+        console.log(`[Facebook] ✅ Feed post with image + product link: ${feedJson.id}`);
+        return { platformPostId: feedJson.id || '' };
+      }
+      console.warn(`[Facebook] Feed post with attached_media failed: ${feedJson.error.message}`);
+    } else {
+      console.warn(`[Facebook] Image staging failed: ${stageJson.error?.message || 'no id returned'} — falling back to link-only post`);
     }
-    console.warn(`[Facebook] staged /feed failed: ${feedJson.error.message}`);
-  } else {
-    console.warn(`[Facebook] Photo staging failed: ${stageJson.error?.message || 'no id returned'}`);
   }
 
-  // Last resort: text-only with URL in message so it at least posts something
-  console.warn('[Facebook] Falling back to text-only post');
-  return postTextOnly(pageId, accessToken, { ...payload, text: `${payload.text}\n\n${imageUrl}` });
+  // Fallback: text post with product URL as link (image won't show inline)
+  console.warn('[Facebook] Falling back to feed post with product link only (no image)');
+  return postTextOnly(pageId, accessToken, payload);
 }
 
 /**
- * Multiple images: stage each as unpublished, then /feed with attached_media[].
+ * Stage all images, then post a feed carousel with all images + product link.
  */
 async function postMultipleImages(pageId, accessToken, payload, images) {
-  const photoIds = [];
+  const productUrl = getProductUrl(payload);
+  const photoIds   = [];
+
+  let message = payload.text || '';
+  if (productUrl && !message.includes(productUrl)) {
+    message = message ? `${message}\n\n${productUrl}` : productUrl;
+  }
+
   for (const url of images) {
+    if (!url.startsWith('https://')) continue;
     try {
       const res  = await fetch(`${GRAPH}/${pageId}/photos`, {
         method:  'POST',
@@ -153,69 +181,78 @@ async function postMultipleImages(pageId, accessToken, payload, images) {
       const json = await res.json();
       if (json.id) {
         photoIds.push(json.id);
-        console.log(`[Facebook] Staged photo: ${json.id}`);
+        console.log(`[Facebook] Staged photo ${photoIds.length}: ${json.id}`);
       } else {
         console.warn('[Facebook] Failed to stage photo:', url, json.error?.message);
       }
     } catch (err) {
-      console.warn('[Facebook] Photo upload error:', err.message);
+      console.warn('[Facebook] Photo staging error:', err.message);
     }
   }
 
   if (!photoIds.length) {
-    console.warn('[Facebook] No photos staged — falling back to single image feed post');
+    console.warn('[Facebook] No photos staged — falling back to single image post');
     return postSingleImage(pageId, accessToken, payload, images[0]);
   }
 
+  // Single staged photo → feed + attached_media, URL appended to message (no `link` param)
   if (photoIds.length === 1) {
-    // Only one staged — use single image path for reliability
-    const feedRes  = await fetch(`${GRAPH}/${pageId}/feed`, {
+    const feedBody = {
+      message:        message,
+      attached_media: [{ media_fbid: photoIds[0] }],
+      access_token:   accessToken,
+    };
+
+    const res  = await fetch(`${GRAPH}/${pageId}/feed`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({
-        message:        payload.text,
-        attached_media: [{ media_fbid: photoIds[0] }],
-        access_token:   accessToken,
-      }),
+      body:    JSON.stringify(feedBody),
     });
-    const feedJson = await feedRes.json();
-    if (!feedJson.error) return { platformPostId: feedJson.id || '' };
-    // Fall back to link post if attached_media fails
+    const json = await res.json();
+    if (!json.error) {
+      console.log(`[Facebook] ✅ Feed post (1 image): ${json.id}`);
+      return { platformPostId: json.id || '' };
+    }
     return postSingleImage(pageId, accessToken, payload, images[0]);
   }
 
-  // Multiple staged photos → carousel via /feed
+  // Multiple staged photos → carousel feed post, URL appended to message (no `link` param)
+  const feedBody = {
+    message:        message,
+    attached_media: photoIds.map(id => ({ media_fbid: id })),
+    access_token:   accessToken,
+  };
+
   const res  = await fetch(`${GRAPH}/${pageId}/feed`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({
-      message:        payload.text,
-      attached_media: photoIds.map(id => ({ media_fbid: id })),
-      access_token:   accessToken,
-    }),
+    body:    JSON.stringify(feedBody),
   });
   const json = await res.json();
 
   if (!json.error) {
-    console.log(`[Facebook] Multi-image feed post OK: ${json.id}`);
+    console.log(`[Facebook] ✅ Carousel feed post (${photoIds.length} images): ${json.id}`);
     return { platformPostId: json.id || '' };
   }
 
-  console.warn(`[Facebook] Multi-image feed failed: ${json.error.message} — falling back to single`);
+  console.warn(`[Facebook] Multi-image feed failed (${json.error.message}) — falling back to single image`);
   return postSingleImage(pageId, accessToken, payload, images[0]);
 }
 
+/**
+ * Text-only post.  Uses productUrl as the `link` param so Facebook renders
+ * a proper clickable link preview card rather than plain text.
+ */
 async function postTextOnly(pageId, accessToken, payload) {
+  const productUrl = getProductUrl(payload);
+
   const body = {
     message:      payload.text,
     access_token: accessToken,
   };
 
-  // Only add link preview for real public URLs — Facebook rejects localhost/private URLs
-  // with code 1500 "invalid url". Filter out anything that isn't a public https URL.
-  const urlMatch = payload.text && payload.text.match(/https:\/\/[^\s]+/);
-  if (urlMatch && !urlMatch[0].includes('localhost') && !urlMatch[0].includes('127.0.0.1')) {
-    body.link = urlMatch[0];
+  if (productUrl) {
+    body.link = productUrl;
   }
 
   const res  = await fetch(`${GRAPH}/${pageId}/feed`, {
@@ -231,7 +268,29 @@ async function postTextOnly(pageId, accessToken, payload) {
     throw err;
   }
 
+  console.log(`[Facebook] ✅ Text post with link: ${json.id}`);
   return { platformPostId: json.id || '' };
+}
+
+/**
+ * Extract the product/offer page URL from the payload.
+ * Falls back to parsing the text if productUrl field isn't set
+ * (for backward compat with any older code paths).
+ * Only returns public HTTPS URLs — never localhost.
+ */
+function getProductUrl(payload) {
+  // Primary: dedicated productUrl field from postComposer
+  if (payload.productUrl &&
+      payload.productUrl.startsWith('https://') &&
+      !payload.productUrl.includes('localhost')) {
+    return payload.productUrl;
+  }
+  // Fallback: extract first https URL from post text
+  const match = payload.text && payload.text.match(/https:\/\/[^\s]+/);
+  if (match && !match[0].includes('localhost') && !match[0].includes('127.0.0.1')) {
+    return match[0];
+  }
+  return null;
 }
 
 module.exports = { publish };

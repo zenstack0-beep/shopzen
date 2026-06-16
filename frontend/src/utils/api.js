@@ -8,10 +8,17 @@ import axios from 'axios';
  *  - Local dev: React proxy in package.json forwards /api/* to localhost:5001.
  *
  * We always use /api as the base — Vercel handles the routing in both cases.
+ *
+ * TIMEOUT NOTE:
+ *   Instagram publishing requires polling the container status API until the
+ *   media container reaches FINISHED state, which can take 5–12 seconds.
+ *   The previous 15s timeout was too close to this limit, causing the frontend
+ *   to show "failed" even though the backend successfully published the post.
+ *   Increased to 45s to safely cover Instagram (≤12s) and any other slow ops.
  */
 const API = axios.create({
   baseURL: '/api',
-  timeout: 15000,
+  timeout: 45000,
   withCredentials: true,
 });
 

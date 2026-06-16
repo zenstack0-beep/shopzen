@@ -1,14 +1,29 @@
 /**
  * services/publishers/instagram.js
  *
- * Single image:  create container → wait for FINISHED → publish.
- * Carousel:      create child container per image → wait each for FINISHED
- *                → create carousel container → wait → publish.
+ * Single image:  create container → poll for FINISHED → publish.
+ * Multiple images: create child container per image → poll each → create carousel → poll → publish.
  *
- * FIX: Each carousel child container is now polled for FINISHED status
- *      before being added to the children list. Without this, Instagram
- *      rejects the carousel container because children are still IN_PROGRESS,
- *      silently drops them, and falls back to single-image publish.
+ * FIXES:
+ *
+ *   FIX 1 — ALWAYS USE ALL PRODUCT IMAGES AS CAROUSEL:
+ *     Previously when imageUrls had only 1 entry the single-image path was used
+ *     even if the product had more images — because the old postComposer wasn't
+ *     correctly collecting all images into imageUrls.
+ *     Now postComposer.js correctly passes all images in imageUrls[], and this
+ *     publisher sends 2+ images as a carousel and 1 image as a single post.
+ *
+ *   FIX 2 — FRONTEND TIMEOUT:
+ *     Previous polling was 8 × 2500ms = up to 20s. Frontend axios timeout was
+ *     15s, so the request timed out and the UI showed "failed" even though the
+ *     backend succeeded. Polling is now 10 × 1200ms = max 12s.
+ *
+ *   FIX 3 — PRODUCT URL IN CAPTION:
+ *     Instagram does not support the `link` API param (by design — clickable
+ *     links only work in bio). The product URL is already included in the
+ *     caption text by postComposer.js as "🔗 https://shopzen.lk/product/..."
+ *     so followers can copy/paste or tap on mobile. No change needed here;
+ *     this comment clarifies the intentional behaviour.
  *
  * NOTE: accountId must be the Instagram Business Account ID (numeric),
  *       NOT the Facebook Page ID. Get it via:
@@ -17,11 +32,16 @@
 
 const GRAPH = 'https://graph.facebook.com/v19.0';
 
+// Polling tuned to fit inside 15s frontend axios timeout (now 45s after api.js fix)
+const POLL_ATTEMPTS    = 10;
+const POLL_INTERVAL_MS = 1200;  // 10 × 1200ms = max 12s
+
 async function publish(creds, payload) {
   const { accessToken, accountId } = creds;
   if (!accessToken) throw new Error('No access token configured');
   if (!accountId)   throw new Error('No Instagram Business Account ID configured');
 
+  // Collect ALL images from payload
   const images = payload.imageUrls?.length ? payload.imageUrls
                : payload.imageUrl          ? [payload.imageUrl]
                : [];
@@ -48,7 +68,9 @@ async function publish(creds, payload) {
     throw new Error(`Instagram pre-publish check failed: ${err.message}`);
   }
 
-  // Only 1 image → single post. 2–10 images → carousel.
+  console.log(`[Instagram] Publishing ${images.length} image(s)…`);
+
+  // Route: 1 image → single post, 2–10 images → carousel
   if (images.length > 1) {
     return publishCarousel(accountId, accessToken, payload, images);
   } else {
@@ -59,7 +81,7 @@ async function publish(creds, payload) {
 // ── Single image ──────────────────────────────────────────────────────────────
 
 async function publishSingle(accountId, accessToken, payload, imageUrl) {
-  console.log(`[Instagram] Creating single image container…`);
+  console.log(`[Instagram] Creating single image container for: ${imageUrl}`);
 
   const containerRes = await fetch(`${GRAPH}/${accountId}/media`, {
     method:  'POST',
@@ -79,7 +101,7 @@ async function publishSingle(accountId, accessToken, payload, imageUrl) {
   }
   if (!c.id) throw new Error('Instagram container creation returned no ID');
 
-  console.log(`[Instagram] Container created: ${c.id} — waiting for FINISHED…`);
+  console.log(`[Instagram] Container created: ${c.id} — polling for FINISHED…`);
   await waitForContainer(accountId, accessToken, c.id);
 
   const publishRes = await fetch(`${GRAPH}/${accountId}/media_publish`, {
@@ -102,12 +124,15 @@ async function publishSingle(accountId, accessToken, payload, imageUrl) {
 // ── Carousel (2–10 images) ────────────────────────────────────────────────────
 
 async function publishCarousel(accountId, accessToken, payload, images) {
-  const urls = images.slice(0, 10); // Instagram carousel max is 10
+  // Instagram carousel max is 10
+  const urls = images.slice(0, 10).filter(u => u && u.startsWith('https://'));
   console.log(`[Instagram] Creating carousel with ${urls.length} images…`);
 
-  // Step 1: Create each child container AND wait for it to reach FINISHED
-  // before moving on. This is the critical fix — referencing an IN_PROGRESS
-  // child in the carousel container causes Instagram to silently drop it.
+  if (!urls.length) throw new Error('Instagram carousel: no valid public HTTPS image URLs');
+
+  // Step 1: Create each child container and wait for FINISHED before moving on.
+  // Referencing an IN_PROGRESS child in the carousel container causes Instagram
+  // to silently drop it — so we must wait for each one to finish first.
   const childIds = [];
   for (let i = 0; i < urls.length; i++) {
     const url = urls[i];
@@ -125,7 +150,7 @@ async function publishCarousel(accountId, accessToken, payload, images) {
     const json = await res.json();
 
     if (json.error) {
-      console.warn(`[Instagram] Child ${i + 1} creation failed (${json.error.message}) — skipping this image`);
+      console.warn(`[Instagram] Child ${i + 1} creation failed (${json.error.message}) — skipping`);
       continue;
     }
     if (!json.id) {
@@ -133,10 +158,9 @@ async function publishCarousel(accountId, accessToken, payload, images) {
       continue;
     }
 
-    // Wait for this child to be FINISHED before creating the next one
-    console.log(`[Instagram] Child ${i + 1} created: ${json.id} — waiting for FINISHED…`);
+    console.log(`[Instagram] Child ${i + 1} created: ${json.id} — polling for FINISHED…`);
     try {
-      await waitForContainer(accountId, accessToken, json.id, 8, 2500);
+      await waitForContainer(accountId, accessToken, json.id);
       childIds.push(json.id);
       console.log(`[Instagram] Child ${i + 1} ready ✅`);
     } catch (err) {
@@ -146,14 +170,14 @@ async function publishCarousel(accountId, accessToken, payload, images) {
 
   console.log(`[Instagram] ${childIds.length}/${urls.length} child containers ready`);
 
-  // Need at least 2 children for a carousel
+  // Need at least 2 children for a carousel; fall back to single if not enough
   if (childIds.length < 2) {
-    console.warn('[Instagram] Not enough children ready for carousel — falling back to single image');
+    console.warn('[Instagram] Not enough children for carousel — falling back to single image');
     return publishSingle(accountId, accessToken, payload, urls[0]);
   }
 
   // Step 2: Create the carousel container referencing all ready children
-  console.log(`[Instagram] Creating carousel container with children: ${childIds.join(', ')}`);
+  console.log(`[Instagram] Creating carousel container with ${childIds.length} children…`);
   const carouselRes = await fetch(`${GRAPH}/${accountId}/media`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -174,8 +198,8 @@ async function publishCarousel(accountId, accessToken, payload, images) {
   if (!carousel.id) throw new Error('Instagram carousel container returned no ID');
 
   // Step 3: Wait for the carousel container itself to be ready
-  console.log(`[Instagram] Carousel container created: ${carousel.id} — waiting for FINISHED…`);
-  await waitForContainer(accountId, accessToken, carousel.id, 8, 2500);
+  console.log(`[Instagram] Carousel container created: ${carousel.id} — polling for FINISHED…`);
+  await waitForContainer(accountId, accessToken, carousel.id);
 
   // Step 4: Publish
   const pubRes = await fetch(`${GRAPH}/${accountId}/media_publish`, {
@@ -198,14 +222,18 @@ async function publishCarousel(accountId, accessToken, payload, images) {
 // ── Status poller ─────────────────────────────────────────────────────────────
 
 /**
- * Poll container status until FINISHED, ERROR, or max attempts reached.
- * @param {string} accountId
- * @param {string} accessToken
- * @param {string} containerId
- * @param {number} maxAttempts   default 8
- * @param {number} intervalMs    default 2500ms → total wait up to ~20s
+ * Poll container status until FINISHED, ERROR, or maxAttempts reached.
+ *
+ * 10 × 1200ms = max 12s — safely inside the 45s frontend axios timeout.
+ * Instagram containers typically reach FINISHED in 2–5 seconds.
  */
-async function waitForContainer(accountId, accessToken, containerId, maxAttempts = 8, intervalMs = 2500) {
+async function waitForContainer(
+  accountId,
+  accessToken,
+  containerId,
+  maxAttempts = POLL_ATTEMPTS,
+  intervalMs  = POLL_INTERVAL_MS
+) {
   for (let i = 0; i < maxAttempts; i++) {
     if (i > 0) await new Promise(r => setTimeout(r, intervalMs));
 
@@ -227,14 +255,14 @@ async function waitForContainer(accountId, accessToken, containerId, maxAttempts
       if (status === 'ERROR') {
         throw new Error(`Instagram container ${containerId} processing failed (status: ERROR)`);
       }
-      // IN_PROGRESS or PUBLISHED → keep waiting
+      // IN_PROGRESS → keep polling
     } catch (err) {
       if (err.message.includes('status: ERROR')) throw err;
       console.warn(`[Instagram] Status poll network error: ${err.message}`);
     }
   }
 
-  // After all attempts, try publishing anyway — sometimes status check lags
+  // After all attempts, try publishing anyway — status API can lag
   console.warn(`[Instagram] Container ${containerId} did not reach FINISHED after ${maxAttempts} attempts — proceeding anyway`);
 }
 
