@@ -49,13 +49,63 @@ const helmetMiddleware = helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc:  ["'self'"],
-      scriptSrc:   ["'self'", "'unsafe-inline'", 'https://accounts.google.com', 'https://apis.google.com'],
-      styleSrc:    ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-      imgSrc:      ["'self'", 'data:', 'blob:', 'https://res.cloudinary.com', 'https://lh3.googleusercontent.com', 'https://*.googleusercontent.com'],
-      fontSrc:     ["'self'", 'https://fonts.gstatic.com'],
-      connectSrc:  ["'self'", 'https://api.anthropic.com', 'https://openrouter.ai'],
-      frameSrc:    ["'none'"],
-      objectSrc:   ["'none'"],
+      // GTM loads from googletagmanager.com; GA4 tag (gtag.js) loads from
+      // google-analytics.com and googletagmanager.com; Meta Pixel from
+      // connect.facebook.net; Google Sign-In from accounts.google.com.
+      scriptSrc: [
+        "'self'",
+        "'unsafe-inline'",        // React inline scripts + GTM inline <script> blocks
+        "'unsafe-eval'",          // GTM's dynamic script evaluation
+        'https://accounts.google.com',
+        'https://apis.google.com',
+        'https://www.googletagmanager.com',
+        'https://www.google-analytics.com',
+        'https://ssl.google-analytics.com',
+        'https://tagmanager.google.com',
+        'https://connect.facebook.net',   // Meta Pixel
+        'https://static.ads-twitter.com', // Twitter/X Pixel (future-proof)
+      ],
+      styleSrc: [
+        "'self'",
+        "'unsafe-inline'",
+        'https://fonts.googleapis.com',
+        'https://tagmanager.google.com',
+      ],
+      imgSrc: [
+        "'self'",
+        'data:',
+        'blob:',
+        'https://res.cloudinary.com',
+        'https://lh3.googleusercontent.com',
+        'https://*.googleusercontent.com',
+        'https://www.google-analytics.com',    // GA4 beacon pixel
+        'https://www.googletagmanager.com',    // GTM preview mode images
+        'https://www.facebook.com',            // Meta Pixel 1×1 tracking pixel
+        'https://*.facebook.com',
+      ],
+      fontSrc: [
+        "'self'",
+        'https://fonts.gstatic.com',
+      ],
+      // Allow GA4/GTM beacons, Meta Pixel XHR, and your own APIs.
+      connectSrc: [
+        "'self'",
+        'https://www.google-analytics.com',
+        'https://analytics.google.com',
+        'https://stats.g.doubleclick.net',
+        'https://www.googletagmanager.com',
+        'https://www.facebook.com',
+        'https://connect.facebook.net',
+        'https://api.anthropic.com',
+        'https://openrouter.ai',
+        'https://res.cloudinary.com',
+      ],
+      // GTM preview mode runs in an iframe from googletagmanager.com
+      frameSrc: [
+        "'none'",
+        'https://www.googletagmanager.com',
+      ],
+      objectSrc: ["'none'"],
       upgradeInsecureRequests: [],
     },
   },
