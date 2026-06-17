@@ -216,7 +216,29 @@
       window.scrollTo(0,0);
     </script>
 
-    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <!--
+      SSR Flash Prevention
+      The backend injects static HTML into #root for Google crawlers.
+      Without this, users see a ~200ms flash of raw text/links before
+      React mounts. The SSR content is wrapped in [data-ssr] and hidden
+      via CSS immediately. React's index.js sets data-react-ready on
+      <html> which removes this rule — real UI appears instantly.
+      Crawlers run no JS, so they always see the full SSR content.
+    -->
+    <style id="ssr-hide">
+      /* Hide SSR crawler content before React paints */
+      #root [data-ssr] { display: none !important; }
+      /* Belt-and-suspenders: also hide any direct #root children until ready */
+      html:not([data-react-ready]) #root > *:not(script) { visibility: hidden; }
+    </style>
+
+    <noscript>
+      <style>
+        #root [data-ssr] { display: block !important; }
+        html #root > * { visibility: visible !important; }
+      </style>
+      You need to enable JavaScript to run this app.
+    </noscript>
     <div id="root"></div>
 
 

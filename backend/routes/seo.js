@@ -975,10 +975,13 @@ function injectSeoWindowConfig(html, meta) {
 // not affect the live app UI — it only exists in the initial HTML response.
 function injectHomeContent(html, contentHtml) {
   if (!contentHtml) return html;
+  // Wrap SSR content in a data-ssr div so the flash-prevention CSS in
+  // index.html can hide it instantly before React mounts.
+  const wrapped = `<div data-ssr="1" style="display:none" aria-hidden="true">${contentHtml}</div>`;
   if (html.includes('<div id="root"></div>')) {
-    return html.replace('<div id="root"></div>', `<div id="root">${contentHtml}</div>`);
+    return html.replace('<div id="root"></div>', `<div id="root">${wrapped}</div>`);
   }
-  return html.replace('<div id="root">', `<div id="root">${contentHtml}`);
+  return html.replace('<div id="root">', `<div id="root">${wrapped}`);
 }
 
 function he(str) {
