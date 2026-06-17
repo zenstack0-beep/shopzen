@@ -461,8 +461,9 @@ a:focus-visible      { outline: 2px solid var(--color-primary); outline-offset: 
 }
 /* Hide sticky when mobile nav present to avoid overlap */
 @media(max-width:768px){
-  .sticky-atc{bottom:calc(64px + env(safe-area-inset-bottom,0px))}
+  .sticky-atc{bottom:calc(58px + env(safe-area-inset-bottom,0px))}
 }
+
 .dark-mode .sticky-atc{background:rgba(15,20,40,0.92)}
 .dark-mode .sticky-atc-name{color:var(--text-primary)}
 

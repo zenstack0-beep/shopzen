@@ -33,9 +33,11 @@ export default function WhatsAppWidget() {
 
   const phone = config.whatsappNumber.replace(/[^0-9]/g, '');
   const position = config.whatsappButtonPosition || 'bottom-right';
+  // On mobile: bottom nav = 58px + safe area. Use CSS calc to stay above it.
+  const mobileBottom = 'max(80px, calc(58px + env(safe-area-inset-bottom, 0px) + 16px))';
   const posStyles = {
-    'bottom-right': { bottom: '80px', right: '20px' },
-    'bottom-left':  { bottom: '80px', left: '20px' },
+    'bottom-right': { bottom: mobileBottom, right: '20px' },
+    'bottom-left':  { bottom: mobileBottom, left: '20px' },
     'top-right':    { top: '80px', right: '20px' },
     'top-left':     { top: '80px', left: '20px' },
   };
