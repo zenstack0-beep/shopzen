@@ -111,6 +111,7 @@ export default function ProductDetail() {
   const infoRef   = useRef(null);
   const shineRef  = useRef(null);
   const btnRef    = useRef(null);
+  const atcRowRef = useRef(null);
 
   const sym = settings?.currencySymbol || 'Rs.';
 
@@ -307,11 +308,19 @@ export default function ProductDetail() {
   /* Sticky ATC: show after scrolling past the add-to-cart section */
   useEffect(() => {
     if (!product) return;
-    const onScroll = () => {
-      setStickyVisible(window.scrollY > 480);
-    };
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
+    const target = atcRowRef.current;
+    if (!target) {
+      // fallback: use scroll threshold
+      const onScroll = () => setStickyVisible(window.scrollY > 600);
+      window.addEventListener('scroll', onScroll, { passive: true });
+      return () => window.removeEventListener('scroll', onScroll);
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => setStickyVisible(!entry.isIntersecting),
+      { threshold: 0, rootMargin: '0px 0px -20px 0px' }
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
   }, [product]);
 
   /* Image 3D tilt */
@@ -499,7 +508,7 @@ export default function ProductDetail() {
           {/* Brand + title */}
           <div>
             {product.brand && <p className="text-xs font-black uppercase tracking-widest mb-1" style={{ color: 'var(--color-primary)', opacity: 0.7 }}>{product.brand}</p>}
-            <h1 className="product-detail-title text-2xl sm:text-3xl lg:text-4xl font-black leading-tight" style={{ fontFamily: 'var(--font-display)', color: 'var(--color-dark)', letterSpacing: '-0.025em' }}>
+            <h1 className="product-detail-title text-2xl sm:text-3xl lg:text-4xl font-black leading-tight" style={{ fontFamily: 'var(--font-display)', color: 'var(--color-dark)', letterSpacing: '-0.025em', wordBreak: 'break-word', overflowWrap: 'break-word' }}>
               {product.name}
             </h1>
           </div>
@@ -554,15 +563,15 @@ export default function ProductDetail() {
 
           {/* Qty + Add */}
           {product.stock > 0 && (
-            <div className="product-atc-row flex gap-3 flex-wrap">
-              <div className="qty-stepper">
+            <div ref={atcRowRef} className="product-atc-row flex gap-3" style={{ flexWrap: 'nowrap', alignItems: 'stretch' }}>
+              <div className="qty-stepper" style={{ flexShrink: 0 }}>
                 <button className="qty-stepper-btn" onClick={() => setQty(q => Math.max(1, q - 1))} disabled={qty<=1}>−</button>
                 <span className="qty-stepper-val">{qty}</span>
                 <button className="qty-stepper-btn" onClick={() => setQty(q => Math.min(product.stock, q + 1))}>+</button>
               </div>
               <MagneticButton ref={btnRef} onClick={handleAdd}
-                className="btn-primary flex-1 py-3.5 text-base font-black"
-                style={{ background: adding ? 'linear-gradient(135deg,#16a34a,#22c55e)' : undefined }}>
+                className="btn-primary py-3.5 text-base font-black"
+                style={{ flex: '1 1 0', minWidth: 0, background: adding ? 'linear-gradient(135deg,#16a34a,#22c55e)' : undefined }}>
                 {adding ? '✓ Added!' : '🛒 Add to Cart'}
               </MagneticButton>
               <button onClick={toggleWishlist}
