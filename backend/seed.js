@@ -52,7 +52,7 @@ async function seed() {
     bankAccountNumber: '0123456789', bankBranch: 'Colombo 03',
 
     // ── Appearance ──
-    theme: 'default', primaryColor: '#b5451b', fontStyle: 'default',
+    theme: 'default', primaryColor: '#15803d', fontStyle: 'default',
     logoUrl: '', faviconUrl: '', customCSS: '',
 
     // ── Features ──

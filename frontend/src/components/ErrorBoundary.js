@@ -161,7 +161,7 @@ const styles = {
   body:  { color: 'var(--text-secondary, #64748b)', fontSize: 14, margin: '0 0 28px', lineHeight: 1.6 },
   buttons: { display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' },
   primary: {
-    background: 'var(--color-primary, #b5451b)',
+    background: 'var(--color-primary, #15803d)',
     color: '#fff', border: 'none', borderRadius: 12,
     padding: '12px 24px', fontWeight: 700, fontSize: 14, cursor: 'pointer',
   },
@@ -176,7 +176,7 @@ const styles = {
   spinner: {
     width: 36, height: 36,
     border: '3px solid var(--border-color, #e5e7eb)',
-    borderTopColor: 'var(--color-primary, #b5451b)',
+    borderTopColor: 'var(--color-primary, #15803d)',
     borderRadius: '50%',
     animation: 'szSpin 0.7s linear infinite',
     margin: '16px auto 0',

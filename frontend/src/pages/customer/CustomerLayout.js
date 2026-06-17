@@ -175,7 +175,7 @@ const SnowEffect = () => (
 /* ── Confetti ──────────────────────────────────────────────────── */
 const ConfettiEffect = () => (
   <>
-    {Array.from({length:22},(_,i)=>({id:i,left:Math.random()*100,delay:Math.random()*6,dur:3+Math.random()*6,color:['#b5451b','#f0a500','#3b82f6','#10b981','#8b5cf6','#ef4444','#f59e0b','#06b6d4'][i%8],size:6+Math.random()*8})).map(p=>(
+    {Array.from({length:22},(_,i)=>({id:i,left:Math.random()*100,delay:Math.random()*6,dur:3+Math.random()*6,color:['#15803d','#84cc16','#3b82f6','#10b981','#8b5cf6','#ef4444','#f59e0b','#06b6d4'][i%8],size:6+Math.random()*8})).map(p=>(
       <div key={p.id} className="confetti-piece" style={{left:`${p.left}%`,animationDelay:`${p.delay}s`,animationDuration:`${p.dur}s`,background:p.color,width:p.size,height:p.size}}/>
     ))}
   </>

@@ -49,7 +49,7 @@ const getFromAddress = async (theme) => {
 const sendMail = async ({ to, subject, html }) => {
   try {
     const resend = getResendClient();
-    const theme = await getTheme().catch(() => ({ storeName: 'ShopZen', primary: '#b5451b' }));
+    const theme = await getTheme().catch(() => ({ storeName: 'ShopZen', primary: '#15803d' }));
     const from = await getFromAddress(theme);
 
     // Dev-mode hint: remind developers which sender is being used
@@ -110,13 +110,13 @@ const getTheme = async () => {
     const map = {};
     rows.forEach(r => { map[r.key] = r.value; });
     _themeCache = {
-      primary:   map.primaryColor || '#b5451b',
+      primary:   map.primaryColor || '#15803d',
       storeName: map.storeName    || 'ShopZen',
     };
     _themeCacheAt = now;
   } catch (err) {
     console.warn('[MAIL] Could not load theme from DB, using defaults:', err.message);
-    _themeCache = { primary: '#b5451b', storeName: 'ShopZen' };
+    _themeCache = { primary: '#15803d', storeName: 'ShopZen' };
     _themeCacheAt = now;
   }
   return _themeCache;
@@ -133,7 +133,7 @@ const lighten = (hex) => {
     const b = parseInt(h.slice(4, 6), 16);
     const mix = (c) => Math.min(255, Math.round(c + (255 - c) * 0.35));
     return `rgb(${mix(r)},${mix(g)},${mix(b)})`;
-  } catch (_) { return '#e8643c'; }
+  } catch (_) { return '#22c55e'; }
 };
 
 const header = (subtitle, theme) => `

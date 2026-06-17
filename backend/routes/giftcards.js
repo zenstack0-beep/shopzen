@@ -101,12 +101,12 @@ const getT = async () => {
     const map = {};
     rows.forEach(r => { map[r.key] = r.value; });
     return {
-      primary: map.primaryColor || '#b5451b',
+      primary: map.primaryColor || '#15803d',
       storeName: map.storeName || 'ShopZen',
       storeUrl: map.storeUrl || process.env.FRONTEND_URL || 'https://shopzen.lk',
     };
   } catch {
-    return { primary: '#b5451b', storeName: 'ShopZen', storeUrl: process.env.FRONTEND_URL || 'https://shopzen.lk' };
+    return { primary: '#15803d', storeName: 'ShopZen', storeUrl: process.env.FRONTEND_URL || 'https://shopzen.lk' };
   }
 };
 
@@ -118,7 +118,7 @@ const lx = (hex) => {
     const b = parseInt(h.slice(4, 6), 16);
     const mix = (c) => Math.min(255, Math.round(c + (255 - c) * 0.35));
     return `rgb(${mix(r)},${mix(g)},${mix(b)})`;
-  } catch { return '#e8643c'; }
+  } catch { return '#22c55e'; }
 };
 
 const wrapEmail = (content, t) => `<!DOCTYPE html><html><body style="font-family:sans-serif;background:#f1f5f9;padding:40px 20px;margin:0">
@@ -351,7 +351,7 @@ const gcRejectedPurchaserHtml = async (card, adminNote) => {
 router.get('/templates', async (req, res) => {
   try {
     const DESIGNS = [
-      { id: 'default', emoji: '🎁', label: 'Classic Gift', bg: '#b5451b', price: null },
+      { id: 'default', emoji: '🎁', label: 'Classic Gift', bg: '#15803d', price: null },
       { id: 'birthday', emoji: '🎂', label: 'Birthday', bg: '#7c3aed', price: null },
       { id: 'christmas', emoji: '🎄', label: 'Christmas', bg: '#15803d', price: null },
       { id: 'anniversary', emoji: '💝', label: 'Anniversary', bg: '#be185d', price: null },

@@ -16,7 +16,7 @@ const PRESETS = {
 
 const emptyForm = {
   name:'', type:'custom', isActive:false, isScheduled:false,
-  announcement:'', announcementBg:'#b5451b', announcementEnabled:true,
+  announcement:'', announcementBg:'#15803d', announcementEnabled:true,
   discountPercent:0, couponCode:'', couponType:'percentage', couponValue:0,
   couponDescription:'', couponMinOrder:0, couponAutoCreate:false,
   isCouponCampaign:false,
@@ -24,7 +24,7 @@ const emptyForm = {
   featuredBannerTitle:'', featuredBannerSubtitle:'',
   startDate:'', endDate:'',
   pageSlug:'', pageTitle:'', pageDescription:'', pageBannerImage:'', pageContent:'',
-  theme:{ primaryColor:'#b5451b', secondaryColor:'#f0a500', bgColor:'#0f172a', snowEffect:false, confettiEffect:false, customCSS:'' }
+  theme:{ primaryColor:'#15803d', secondaryColor:'#84cc16', bgColor:'#0f172a', snowEffect:false, confettiEffect:false, customCSS:'' }
 };
 
 // ── Countdown Timer Component ─────────────────────────────────────────────────
@@ -68,7 +68,7 @@ const SnowPreview = () => (
 
 const ConfettiPreview = () => (
   <div className="pointer-events-none absolute inset-0 overflow-hidden">
-    {Array.from({length:12},(_,i)=>({id:i,left:Math.random()*100,delay:Math.random()*4,dur:2+Math.random()*4,color:['#b5451b','#f0a500','#3b82f6','#10b981','#8b5cf6','#ef4444'][i%6]})).map(p=>(
+    {Array.from({length:12},(_,i)=>({id:i,left:Math.random()*100,delay:Math.random()*4,dur:2+Math.random()*4,color:['#15803d','#84cc16','#3b82f6','#10b981','#8b5cf6','#ef4444'][i%6]})).map(p=>(
       <div key={p.id} style={{position:'absolute',top:-10,left:`${p.left}%`,width:8,height:8,borderRadius:2,background:p.color,animationName:'confetti-fall',animationDuration:`${p.dur}s`,animationDelay:`${p.delay}s`,animationTimingFunction:'linear',animationIterationCount:'infinite'}}/>
     ))}
   </div>
@@ -243,7 +243,7 @@ export default function AdminSeasonal() {
         <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
           {campaigns.map(c => (
             <div key={c._id} className={`rounded-2xl overflow-hidden border-2 transition-all ${c.isActive ? 'border-green-400 shadow-lg shadow-green-100' : 'border-gray-100'}`}>
-              <div className="p-5 text-white relative overflow-hidden min-h-[120px]" style={{background:`linear-gradient(135deg, ${c.theme?.primaryColor||'#b5451b'}, ${c.theme?.bgColor||'#0f172a'})`}}>
+              <div className="p-5 text-white relative overflow-hidden min-h-[120px]" style={{background:`linear-gradient(135deg, ${c.theme?.primaryColor||'#15803d'}, ${c.theme?.bgColor||'#0f172a'})`}}>
                 {c.theme?.snowEffect && <SnowPreview/>}
                 {c.theme?.confettiEffect && <ConfettiPreview/>}
                 <div className="relative z-10">
@@ -302,7 +302,7 @@ export default function AdminSeasonal() {
                 <tr key={c._id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-xl flex-shrink-0" style={{background:`linear-gradient(135deg,${c.theme?.primaryColor||'#b5451b'},${c.theme?.bgColor||'#0f172a'})`}}/>
+                      <div className="w-8 h-8 rounded-xl flex-shrink-0" style={{background:`linear-gradient(135deg,${c.theme?.primaryColor||'#15803d'},${c.theme?.bgColor||'#0f172a'})`}}/>
                       <div>
                         <p className="font-semibold text-sm text-gray-800">{c.name}</p>
                         {c.couponCode && <p className="text-xs text-gray-400 font-mono">{c.couponCode}</p>}
@@ -396,7 +396,7 @@ export default function AdminSeasonal() {
                   <div><label className="form-label">Announcement Text</label><input value={form.announcement||''} onChange={e=>setForm(p=>({...p,announcement:e.target.value}))} className="form-input" placeholder="🎄 Christmas Sale! 25% off everything!"/></div>
                   <div className="flex gap-2 items-end">
                     <div className="flex-1"><label className="form-label">Announcement BG Color</label>
-                      <div className="flex gap-2 items-center"><input type="color" value={form.announcementBg||'#b5451b'} onChange={e=>setForm(p=>({...p,announcementBg:e.target.value}))} className="w-11 h-10 rounded-xl border-2 border-gray-200 cursor-pointer p-0.5"/><input value={form.announcementBg||''} onChange={e=>setForm(p=>({...p,announcementBg:e.target.value}))} className="form-input font-mono text-sm flex-1"/></div>
+                      <div className="flex gap-2 items-center"><input type="color" value={form.announcementBg||'#15803d'} onChange={e=>setForm(p=>({...p,announcementBg:e.target.value}))} className="w-11 h-10 rounded-xl border-2 border-gray-200 cursor-pointer p-0.5"/><input value={form.announcementBg||''} onChange={e=>setForm(p=>({...p,announcementBg:e.target.value}))} className="form-input font-mono text-sm flex-1"/></div>
                     </div>
                     <div className="pb-0.5"><Toggle label="Show Announcement" value={form.announcementEnabled!==false} onChange={()=>setForm(p=>({...p,announcementEnabled:!p.announcementEnabled}))}/></div>
                   </div>
@@ -505,7 +505,7 @@ export default function AdminSeasonal() {
                     <Toggle label="❄️ Snow Effect" value={form.theme?.snowEffect} onChange={()=>setForm(p=>({...p,theme:{...p.theme,snowEffect:!p.theme?.snowEffect}}))}/>
                     <Toggle label="🎊 Confetti Effect" value={form.theme?.confettiEffect} onChange={()=>setForm(p=>({...p,theme:{...p.theme,confettiEffect:!p.theme?.confettiEffect}}))}/>
                     {/* Live Preview */}
-                    <div className="mt-3 rounded-xl overflow-hidden relative h-24" style={{background:`linear-gradient(135deg,${form.theme?.primaryColor||'#b5451b'},${form.theme?.bgColor||'#0f172a'})`}}>
+                    <div className="mt-3 rounded-xl overflow-hidden relative h-24" style={{background:`linear-gradient(135deg,${form.theme?.primaryColor||'#15803d'},${form.theme?.bgColor||'#0f172a'})`}}>
                       {form.theme?.snowEffect && <SnowPreview/>}
                       {form.theme?.confettiEffect && <ConfettiPreview/>}
                       <div className="absolute inset-0 flex items-center justify-center">

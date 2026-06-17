@@ -6,7 +6,7 @@ import API from '../../utils/api';
 import toast from 'react-hot-toast';
 
 const DESIGNS = [
-  { id: 'default',     emoji: '🎁', label: 'Classic Gift',  bg: 'linear-gradient(135deg,#b5451b,#f0a500)' },
+  { id: 'default',     emoji: '🎁', label: 'Classic Gift',  bg: 'linear-gradient(135deg,#15803d,#84cc16)' },
   { id: 'birthday',   emoji: '🎂', label: 'Birthday',       bg: 'linear-gradient(135deg,#7c3aed,#a78bfa)' },
   { id: 'christmas',  emoji: '🎄', label: 'Christmas',      bg: 'linear-gradient(135deg,#15803d,#84cc16)' },
   { id: 'anniversary',emoji: '💝', label: 'Anniversary',    bg: 'linear-gradient(135deg,#be185d,#fb7185)' },

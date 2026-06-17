@@ -11,7 +11,7 @@ import API from '../../utils/api';
 const fmt  = n  => `Rs. ${(n || 0).toLocaleString()}`;
 const fmtK = n  => n >= 1000 ? `Rs. ${(n/1000).toFixed(1)}k` : fmt(n);
 const pct  = (a, b) => b > 0 ? Math.round(((a - b) / b) * 100) : 0;
-const COLORS = ['#b5451b','#f0a500','#3b82f6','#10b981','#8b5cf6','#ef4444','#06b6d4','#84cc16'];
+const COLORS = ['#15803d','#84cc16','#3b82f6','#10b981','#8b5cf6','#ef4444','#06b6d4','#0f172a'];
 const STATUS_LABELS = {
   pending:'Pending', confirmed:'Confirmed', processing:'Processing',
   shipped:'Shipped', out_for_delivery:'Out for Delivery',

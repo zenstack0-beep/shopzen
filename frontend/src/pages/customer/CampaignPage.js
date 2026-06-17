@@ -62,9 +62,9 @@ export default function CampaignPage() {
     </div>
   );
 
-  const primaryColor = campaign.theme?.primaryColor || '#b5451b';
+  const primaryColor = campaign.theme?.primaryColor || '#15803d';
   const bgColor = campaign.theme?.bgColor || '#0f172a';
-  const accentColor = campaign.theme?.secondaryColor || '#f0a500';
+  const accentColor = campaign.theme?.secondaryColor || '#84cc16';
 
   const copyCoupon = () => {
     if (!campaign.couponCode) return;

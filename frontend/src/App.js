@@ -111,7 +111,7 @@ function PageLoader() {
         width: 40,
         height: 40,
         border: '3px solid var(--border-color, #e5e7eb)',
-        borderTopColor: 'var(--color-primary, #b5451b)',
+        borderTopColor: 'var(--color-primary, #15803d)',
         borderRadius: '50%',
         animation: 'spin 0.7s linear infinite',
       }}/>

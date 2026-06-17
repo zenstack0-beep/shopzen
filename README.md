@@ -190,3 +190,62 @@ app.get('*', (req, res) => res.sendFile(path.join(__dirname, '../frontend/build/
 ---
 
 Made with ❤️ for Sri Lankan e-commerce
+
+
+# Brand color update — ShopZen
+
+The site's "default" theme (named `Ember Classic`) hardcoded an orange/amber
+palette in 18 source files. All instances have been replaced with your
+green/lime palette. The dark navy color was already `#0f172a` everywhere, so
+it required no changes.
+
+## Color mapping
+
+| Role          | Old value  | New value  |
+|---------------|------------|------------|
+| primary       | `#b5451b`  | `#15803d`  |
+| primary dark  | `#8b3214`  | `#0f5f2e`  |
+| primary light | `#e8643c`  | `#22c55e`  |
+| accent        | `#f0a500`  | `#84cc16`  |
+| dark          | `#0f172a`  | `#0f172a` (unchanged) |
+
+`primaryDark`/`primaryLight` aren't ones you specified, so I picked shades
+that sit naturally around `#15803d` (a darker and a lighter green) so
+hover/active states still look intentional rather than mismatched.
+
+## Files changed (drop these into your project at the same paths)
+
+- `frontend/src/context/ThemeContext.js` — default theme definition (source of truth for the React app)
+- `frontend/public/index.html` — pre-React bootstrap script + `theme-color` meta tag
+- `frontend/public/manifest.json` — PWA `theme_color`
+- `frontend/src/components/ErrorBoundary.js` — fallback button/spinner color
+- `frontend/src/App.js` — fallback loading spinner color
+- `frontend/src/pages/customer/CustomerLayout.js` — floating particle colors
+- `frontend/src/pages/customer/GiftCards.js` — default gift card gradient
+- `frontend/src/pages/customer/CampaignPage.js` — fallback campaign colors
+- `frontend/src/pages/admin/GiftCards.js` — default gift card gradient (×2)
+- `frontend/src/pages/admin/Seasonal.js` — announcement bar + campaign theme defaults (×7)
+- `frontend/src/pages/admin/Settings.js` — announcement bar defaults (×3)
+- `frontend/src/pages/admin/Dashboard.js` — chart color palette
+- `frontend/src/pages/admin/ThemeBuilder.js` — final fallback color values
+- `backend/models/index.js` — Mongoose schema defaults for theme/announcement colors
+- `backend/seed.js` — seed data default primary color
+- `backend/utils/mailer.js` — email theme fallback colors (×4)
+- `backend/routes/seo.js` — server-rendered HTML fallback `theme-color`
+- `backend/routes/giftcards.js` — gift card email theme fallback colors (×4)
+
+## One thing to do after copying these in
+
+Your `frontend/build/` folder is a **compiled production bundle** generated
+by `npm run build` — it has the old orange baked into the minified
+JS/CSS, so swapping source files alone won't change what's currently
+deployed. After replacing the files above, run:
+
+```
+cd frontend && npm run build
+```
+
+to regenerate `build/` with the new colors. (I patched the small
+`build/index.html` bootstrap script and the CSS bundle as a stopgap in case
+you're serving the existing build right now, but the minified JS bundle
+still contains the old palette until you rebuild.)

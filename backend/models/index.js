@@ -244,8 +244,8 @@ const seasonalCampaignSchema = new mongoose.Schema({
   pageBannerImage: String,
   pageContent: String,
   theme: {
-    primaryColor: { type: String, default: '#b5451b' },
-    secondaryColor: { type: String, default: '#f0a500' },
+    primaryColor: { type: String, default: '#15803d' },
+    secondaryColor: { type: String, default: '#84cc16' },
     accentColor: { type: String, default: '#ffffff' },
     bgColor: { type: String, default: '#0f172a' },
     fontStyle: { type: String, default: 'default' },
@@ -255,7 +255,7 @@ const seasonalCampaignSchema = new mongoose.Schema({
     customCSS: String
   },
   announcement: String,
-  announcementBg: { type: String, default: '#b5451b' },
+  announcementBg: { type: String, default: '#15803d' },
   announcementEnabled: { type: Boolean, default: true },
   discountPercent: { type: Number, default: 0 },
   couponCode: String,

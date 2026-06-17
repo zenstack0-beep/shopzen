@@ -144,7 +144,7 @@ export default function AdminSettings() {
     heroStyle:'gradient', headerStyle:'default', footerStyle:'default',
     customHeaderCode:'', customFooterCode:'',
     termsUrl:'', privacyUrl:'',
-    announcementEnabled:true, announcementText:'', announcementBg:'#b5451b', announcementTextColor:'#ffffff', announcementLink:'',
+    announcementEnabled:true, announcementText:'', announcementBg:'#15803d', announcementTextColor:'#ffffff', announcementLink:'',
   });
   const [, setGateways] = useState([]);
   const [deliveryServices, setDeliveryServices] = useState([]);
@@ -739,7 +739,7 @@ export default function AdminSettings() {
                   <div>
                     <label className="form-label">Background Color</label>
                     <div className="flex gap-2 items-center">
-                      <input type="color" value={settings.announcementBg||'#b5451b'} onChange={e=>setSettings(p=>({...p,announcementBg:e.target.value}))} className="w-11 h-10 rounded-xl border-2 border-gray-200 cursor-pointer p-0.5"/>
+                      <input type="color" value={settings.announcementBg||'#15803d'} onChange={e=>setSettings(p=>({...p,announcementBg:e.target.value}))} className="w-11 h-10 rounded-xl border-2 border-gray-200 cursor-pointer p-0.5"/>
                       <input value={settings.announcementBg||''} onChange={e=>setSettings(p=>({...p,announcementBg:e.target.value}))} className="form-input font-mono text-sm flex-1"/>
                     </div>
                   </div>
@@ -756,7 +756,7 @@ export default function AdminSettings() {
                 {settings.announcementEnabled !== false && settings.announcementText && (
                   <div className="rounded-xl overflow-hidden border border-gray-100">
                     <p className="text-xs text-gray-400 px-3 py-1 bg-gray-50">Preview:</p>
-                    <div className="py-2 px-4 text-sm font-semibold text-center" style={{background:settings.announcementBg||'#b5451b',color:settings.announcementTextColor||'#fff'}}>
+                    <div className="py-2 px-4 text-sm font-semibold text-center" style={{background:settings.announcementBg||'#15803d',color:settings.announcementTextColor||'#fff'}}>
                       {settings.announcementText}
                     </div>
                   </div>
