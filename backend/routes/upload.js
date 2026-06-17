@@ -26,12 +26,147 @@
 
 'use strict';
 
-const express = require('express');
-const router  = express.Router();
-const multer  = require('multer');
-const path    = require('path');
-const fs      = require('fs');
+const express  = require('express');
+const router   = express.Router();
+const multer   = require('multer');
+const path     = require('path');
+const fs       = require('fs');
+const unzipper = require('unzipper');   // npm install unzipper
+const sharp    = require('sharp');      // npm install sharp — local image processing
+const Product  = require('../models/Product');
 const { adminAuth } = require('../middleware/auth');
+const { Settings } = require('../models/index');
+
+// ─── IMAGE PROCESSING: Admin-configurable settings ───────────────────────────
+// Settings are stored in the existing generic `Settings` key→value collection
+// (same one used by /api/settings) under keys prefixed "imgproc.".  This
+// keeps everything backward compatible — if no settings exist yet, sane
+// defaults are used and behaviour is opt-OUT (processing is ON by default
+// for the SKU bulk importer, since that's what was requested, but can be
+// switched off from the admin panel without touching code).
+const IMG_SETTINGS_KEY = 'imageProcessing';
+
+const DEFAULT_IMG_SETTINGS = {
+  enabled:        true,   // master switch for the Sharp processing pipeline
+  maxWidth:       1200,
+  maxHeight:      1200,
+  sharpen:        true,
+  format:         'webp', // 'webp' | 'jpeg' | 'png' | 'original'
+  quality:        90,
+  // ENHANCEMENT: Cloudinary AI Effects — these run server-side on
+  // Cloudinary's infrastructure AFTER the Sharp-processed buffer is
+  // uploaded, using their actual AI models (not just a basic filter).
+  // This is what actually fixes "still looks like the original" — Sharp's
+  // sharpen() is a mild local filter; e_improve / e_unsharp_mask / e_upscale
+  // are full AI-driven corrections for contrast, clarity, and detail.
+  cloudinaryAI: {
+    improve:        true,   // e_improve — AI-enhanced overall quality (contrast, lighting, colour)
+    sharpen:         true,  // e_unsharp_mask — stronger, more visible sharpening than Sharp's local filter
+    sharpenStrength: 150,   // unsharp_mask amount, Cloudinary scale 1–2000 (100 ≈ ImageMagick 1.0); 150 is a noticeably crisper default
+  },
+  aiUpscale: {
+    enabled:           false, // OFF by default — opt-in, uses Cloudinary's e_upscale (no extra API key needed)
+    minWidthThreshold: 500,   // images narrower than this (px) are candidates for upscale
+    minHeightThreshold: 500,
+  },
+};
+
+let _imgSettingsCache = null;
+let _imgSettingsCacheAt = 0;
+const IMG_SETTINGS_CACHE_TTL = 15 * 1000; // 15s — admin changes apply quickly without hitting DB every file
+
+async function getImageProcessingSettings() {
+  const now = Date.now();
+  if (_imgSettingsCache && now - _imgSettingsCacheAt < IMG_SETTINGS_CACHE_TTL) {
+    return _imgSettingsCache;
+  }
+  try {
+    const row = await Settings.findOne({ key: IMG_SETTINGS_KEY });
+    const stored = row?.value || {};
+    // Deep-merge over defaults so partially-saved settings don't wipe the rest
+    const merged = {
+      ...DEFAULT_IMG_SETTINGS,
+      ...stored,
+      cloudinaryAI: { ...DEFAULT_IMG_SETTINGS.cloudinaryAI, ...(stored.cloudinaryAI || {}) },
+      aiUpscale: { ...DEFAULT_IMG_SETTINGS.aiUpscale, ...(stored.aiUpscale || {}) },
+    };
+    _imgSettingsCache = merged;
+    _imgSettingsCacheAt = now;
+    return merged;
+  } catch (err) {
+    console.warn('[ImageProcessing] settings load failed, using defaults:', err.message);
+    return DEFAULT_IMG_SETTINGS;
+  }
+}
+
+function invalidateImgSettingsCache() {
+  _imgSettingsCache = null;
+  _imgSettingsCacheAt = 0;
+}
+
+// ─── IMAGE PROCESSING: Sharp pipeline ─────────────────────────────────────────
+// Resizes (max bound, preserves aspect ratio, never upscales here — that's
+// Cloudinary's job if aiUpscale is enabled), sharpens, converts format, and
+// compresses. Runs entirely in-memory on the buffer before it ever reaches
+// Cloudinary / disk, so bandwidth and storage are both reduced.
+//
+// Returns { buffer, ext, mimeType, originalWidth, originalHeight, wasProcessed }
+async function processImageBuffer(buffer, originalName, settings) {
+  const ext = path.extname(originalName).toLowerCase().slice(1);
+
+  // SVG is vector — Sharp raster pipeline doesn't apply. Pass through untouched.
+  if (ext === 'svg') {
+    return { buffer, ext: 'svg', mimeType: 'image/svg+xml', originalWidth: null, originalHeight: null, wasProcessed: false };
+  }
+
+  if (!settings.enabled) {
+    return { buffer, ext, mimeType: null, originalWidth: null, originalHeight: null, wasProcessed: false };
+  }
+
+  try {
+    const img = sharp(buffer, { failOn: 'none' });
+    const meta = await img.metadata();
+    const originalWidth  = meta.width  || null;
+    const originalHeight = meta.height || null;
+
+    let pipeline = img.resize({
+      width:  settings.maxWidth,
+      height: settings.maxHeight,
+      fit:           'inside',   // preserve aspect ratio, never crop
+      withoutEnlargement: true,  // never upscale here — only downsizes oversized images
+    });
+
+    if (settings.sharpen) {
+      pipeline = pipeline.sharpen(); // mild unsharp-mask, good default for product photos
+    }
+
+    let outExt = ext;
+    let mimeType = null;
+    const targetFormat = settings.format === 'original' ? ext : settings.format;
+
+    if (targetFormat === 'webp') {
+      pipeline = pipeline.webp({ quality: settings.quality });
+      outExt = 'webp'; mimeType = 'image/webp';
+    } else if (targetFormat === 'jpeg' || targetFormat === 'jpg') {
+      pipeline = pipeline.jpeg({ quality: settings.quality, mozjpeg: true });
+      outExt = 'jpg'; mimeType = 'image/jpeg';
+    } else if (targetFormat === 'png') {
+      pipeline = pipeline.png({ quality: settings.quality, compressionLevel: 9 });
+      outExt = 'png'; mimeType = 'image/png';
+    } else {
+      // gif or any unrecognised — leave format as-is, just resize/sharpen
+      outExt = ext; mimeType = null;
+    }
+
+    const outBuffer = await pipeline.toBuffer();
+    return { buffer: outBuffer, ext: outExt, mimeType, originalWidth, originalHeight, wasProcessed: true };
+  } catch (err) {
+    // If Sharp can't parse/process the buffer for any reason, fall back to
+    // the original, unmodified buffer rather than failing the whole upload.
+    console.warn(`[ImageProcessing] Sharp failed for "${originalName}", using original:`, err.message);
+    return { buffer, ext, mimeType: null, originalWidth: null, originalHeight: null, wasProcessed: false };
+  }
+}
 
 // ─── Cloudinary or local storage ─────────────────────────────────────────────
 const USE_CLOUDINARY =
@@ -73,13 +208,24 @@ function hasMagicBytes(buffer, signature) {
 function isValidImageBuffer(buffer, originalname) {
   const ext = path.extname(originalname).toLowerCase().slice(1);
   if (ext === 'svg') return true; // SVG is text; magic-byte check N/A
+  if (!buffer || buffer.length < 4) return false;
+
+  // FIX: Validate against ANY known image signature, not only the one that
+  // matches the file's extension. Phones/exporters often save a JPEG with a
+  // .png extension (or vice-versa); the file is still a perfectly valid
+  // image and should be accepted. This previously caused false
+  // "invalid image data" rejections for legitimately-encoded images whose
+  // extension didn't match their real format.
   for (const sig of IMAGE_SIGNATURES) {
-    if (sig.ext === ext && hasMagicBytes(buffer, sig.magic)) return true;
-    // webp: RIFF....WEBP
-    if (ext === 'webp' && hasMagicBytes(buffer, [0x52, 0x49, 0x46, 0x46]) &&
-        buffer.slice(8, 12).toString('ascii') === 'WEBP') return true;
+    if (hasMagicBytes(buffer, sig.magic)) {
+      if (sig.ext === 'webp') {
+        // webp: RIFF....WEBP — confirm the WEBP marker too
+        if (buffer.slice(8, 12).toString('ascii') === 'WEBP') return true;
+        continue;
+      }
+      return true;
+    }
   }
-  // For jpg/png/gif/webp — if no signature matched, reject.
   return false;
 }
 
@@ -245,6 +391,359 @@ router.post('/multiple', adminAuth, upload.array('images', 10), async (req, res)
     res.json({ urls });
   } catch (err) {
     res.status(500).json({ message: err.message });
+  }
+});
+
+// ─── GET /api/upload/image-processing-settings ───────────────────────────────
+// Returns current admin settings for the Sharp processing pipeline + AI
+// upscale toggle, merged with defaults so the frontend always gets a
+// complete object even before anything has been saved.
+router.get('/image-processing-settings', adminAuth, async (req, res) => {
+  try {
+    const settings = await getImageProcessingSettings();
+    res.json(settings);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─── PUT /api/upload/image-processing-settings ───────────────────────────────
+// Saves admin settings for the Sharp processing pipeline + AI upscale.
+// Body is the same shape as DEFAULT_IMG_SETTINGS (partial updates allowed —
+// merged over existing values).
+router.put('/image-processing-settings', adminAuth, async (req, res) => {
+  try {
+    const current = await getImageProcessingSettings();
+    const incoming = req.body || {};
+    const merged = {
+      ...current,
+      ...incoming,
+      cloudinaryAI: { ...current.cloudinaryAI, ...(incoming.cloudinaryAI || {}) },
+      aiUpscale: { ...current.aiUpscale, ...(incoming.aiUpscale || {}) },
+    };
+
+    // Basic validation / clamping so a bad admin input can't break uploads
+    merged.maxWidth  = Math.min(Math.max(parseInt(merged.maxWidth, 10)  || DEFAULT_IMG_SETTINGS.maxWidth,  100), 4000);
+    merged.maxHeight = Math.min(Math.max(parseInt(merged.maxHeight, 10) || DEFAULT_IMG_SETTINGS.maxHeight, 100), 4000);
+    merged.quality   = Math.min(Math.max(parseInt(merged.quality, 10)   || DEFAULT_IMG_SETTINGS.quality,   1),   100);
+    if (!['webp', 'jpeg', 'jpg', 'png', 'original'].includes(merged.format)) {
+      merged.format = DEFAULT_IMG_SETTINGS.format;
+    }
+    merged.cloudinaryAI.sharpenStrength = Math.min(Math.max(parseInt(merged.cloudinaryAI.sharpenStrength, 10) || DEFAULT_IMG_SETTINGS.cloudinaryAI.sharpenStrength, 1), 2000);
+    merged.aiUpscale.minWidthThreshold  = Math.max(parseInt(merged.aiUpscale.minWidthThreshold, 10)  || DEFAULT_IMG_SETTINGS.aiUpscale.minWidthThreshold, 50);
+    merged.aiUpscale.minHeightThreshold = Math.max(parseInt(merged.aiUpscale.minHeightThreshold, 10) || DEFAULT_IMG_SETTINGS.aiUpscale.minHeightThreshold, 50);
+
+    await Settings.findOneAndUpdate(
+      { key: IMG_SETTINGS_KEY },
+      { key: IMG_SETTINGS_KEY, value: merged, updatedAt: new Date() },
+      { upsert: true }
+    );
+    invalidateImgSettingsCache();
+    res.json({ success: true, settings: merged });
+  } catch (err) {
+    console.error('[ImageProcessing] settings save error:', err);
+    res.status(500).json({ message: err.message || 'Failed to save image processing settings' });
+  }
+});
+
+// ─── POST /api/upload/sku-images ──────────────────────────────────────────────
+// Upload a ZIP whose top-level folders are named by SKU.
+// Every image inside a SKU folder is uploaded and assigned to that product.
+//
+// Expected ZIP layout (sub-folders optional):
+//   /SKU-001/front.jpg
+//   /SKU-001/back.png
+//   /SKU-002/main.jpg
+//   ...
+//
+// The endpoint:
+//   1. Streams the ZIP into memory entry-by-entry.
+//   2. For each image entry, resolves the SKU from the first path segment.
+//   3. Uploads the image bytes to Cloudinary (or saves to local disk).
+//   4. Finds the matching Product by SKU (case-insensitive) and pushes the URL
+//      into product.images[]; the first image also sets product.thumbnail when
+//      the product has none.
+//   5. Returns a detailed summary: matched, skipped, unmatched SKUs.
+
+const skuZipStorage = multer.memoryStorage();
+const skuZipUpload  = multer({
+  storage: skuZipStorage,
+  limits:  { fileSize: 200 * 1024 * 1024 }, // 200 MB zip ceiling
+  fileFilter: (req, file, cb) => {
+    const ok = /\.zip$/i.test(file.originalname) || file.mimetype === 'application/zip' ||
+               file.mimetype === 'application/x-zip-compressed';
+    if (ok) cb(null, true);
+    else    cb(new Error('Only .zip files are accepted for SKU image upload'));
+  },
+});
+
+router.post('/sku-images', adminAuth, skuZipUpload.single('zipfile'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ message: 'No zip file uploaded' });
+
+  // Load admin-configurable image-processing settings once per request.
+  const imgSettings = await getImageProcessingSettings();
+
+  // Helper: upload a (possibly already Sharp-processed) buffer as an image.
+  // `applyAiUpscale` tells Cloudinary to additionally run its e_upscale
+  // generative-AI transformation on this specific asset (used only when the
+  // source image was below the configured resolution threshold).
+  // `alreadyProcessed` tells this function whether Sharp already resized /
+  // sharpened / compressed the buffer locally — if so, Cloudinary must NOT
+  // also apply quality:auto / fetch_format:auto, because those re-compress
+  // and re-encode the image independently, which silently undoes (or masks)
+  // the sharpening and quality settings Sharp just applied. This was the
+  // actual reason uploaded images still looked like the unprocessed
+  // originals: Sharp's work was being re-processed a second time by
+  // Cloudinary's own "auto" pipeline right after.
+  async function uploadImageBuffer(buffer, originalName, ext, applyAiUpscale, alreadyProcessed) {
+    if (USE_CLOUDINARY) {
+      return new Promise((resolve, reject) => {
+        const transformation = [];
+
+        if (alreadyProcessed) {
+          // Sharp already resized/sharpened/compressed — store the bytes
+          // as delivered, don't let Cloudinary's generic auto-quality
+          // re-touch them.
+          transformation.push({ quality: 100 });
+        } else {
+          // Sharp was skipped (processing disabled, or SVG) — fall back to
+          // Cloudinary's own auto optimisation, same as before this feature.
+          transformation.push({ quality: 'auto', fetch_format: 'auto' });
+        }
+
+        // ENHANCEMENT: Cloudinary AI Effects chain. These run as real
+        // server-side AI models on Cloudinary's infrastructure — this is
+        // what actually fixes images "still looking like the original",
+        // since Sharp's local sharpen() is a mild filter while these are
+        // full AI-driven corrections. Order matters: upscale (resolution)
+        // first, then improve (tone/contrast/lighting), then sharpen last
+        // so it sharpens the already-corrected image rather than the raw one.
+        if (applyAiUpscale) {
+          // e_upscale — generative AI resolution upscaling for genuinely
+          // low-res sources. No extra third-party API key required since it
+          // runs through the existing Cloudinary account. If the account/
+          // plan doesn't support it, Cloudinary ignores the unsupported
+          // transformation rather than failing the upload.
+          transformation.push({ effect: 'upscale' });
+        }
+        if (imgSettings.cloudinaryAI.improve) {
+          // e_improve — AI-enhanced overall visual quality: contrast,
+          // lighting, and colour balance.
+          transformation.push({ effect: 'improve' });
+        }
+        if (imgSettings.cloudinaryAI.sharpen) {
+          // e_unsharp_mask — stronger, more visible sharpening than Sharp's
+          // local filter; strength is admin-configurable (1-2000 scale).
+          transformation.push({ effect: `unsharp_mask:${imgSettings.cloudinaryAI.sharpenStrength}` });
+        }
+
+        const stream = cloudinary.uploader.upload_stream(
+          {
+            folder: 'shopzen',
+            public_id: `${Date.now()}-${Math.round(Math.random() * 1e9)}`,
+            transformation,
+            format: ext !== 'svg' ? ext : undefined, // tell Cloudinary the real (post-processing) format
+          },
+          (err, result) => { if (err) reject(err); else resolve(result.secure_url); }
+        );
+        const { Readable } = require('stream');
+        Readable.from(buffer).pipe(stream);
+      });
+    } else {
+      // Local disk fallback
+      const uploadsDir = path.join(__dirname, '../uploads');
+      if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+      const filename = `${Date.now()}-${Math.round(Math.random() * 1e9)}.${ext}`;
+      const dest     = path.join(uploadsDir, filename);
+      fs.writeFileSync(dest, buffer);
+      const proto = req.headers['x-forwarded-proto'] || req.protocol;
+      const host  = req.headers['x-forwarded-host']  || req.get('host');
+      return `${proto}://${host}/uploads/${filename}`;
+    }
+  }
+
+  const IMAGE_EXT = /\.(jpe?g|png|gif|webp|svg)$/i;
+
+  // summary counters
+  const results    = {};   // sku → { uploaded:[], errors:[], processed:0, upscaled:0 }
+  const noProduct  = new Set();
+  let totalFiles     = 0;
+  let totalProcessed = 0;
+  let totalUpscaled  = 0;
+  let totalBytesBefore = 0;
+  let totalBytesAfter  = 0;
+
+  try {
+    // Parse the in-memory ZIP
+    const directory = await unzipper.Open.buffer(req.file.buffer);
+
+    // Collect all valid image entries first so we can batch-process them
+    // with bounded concurrency instead of doing everything sequentially.
+    const entries = [];
+    for (const entry of directory.files) {
+      if (entry.type === 'Directory') continue;
+      const relPath = entry.path.replace(/\\/g, '/');
+      const baseName = relPath.split('/').pop() || '';
+      // FIX: macOS zip exports include a "__MACOSX/" folder containing
+      // "._<filename>" AppleDouble resource-fork stubs that shadow every
+      // real file (e.g. "._10445_1.png" next to "10445_1.png"). These stubs
+      // are tiny binary blobs, not real images, and were previously being
+      // read and failing the magic-byte check ("invalid image data").
+      // Skip them no matter where they appear in the zip, not just under
+      // __MACOSX/, since some zip tools place "._*" files alongside the
+      // real ones at the top level too.
+      if (
+        relPath.startsWith('__MACOSX') ||
+        relPath.includes('/__MACOSX/') ||
+        baseName === '.DS_Store' ||
+        baseName.startsWith('._')
+      ) continue;
+
+      // FIX: Derive SKU from the image's immediate PARENT folder, not always
+      // the first path segment. When a zip is created by selecting a folder
+      // (e.g. "test products/") and compressing it, every entry gets an
+      // extra wrapping segment: "test products/SKU-001/img.png" instead of
+      // "SKU-001/img.png". Using parts[0] then incorrectly read "test
+      // products" as the SKU. The parent-folder-of-the-file is always the
+      // actual SKU folder, regardless of how many levels wrap it.
+      const parts = relPath.split('/').filter(Boolean);
+      if (parts.length < 2) continue;          // root-level files ignored
+      const skuRaw = parts[parts.length - 2];
+      const fileName = parts[parts.length - 1];
+
+      if (!IMAGE_EXT.test(fileName)) continue; // skip non-image files
+
+      entries.push({ entry, skuRaw, fileName });
+      if (!results[skuRaw]) results[skuRaw] = { uploaded: [], errors: [], processed: 0, upscaled: 0 };
+    }
+
+    totalFiles = entries.length;
+
+    // ── BATCH PROCESSING ──────────────────────────────────────────────────
+    // Process entries in fixed-size batches with bounded concurrency so we
+    // don't open hundreds of simultaneous Cloudinary upload streams / Sharp
+    // pipelines at once on large imports (which previously could exhaust
+    // memory or hit Cloudinary rate limits on big zips).
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < entries.length; i += BATCH_SIZE) {
+      const batch = entries.slice(i, i + BATCH_SIZE);
+
+      await Promise.all(batch.map(async ({ entry, skuRaw, fileName }) => {
+        try {
+          const rawBuffer = await entry.buffer();
+          totalBytesBefore += rawBuffer.length;
+
+          // Magic-byte guard (skip SVG — it's text)
+          const sourceExt = path.extname(fileName).toLowerCase().slice(1);
+          if (sourceExt !== 'svg' && !isValidImageBuffer(rawBuffer, fileName)) {
+            results[skuRaw].errors.push(`${fileName}: invalid image data`);
+            return;
+          }
+
+          // Find matching product (case-insensitive SKU match)
+          const product = await Product.findOne({ sku: { $regex: `^${skuRaw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' } });
+          if (!product) {
+            noProduct.add(skuRaw);
+            results[skuRaw].errors.push(`${fileName}: no product found for SKU "${skuRaw}"`);
+            return;
+          }
+
+          // ── ENHANCEMENT: Sharp processing pipeline ──────────────────────
+          // Resize to admin-configured max bounds, sharpen, convert format,
+          // and compress — all locally, before the bytes ever reach
+          // Cloudinary. Falls back to the original buffer if Sharp fails.
+          const processed = await processImageBuffer(rawBuffer, fileName, imgSettings);
+          totalBytesAfter += processed.buffer.length;
+          if (processed.wasProcessed) {
+            totalProcessed += 1;
+            results[skuRaw].processed += 1;
+          }
+
+          // ── ENHANCEMENT: optional AI Upscale ────────────────────────────
+          // Only applied when explicitly enabled in admin settings AND the
+          // ORIGINAL image's resolution is below the configured threshold
+          // (no point upscaling already-large images).
+          let applyAiUpscale = false;
+          if (
+            imgSettings.aiUpscale.enabled &&
+            processed.originalWidth && processed.originalHeight &&
+            (processed.originalWidth < imgSettings.aiUpscale.minWidthThreshold ||
+             processed.originalHeight < imgSettings.aiUpscale.minHeightThreshold)
+          ) {
+            applyAiUpscale = true;
+            totalUpscaled += 1;
+            results[skuRaw].upscaled += 1;
+          }
+
+          // Upload the (processed) image
+          const url = await uploadImageBuffer(processed.buffer, fileName, processed.ext, applyAiUpscale, processed.wasProcessed);
+
+          // Attach to product
+          // FIX: The first image uploaded for a product becomes the
+          // thumbnail only — it is NOT also pushed into product.images[],
+          // since the storefront gallery already prepends product.thumbnail
+          // to the front of that list. Pushing it too caused the same photo
+          // to render twice. Every subsequent image still gets pushed into
+          // images[] as before.
+          const isFirstImageForProduct = !product.thumbnail;
+          if (isFirstImageForProduct) {
+            product.thumbnail = url;
+          } else {
+            if (!Array.isArray(product.images)) product.images = [];
+            product.images.push(url);
+          }
+          await product.save();
+
+          results[skuRaw].uploaded.push(url);
+        } catch (entryErr) {
+          results[skuRaw].errors.push(`${fileName}: ${entryErr.message}`);
+        }
+      }));
+    }
+
+    // Build response summary
+    const matched   = Object.keys(results).filter(s => results[s].uploaded.length > 0);
+    const withErrors= Object.keys(results).filter(s => results[s].errors.length > 0);
+    const unmatched = [...noProduct];
+    const bytesSavedPct = totalBytesBefore > 0
+      ? Math.round((1 - totalBytesAfter / totalBytesBefore) * 100)
+      : 0;
+
+    return res.json({
+      message:  `SKU image import complete. ${matched.length} SKU(s) updated.`,
+      matched:  matched.length,
+      unmatched: unmatched.length,
+      unmatchedSkus: unmatched,
+      withErrors: withErrors.length,
+      details:  results,
+      // ── ENHANCEMENT: additive fields, fully backward compatible ─────────
+      // Existing frontend code that only reads matched/unmatched/withErrors/
+      // details keeps working untouched; new fields are simply ignored by
+      // older UI until the frontend is updated to display them.
+      processing: {
+        totalFiles,
+        processed:   totalProcessed,
+        aiUpscaled:  totalUpscaled,
+        bytesBefore: totalBytesBefore,
+        bytesAfter:  totalBytesAfter,
+        bytesSavedPct,
+        settingsUsed: {
+          enabled:   imgSettings.enabled,
+          maxWidth:  imgSettings.maxWidth,
+          maxHeight: imgSettings.maxHeight,
+          format:    imgSettings.format,
+          quality:   imgSettings.quality,
+          sharpen:   imgSettings.sharpen,
+          cloudinaryImprove:        imgSettings.cloudinaryAI.improve,
+          cloudinarySharpen:        imgSettings.cloudinaryAI.sharpen,
+          cloudinarySharpenStrength: imgSettings.cloudinaryAI.sharpenStrength,
+          aiUpscaleEnabled: imgSettings.aiUpscale.enabled,
+        },
+      },
+    });
+  } catch (err) {
+    console.error('[SKU-images]', err);
+    return res.status(500).json({ message: err.message || 'Failed to process ZIP' });
   }
 });
 

@@ -287,8 +287,10 @@ export default function useSEO({
       },
     });
 
-    // JSON-LD: Organization
-    if (cfg.orgName || cfg.siteName) {
+    // JSON-LD: Organization — always emit so Google can show the logo next to
+    // the site name in search results. `cfg.logoUrl` must be set in admin
+    // Settings (stored in DB as storeLogoUrl, exposed via window.__SHOPZEN_SEO__).
+    {
       const sameAs = [
         cfg.facebookUrl, cfg.instagramUrl, cfg.twitterUrl,
         cfg.linkedinUrl, cfg.youtubeUrl, cfg.tiktokUrl, cfg.whatsappUrl,
@@ -299,15 +301,17 @@ export default function useSEO({
         '@type': 'Organization',
         name: cfg.orgName || siteName,
         url: siteUrl,
-        logo: cfg.logoUrl ? { '@type': 'ImageObject', url: cfg.logoUrl } : undefined,
+        // logoUrl MUST be a direct image URL (Cloudinary or /logo.png).
+        // Google uses this for the website logo badge in search results.
+        // Width ≥160px, aspect ratio ≤1:1 to 9.6:1, recommended 600×60px.
+        logo: cfg.logoUrl
+          ? { '@type': 'ImageObject', url: cfg.logoUrl, width: 600, height: 60 }
+          : { '@type': 'ImageObject', url: `${siteUrl}/og-default.png` },
         contactPoint: cfg.phone ? [{
           '@type': 'ContactPoint',
           telephone: cfg.phone,
           contactType: 'customer service',
         }] : undefined,
-        // Only include sameAs if at least one social profile is configured —
-        // an empty array signals "no social presence" to crawlers, which is
-        // worse than omitting the field entirely.
         sameAs: sameAs.length ? sameAs : undefined,
       });
     }

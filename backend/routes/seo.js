@@ -594,7 +594,9 @@ router.get('/product-meta/:slug', async (req, res) => {
 
     const siteUrl    = (process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
     const productUrl = `${siteUrl}/product/${product.slug}`;
-    const storeName  = 'ShopZen';
+    const _pm = await getSeoMeta();
+    const storeName  = _pm?.storeName || 'ShopZen';
+    const logoUrl    = _pm?.logoUrl   || `${siteUrl}/og-default.png`;
 
     const metaTitle = buildProductTitle(product, storeName);
 
@@ -699,7 +701,7 @@ router.get('/product-meta/:slug', async (req, res) => {
       '@type':    'Organization',
       name:        storeName,
       url:         siteUrl,
-      logo: { '@type': 'ImageObject', url: `${siteUrl}/og-default.png` },
+      logo: { '@type': 'ImageObject', url: logoUrl || `${siteUrl}/og-default.png`, width: 600, height: 60 },
     };
 
     // Breadcrumb using SEO-friendly category URL
@@ -743,7 +745,9 @@ router.get('/category-meta/:slug', async (req, res) => {
     if (!cat) return res.status(404).json({ message: 'Category not found' });
 
     const siteUrl   = (process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
-    const storeName = 'ShopZen';
+    const _cm = await getSeoMeta();
+    const storeName = _cm?.storeName || 'ShopZen';
+    const logoUrl   = _cm?.logoUrl   || `${siteUrl}/og-default.png`;
     const catUrl    = `${siteUrl}/category/${cat.slug}`;
 
     const metaTitle = `${cat.name} — Buy Online in Sri Lanka | ${storeName}`;
@@ -775,7 +779,7 @@ router.get('/category-meta/:slug', async (req, res) => {
       '@type':    'Organization',
       name:        storeName,
       url:         siteUrl,
-      logo: { '@type': 'ImageObject', url: `${siteUrl}/og-default.png` },
+      logo: { '@type': 'ImageObject', url: logoUrl || `${siteUrl}/og-default.png`, width: 600, height: 60 },
     };
 
     res.json({ metaTitle, metaDesc, canonical: catUrl, ogImage, keywords, breadcrumbSchema, orgSchema });
@@ -791,7 +795,9 @@ router.get('/brand-meta/:slug', async (req, res) => {
     const brandName = slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
     const siteUrl   = (process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
-    const storeName = 'ShopZen';
+    const _bm = await getSeoMeta();
+    const storeName = _bm?.storeName || 'ShopZen';
+    const logoUrl   = _bm?.logoUrl   || `${siteUrl}/og-default.png`;
     const brandUrl  = `${siteUrl}/brand/${slug}`;
 
     const metaTitle = `${brandName} Products — Buy Online in Sri Lanka | ${storeName}`;
@@ -821,7 +827,7 @@ router.get('/brand-meta/:slug', async (req, res) => {
       '@type':    'Organization',
       name:        storeName,
       url:         siteUrl,
-      logo: { '@type': 'ImageObject', url: `${siteUrl}/og-default.png` },
+      logo: { '@type': 'ImageObject', url: logoUrl || `${siteUrl}/og-default.png`, width: 600, height: 60 },
     };
 
     res.json({ metaTitle, metaDesc, canonical: brandUrl, ogImage, keywords, breadcrumbSchema, orgSchema });
@@ -940,6 +946,27 @@ function injectMeta(html, { title, desc, canonical, ogTitle, ogDesc, ogImage, og
   return out;
 }
 
+// Injects window.__SHOPZEN_SEO__ into the page so the React useSEO hook has
+// logoUrl, storeName etc. available on first render, before the Settings API
+// call returns. Called once per SSR response after injectMeta.
+function injectSeoWindowConfig(html, meta) {
+  if (!meta) return html;
+  const cfg = {
+    siteName:    meta.storeName || 'ShopZen',
+    siteUrl:     meta.siteUrl   || 'https://shopzen.lk',
+    logoUrl:     meta.logoUrl   || '',
+    defaultOgImage: meta.ogImage || '',
+    currencyCode: 'LKR',
+    countryCode:  'LK',
+  };
+  const script = `<script>window.__SHOPZEN_SEO__=Object.assign(window.__SHOPZEN_SEO__||{},${JSON.stringify(cfg)});</script>`;
+  // Insert just before </head> so it's available before any deferred JS runs.
+  if (html.includes('</head>')) {
+    return html.replace('</head>', script + '\n</head>');
+  }
+  return html;
+}
+
 // Insert pre-rendered static HTML (H1-H3 + category/bestseller links) into
 // <div id="root"> so Google can index meaningful content without executing
 // JS. React's render call replaces #root's children on mount, so this does
@@ -1008,19 +1035,25 @@ function buildHomeSeoContent({ storeName, siteUrl, categories = [], bestSellers 
 async function getSeoMeta() {
   try {
     const rows = await Settings.find({
-      key: { $in: ['seo_config','seo_metaTitle','seo_metaDesc','seo_ogTitle','seo_ogDesc','seo_ogImage','seo_googleVerification','storeName','facebookUrl','instagramUrl','twitterUrl','linkedinUrl','youtubeUrl','tiktokUrl','whatsappUrl'] },
+      key: { $in: ['seo_config','seo_metaTitle','seo_metaDesc','seo_ogTitle','seo_ogDesc','seo_ogImage','seo_googleVerification','storeName','storeLogoUrl','facebookUrl','instagramUrl','twitterUrl','linkedinUrl','youtubeUrl','tiktokUrl','whatsappUrl'] },
     }).lean();
     const s = {};
     rows.forEach(r => { s[r.key] = r.value; });
     const siteUrl   = (s.seo_config?.siteUrl || process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
     const storeName = s.storeName || 'ShopZen';
+    const ogImage   = s.seo_ogImage || `${siteUrl}/og-default.png`;
+    // storeLogoUrl is set in admin Settings → General → Logo upload (Cloudinary URL).
+    // Fall back to ogImage so the Organization schema always has a logo.
+    const logoUrl   = s.storeLogoUrl || ogImage;
     return {
       siteUrl,
+      storeName,
+      logoUrl,
       metaTitle:    s.seo_metaTitle || `${storeName} — Shop Online in Sri Lanka`,
       metaDesc:     s.seo_metaDesc  || 'Shop the best products online in Sri Lanka. Fast delivery, best prices at ShopZen.',
       ogTitle:      s.seo_ogTitle   || s.seo_metaTitle || `${storeName} — Shop Online in Sri Lanka`,
       ogDesc:       s.seo_ogDesc    || s.seo_metaDesc  || 'Shop the best products online in Sri Lanka.',
-      ogImage:      s.seo_ogImage   || `${siteUrl}/og-default.png`,
+      ogImage,
       verification: s.seo_googleVerification || '',
       sameAs: [s.facebookUrl, s.instagramUrl, s.twitterUrl, s.linkedinUrl, s.youtubeUrl, s.tiktokUrl, s.whatsappUrl].filter(Boolean),
     };
@@ -1084,7 +1117,7 @@ async function getHtmlTemplate() {
 }
 
 // ── SSR: /shop page ───────────────────────────────────────────────────────────
-async function renderShopPage(req, html, siteUrl, storeName, defaultOgImage) {
+async function renderShopPage(req, html, siteUrl, storeName, defaultOgImage, logoUrl) {
   const categorySlug = req.query.category || null;
   const searchQ      = req.query.search   || null;
 
@@ -1108,7 +1141,7 @@ async function renderShopPage(req, html, siteUrl, storeName, defaultOgImage) {
             { '@type': 'ListItem', position: 3, name: cat.name, item: catUrl },
           ],
         };
-        const orgSchema = { '@context': 'https://schema.org', '@type': 'Organization', name: storeName, url: siteUrl, logo: { '@type': 'ImageObject', url: defaultOgImage } };
+        const orgSchema = { '@context': 'https://schema.org', '@type': 'Organization', name: storeName, url: siteUrl, logo: { '@type': 'ImageObject', url: logoUrl, width: 600, height: 60 } };
 
         return injectMeta(html, { title, desc, canonical: catUrl, ogImage, ogType: 'website', keywords, robots: 'noindex,follow', schemas: [breadcrumb, orgSchema] });
       }
@@ -1159,13 +1192,18 @@ const seoRenderMiddleware = async (req, res) => {
   if (!html) return res.status(500).send('Frontend build not found.');
 
   const siteUrl        = (process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
-  const storeName      = 'ShopZen';
-  const defaultOgImage = `${siteUrl}/og-default.png`;
+  // Pull storeName and logoUrl from DB so they stay in sync with admin Settings.
+  const _topMeta       = await getSeoMeta();
+  const storeName      = _topMeta?.storeName || 'ShopZen';
+  const defaultOgImage = _topMeta?.ogImage   || `${siteUrl}/og-default.png`;
+  // logoUrl = actual store logo (brand image). Google shows this next to your site
+  // name in search results. Keep it separate from the social OG card image.
+  const logoUrl        = _topMeta?.logoUrl   || defaultOgImage;
 
   const orgSchema = {
     '@context': 'https://schema.org', '@type': 'Organization',
     name: storeName, url: siteUrl,
-    logo: { '@type': 'ImageObject', url: defaultOgImage },
+    logo: { '@type': 'ImageObject', url: logoUrl, width: 600, height: 60 },
   };
 
   // ── /product/:slug ──────────────────────────────────────────────────────────
@@ -1261,7 +1299,7 @@ const seoRenderMiddleware = async (req, res) => {
         });
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-        return res.status(200).send(out);
+        return res.status(200).send(injectSeoWindowConfig(out, _topMeta));
       }
     } catch (err) {
       console.error('[SSR product]', err.message);
@@ -1302,7 +1340,7 @@ const seoRenderMiddleware = async (req, res) => {
         const out = injectMeta(html, { title, desc, canonical: catUrl, ogImage, ogType: 'website', keywords, schemas });
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-        return res.status(200).send(out);
+        return res.status(200).send(injectSeoWindowConfig(out, _topMeta));
       }
     } catch (err) {
       console.error('[SSR category]', err.message);
@@ -1346,7 +1384,7 @@ const seoRenderMiddleware = async (req, res) => {
       const out = injectMeta(html, { title, desc, canonical: brandUrl, ogImage, ogType: 'website', keywords, schemas });
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-      return res.status(200).send(out);
+      return res.status(200).send(injectSeoWindowConfig(out, _topMeta));
     } catch (err) {
       console.error('[SSR brand]', err.message);
     }
@@ -1358,7 +1396,7 @@ const seoRenderMiddleware = async (req, res) => {
       const out = await renderShopPage(req, html, siteUrl, storeName, defaultOgImage);
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-      return res.status(200).send(out);
+      return res.status(200).send(injectSeoWindowConfig(out, _topMeta));
     } catch (err) {
       console.error('[SSR shop]', err.message);
     }
@@ -1398,7 +1436,7 @@ const seoRenderMiddleware = async (req, res) => {
           areaServed: { '@type': 'Country', name: 'Sri Lanka' },
           address: { '@type': 'PostalAddress', addressCountry: 'LK' },
           hasMap: `${siteUrl}/page/contact`,
-          logo: { '@type': 'ImageObject', url: meta.ogImage },
+          logo: { '@type': 'ImageObject', url: meta.logoUrl || meta.ogImage, width: 600, height: 60 },
         };
         // Fetch categories + best sellers for static, crawlable homepage content
         const [homeCategories, bestSellers] = await Promise.all([
@@ -1441,7 +1479,7 @@ const seoRenderMiddleware = async (req, res) => {
         });
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-        return res.status(200).send(out);
+        return res.status(200).send(injectSeoWindowConfig(out, _topMeta));
       }
     } catch (err) {
       console.error('[SSR home]', err.message);
@@ -1456,7 +1494,7 @@ const seoRenderMiddleware = async (req, res) => {
       schemas: [orgSchema],
     });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    return res.status(200).send(out);
+    return res.status(200).send(injectSeoWindowConfig(out, _topMeta));
   }
 
   // ── /wishlist ──────────────────────────────────────────────────────────────
@@ -1467,7 +1505,7 @@ const seoRenderMiddleware = async (req, res) => {
       schemas: [orgSchema],
     });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    return res.status(200).send(out);
+    return res.status(200).send(injectSeoWindowConfig(out, _topMeta));
   }
 
   // ── /gift-cards ────────────────────────────────────────────────────────────
@@ -1479,7 +1517,7 @@ const seoRenderMiddleware = async (req, res) => {
       schemas: [orgSchema],
     });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    return res.status(200).send(out);
+    return res.status(200).send(injectSeoWindowConfig(out, _topMeta));
   }
 
   // ── /page/:slug ────────────────────────────────────────────────────────────
@@ -1493,7 +1531,7 @@ const seoRenderMiddleware = async (req, res) => {
       schemas: [orgSchema],
     });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    return res.status(200).send(out);
+    return res.status(200).send(injectSeoWindowConfig(out, _topMeta));
   }
 
   // ── /campaign/:slug ────────────────────────────────────────────────────────
@@ -1507,7 +1545,7 @@ const seoRenderMiddleware = async (req, res) => {
       schemas: [orgSchema],
     });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    return res.status(200).send(out);
+    return res.status(200).send(injectSeoWindowConfig(out, _topMeta));
   }
 
   // ── Generic fallback — always return HTTP 200 with index.html ──────────────

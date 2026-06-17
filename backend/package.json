@@ -8,6 +8,7 @@
     "seed": "node seed.js"
   },
   "dependencies": {
+    "adm-zip": "^0.5.17",
     "axios": "^1.6.0",
     "bcryptjs": "^2.4.3",
     "cloudinary": "^1.41.3",
@@ -27,7 +28,9 @@
     "nodemailer": "^6.10.1",
     "pdf-parse": "^1.1.1",
     "resend": "^6.12.4",
+    "sharp": "^0.34.5",
     "stripe": "^14.0.0",
+    "unzipper": "^0.12.3",
     "uuid": "^9.0.0"
   },
   "devDependencies": {

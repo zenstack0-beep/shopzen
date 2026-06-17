@@ -1,31 +1,39 @@
 {
     "short_name": "ShopZen",
-    "name": "ShopZen Store",
+    "name": "ShopZen — Online Store Sri Lanka",
     "icons": [
       {
-        "src": "https://res.cloudinary.com/dn7tvazaw/image/upload/w_32,h_32,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png",
+        "src": "/favicon-32x32.png",
         "sizes": "32x32",
-        "type": "image/png"
+        "type": "image/png",
+        "purpose": "any"
       },
       {
-        "src": "https://res.cloudinary.com/dn7tvazaw/image/upload/w_180,h_180,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png",
+        "src": "/apple-touch-icon.png",
         "sizes": "180x180",
-        "type": "image/png"
+        "type": "image/png",
+        "purpose": "any"
       },
       {
-        "src": "https://res.cloudinary.com/dn7tvazaw/image/upload/w_192,h_192,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png",
+        "src": "/android-chrome-192x192.png",
         "sizes": "192x192",
-        "type": "image/png"
+        "type": "image/png",
+        "purpose": "any maskable"
       },
       {
-        "src": "https://res.cloudinary.com/dn7tvazaw/image/upload/w_512,h_512,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png",
+        "src": "/android-chrome-512x512.png",
         "sizes": "512x512",
-        "type": "image/png"
+        "type": "image/png",
+        "purpose": "any maskable"
       }
     ],
-    "start_url": ".",
+    "start_url": "/",
+    "scope": "/",
     "display": "standalone",
     "theme_color": "#b5451b",
     "background_color": "#ffffff",
-    "description": "ShopZen - Your online store"
+    "description": "ShopZen — Shop electronics, appliances and more online in Sri Lanka. Fast island-wide delivery.",
+    "lang": "en-LK",
+    "dir": "ltr",
+    "categories": ["shopping", "electronics"]
   }

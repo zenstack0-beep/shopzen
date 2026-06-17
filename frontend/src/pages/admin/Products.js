@@ -275,6 +275,18 @@ export default function AdminProducts() {
   // ── Excel export state ────────────────────────────────────────────────────
   const [exporting, setExporting] = useState(false);
 
+  // ── SKU Image Bulk Upload state ───────────────────────────────────────────
+  const [skuImageModal, setSkuImageModal]       = useState(false);
+  const [skuZipFile, setSkuZipFile]             = useState(null);
+  const [skuUploading, setSkuUploading]         = useState(false);
+  const [skuResult, setSkuResult]               = useState(null);
+
+  // ── Image Processing settings (Sharp pipeline + AI upscale) ──────────────
+  const [imgSettings, setImgSettings]           = useState(null);
+  const [imgSettingsLoading, setImgSettingsLoading] = useState(false);
+  const [imgSettingsSaving, setImgSettingsSaving]   = useState(false);
+  const [imgSettingsOpen, setImgSettingsOpen]       = useState(false);
+
   // ── Bulk import state ─────────────────────────────────────────────────────
   const [bulkModal, setBulkModal]       = useState(false);
   const [bulkFile, setBulkFile]         = useState(null);
@@ -599,6 +611,66 @@ export default function AdminProducts() {
     }
   };
 
+  /* ── Image Processing Settings: fetch & save ── */
+  const fetchImgSettings = async () => {
+    setImgSettingsLoading(true);
+    try {
+      const { data } = await API.get('/upload/image-processing-settings');
+      setImgSettings(data);
+    } catch (err) {
+      toast.error('Failed to load image processing settings');
+    } finally {
+      setImgSettingsLoading(false);
+    }
+  };
+
+  const saveImgSettings = async () => {
+    if (!imgSettings) return;
+    setImgSettingsSaving(true);
+    const toastId = toast.loading('Saving image processing settings…');
+    try {
+      const { data } = await API.put('/upload/image-processing-settings', imgSettings);
+      setImgSettings(data.settings);
+      toast.success('✅ Settings saved', { id: toastId });
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to save settings', { id: toastId });
+    } finally {
+      setImgSettingsSaving(false);
+    }
+  };
+
+  /* ── SKU Image Bulk Upload: Upload ZIP ── */
+  const handleSkuImageUpload = async () => {
+    if (!skuZipFile) { toast.error('Please select a ZIP file first'); return; }
+    setSkuUploading(true);
+    setSkuResult(null);
+    const toastId = toast.loading('⏳ Uploading SKU images…');
+    try {
+      const formData = new FormData();
+      formData.append('zipfile', skuZipFile);
+      const { data } = await API.post('/upload/sku-images', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setSkuResult(data);
+      if (data.matched > 0) {
+        toast.success(`✅ Updated ${data.matched} product(s)!`, { id: toastId });
+        fetchProducts();
+      } else {
+        toast.error('No products were updated. Check SKU names match.', { id: toastId });
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'SKU image upload failed', { id: toastId });
+    } finally {
+      setSkuUploading(false);
+    }
+  };
+
+  const closeSkuImageModal = () => {
+    setSkuImageModal(false);
+    setSkuZipFile(null);
+    setSkuResult(null);
+  };
+
   const closeBulkModal = () => {
     setBulkModal(false);
     setBulkFile(null);
@@ -753,6 +825,12 @@ export default function AdminProducts() {
               ? <><span style={{display:'inline-block',width:12,height:12,border:'2px solid #16a34a',borderTopColor:'transparent',borderRadius:'50%',animation:'spin 0.7s linear infinite'}}></span> Exporting…</>
               : <>📊 Export Excel</>
             }
+          </button>
+          <button onClick={()=>{setSkuImageModal(true); setSkuResult(null); setSkuZipFile(null); fetchImgSettings();}}
+            className="text-sm font-semibold px-3 py-1.5 rounded-lg border flex items-center gap-1.5 transition-all"
+            style={{ background:'#fdf4ff', borderColor:'#a855f7', color:'#7e22ce' }}
+            title="Bulk assign images to products by SKU folder">
+            🗂️ SKU Images
           </button>
           <button onClick={()=>{setBulkModal(true); setBulkResult(null); setBulkFile(null);}}
             className="text-sm font-semibold px-3 py-1.5 rounded-lg border flex items-center gap-1.5 transition-all"
@@ -933,6 +1011,250 @@ export default function AdminProducts() {
                       {bulkResult.errors.map((e, i) => (
                         <li key={i}>Row {e.row} ({e.name}): {e.message}</li>
                       ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {/* ── SKU Image Bulk Upload Modal ── */}
+      {skuImageModal && (
+        <Modal title="🗂️ Bulk Image Upload by SKU" onClose={closeSkuImageModal}>
+          <div className="space-y-4 text-sm">
+            <div className="bg-purple-50 border border-purple-100 rounded-xl p-4 space-y-2 text-purple-800">
+              <p className="font-semibold text-purple-900">How it works:</p>
+              <ol className="list-decimal list-inside space-y-1 text-xs">
+                <li>Create a folder for each product named exactly after its <strong>SKU</strong>.</li>
+                <li>Place the product images inside that folder (JPG, PNG, WebP, etc.).</li>
+                <li>Zip all the SKU folders together into one <strong>.zip</strong> file.</li>
+                <li>Upload the zip here — images are automatically assigned to matching products.</li>
+              </ol>
+              <div className="bg-white border border-purple-100 rounded-lg p-2 font-mono text-xs text-gray-600 mt-2">
+                <p>📦 images.zip</p>
+                <p className="ml-4">📁 SKU-001/</p>
+                <p className="ml-8">🖼 front.jpg</p>
+                <p className="ml-8">🖼 back.jpg</p>
+                <p className="ml-4">📁 SKU-002/</p>
+                <p className="ml-8">🖼 main.png</p>
+              </div>
+              <p className="text-xs text-purple-700 mt-1">💡 The first image in each folder also sets the product thumbnail if none is set.</p>
+            </div>
+
+            {/* ── Image Processing Settings ── */}
+            <div className="border border-gray-200 rounded-xl overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setImgSettingsOpen(o => !o)}
+                className="w-full flex items-center justify-between px-4 py-2.5 bg-gray-50 hover:bg-gray-100 text-sm font-semibold text-gray-700"
+              >
+                <span>🖼️ Image Processing Settings {imgSettings && !imgSettings.enabled && <span className="text-amber-600 font-normal">(disabled)</span>}</span>
+                <span className="text-gray-400">{imgSettingsOpen ? '▲' : '▼'}</span>
+              </button>
+
+              {imgSettingsOpen && (
+                <div className="p-4 space-y-3 border-t border-gray-200">
+                  {imgSettingsLoading || !imgSettings ? (
+                    <p className="text-xs text-gray-500">Loading settings…</p>
+                  ) : (
+                    <>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={imgSettings.enabled}
+                          onChange={e => setImgSettings({ ...imgSettings, enabled: e.target.checked })}
+                        />
+                        <span>Enable automatic resize / sharpen / compress before upload</span>
+                      </label>
+
+                      <div className={imgSettings.enabled ? '' : 'opacity-50 pointer-events-none'}>
+                        <div className="grid grid-cols-2 gap-3 mt-2">
+                          <div>
+                            <label className="form-label text-xs">Max Width (px)</label>
+                            <input
+                              type="number" min="100" max="4000"
+                              value={imgSettings.maxWidth}
+                              onChange={e => setImgSettings({ ...imgSettings, maxWidth: e.target.value })}
+                              className="form-input text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="form-label text-xs">Max Height (px)</label>
+                            <input
+                              type="number" min="100" max="4000"
+                              value={imgSettings.maxHeight}
+                              onChange={e => setImgSettings({ ...imgSettings, maxHeight: e.target.value })}
+                              className="form-input text-sm"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3 mt-3">
+                          <div>
+                            <label className="form-label text-xs">Output Format</label>
+                            <select
+                              value={imgSettings.format}
+                              onChange={e => setImgSettings({ ...imgSettings, format: e.target.value })}
+                              className="form-input text-sm"
+                            >
+                              <option value="webp">WebP (recommended)</option>
+                              <option value="jpeg">JPEG</option>
+                              <option value="png">PNG</option>
+                              <option value="original">Keep original format</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="form-label text-xs">Quality ({imgSettings.quality})</label>
+                            <input
+                              type="range" min="1" max="100"
+                              value={imgSettings.quality}
+                              onChange={e => setImgSettings({ ...imgSettings, quality: e.target.value })}
+                              className="w-full mt-2.5"
+                            />
+                          </div>
+                        </div>
+
+                        <label className="flex items-center gap-2 text-sm mt-3">
+                          <input
+                            type="checkbox"
+                            checked={imgSettings.sharpen}
+                            onChange={e => setImgSettings({ ...imgSettings, sharpen: e.target.checked })}
+                          />
+                          <span>Sharpen images (local filter, mild effect)</span>
+                        </label>
+                      </div>
+
+                      <div className="border-t border-gray-100 pt-3 mt-3">
+                        <p className="text-sm font-semibold text-gray-700 mb-1">✨ Cloudinary AI Effects</p>
+                        <p className="text-xs text-gray-500 mb-2">These run as real AI models on Cloudinary's servers and have a much stronger visible effect than the local sharpen filter above — use these if uploaded images still look soft or unclear.</p>
+
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={imgSettings.cloudinaryAI?.improve ?? true}
+                            onChange={e => setImgSettings({ ...imgSettings, cloudinaryAI: { ...imgSettings.cloudinaryAI, improve: e.target.checked } })}
+                          />
+                          <span>AI Improve (auto contrast, lighting, color balance)</span>
+                        </label>
+
+                        <label className="flex items-center gap-2 text-sm mt-2">
+                          <input
+                            type="checkbox"
+                            checked={imgSettings.cloudinaryAI?.sharpen ?? true}
+                            onChange={e => setImgSettings({ ...imgSettings, cloudinaryAI: { ...imgSettings.cloudinaryAI, sharpen: e.target.checked } })}
+                          />
+                          <span>AI Sharpen (unsharp mask — noticeably crisper)</span>
+                        </label>
+
+                        {imgSettings.cloudinaryAI?.sharpen && (
+                          <div className="ml-6 mt-2">
+                            <label className="form-label text-xs">Sharpen Strength ({imgSettings.cloudinaryAI.sharpenStrength})</label>
+                            <input
+                              type="range" min="1" max="500"
+                              value={imgSettings.cloudinaryAI.sharpenStrength}
+                              onChange={e => setImgSettings({ ...imgSettings, cloudinaryAI: { ...imgSettings.cloudinaryAI, sharpenStrength: e.target.value } })}
+                              className="w-full"
+                            />
+                            <p className="text-xs text-gray-400 mt-0.5">Higher = crisper, but can introduce halos around edges at extreme values.</p>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="border-t border-gray-100 pt-3 mt-3">
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={imgSettings.aiUpscale?.enabled || false}
+                            onChange={e => setImgSettings({ ...imgSettings, aiUpscale: { ...imgSettings.aiUpscale, enabled: e.target.checked } })}
+                          />
+                          <span>🤖 AI Upscale low-resolution images (via Cloudinary)</span>
+                        </label>
+                        <p className="text-xs text-gray-500 mt-1 ml-6">Applies AI upscaling only to images smaller than the thresholds below. Uses your existing Cloudinary account — no extra API key needed.</p>
+
+                        {imgSettings.aiUpscale?.enabled && (
+                          <div className="grid grid-cols-2 gap-3 mt-2 ml-6">
+                            <div>
+                              <label className="form-label text-xs">Min Width Threshold (px)</label>
+                              <input
+                                type="number" min="50"
+                                value={imgSettings.aiUpscale.minWidthThreshold}
+                                onChange={e => setImgSettings({ ...imgSettings, aiUpscale: { ...imgSettings.aiUpscale, minWidthThreshold: e.target.value } })}
+                                className="form-input text-sm"
+                              />
+                            </div>
+                            <div>
+                              <label className="form-label text-xs">Min Height Threshold (px)</label>
+                              <input
+                                type="number" min="50"
+                                value={imgSettings.aiUpscale.minHeightThreshold}
+                                onChange={e => setImgSettings({ ...imgSettings, aiUpscale: { ...imgSettings.aiUpscale, minHeightThreshold: e.target.value } })}
+                                className="form-input text-sm"
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <button
+                        onClick={saveImgSettings}
+                        disabled={imgSettingsSaving}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-purple-300 text-purple-700 bg-purple-50 hover:bg-purple-100 disabled:opacity-60"
+                      >
+                        {imgSettingsSaving ? 'Saving…' : '💾 Save Settings'}
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label className="form-label">Select ZIP File</label>
+              <input
+                type="file"
+                accept=".zip,application/zip,application/x-zip-compressed"
+                onChange={e => setSkuZipFile(e.target.files[0] || null)}
+                className="form-input text-sm"
+              />
+              {skuZipFile && <p className="text-xs text-gray-500 mt-1">Selected: {skuZipFile.name} ({(skuZipFile.size / 1024 / 1024).toFixed(1)} MB)</p>}
+            </div>
+
+            <button
+              onClick={handleSkuImageUpload}
+              disabled={skuUploading || !skuZipFile}
+              className="btn-primary w-full text-sm disabled:opacity-60"
+            >
+              {skuUploading ? '⏳ Processing…' : '🚀 Upload & Assign Images'}
+            </button>
+
+            {skuResult && (
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-2">
+                <p className="font-semibold text-emerald-700">✅ Products updated: {skuResult.matched}</p>
+                {skuResult.processing && (
+                  <div className="bg-white border border-gray-200 rounded-lg p-3 text-xs text-gray-600 space-y-1">
+                    <p>🖼️ Images processed: <strong>{skuResult.processing.processed}</strong> / {skuResult.processing.totalFiles}</p>
+                    {skuResult.processing.bytesBefore > 0 && (
+                      <p>📦 Size reduced by <strong>{skuResult.processing.bytesSavedPct}%</strong> ({(skuResult.processing.bytesBefore/1024).toFixed(0)}KB → {(skuResult.processing.bytesAfter/1024).toFixed(0)}KB)</p>
+                    )}
+                    {skuResult.processing.aiUpscaled > 0 && (
+                      <p>🤖 AI-upscaled (low-res): <strong>{skuResult.processing.aiUpscaled}</strong></p>
+                    )}
+                  </div>
+                )}
+                {skuResult.unmatched > 0 && (
+                  <p className="font-semibold text-amber-700">⚠️ Unmatched SKUs: {skuResult.unmatched}
+                    <span className="ml-1 font-normal text-xs text-gray-500">({skuResult.unmatchedSkus?.join(', ')})</span>
+                  </p>
+                )}
+                {skuResult.withErrors > 0 && (
+                  <div>
+                    <p className="font-semibold text-red-600 mb-1">❌ SKUs with errors: {skuResult.withErrors}</p>
+                    <ul className="text-xs text-red-600 space-y-0.5 max-h-32 overflow-y-auto">
+                      {Object.entries(skuResult.details || {}).flatMap(([sku, d]) =>
+                        (d.errors || []).map((e, i) => <li key={`${sku}-${i}`}>• [{sku}] {e}</li>)
+                      )}
                     </ul>
                   </div>
                 )}
