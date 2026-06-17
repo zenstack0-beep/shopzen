@@ -361,7 +361,7 @@ router.get('/meta', async (req, res) => {
           'seo_config', 'seo_metaTitle', 'seo_metaDesc', 'seo_ogTitle',
           'seo_ogDesc', 'seo_ogImage', 'seo_googleVerification',
           'seo_ga4Id', 'seo_gtmId', 'seo_fbPixelId',
-          'storeName', 'storeTagline',
+          'storeName', 'storeTagline', 'logoUrl', 'faviconUrl',
         ],
       },
     }).lean();
@@ -376,9 +376,11 @@ router.get('/meta', async (req, res) => {
     const ogTitle   = s.seo_ogTitle   || metaTitle;
     const ogDesc    = s.seo_ogDesc    || metaDesc;
     const ogImage   = s.seo_ogImage   || `${siteUrl}/og-default.png`;
+    const logoUrl   = s.faviconUrl || s.logoUrl || ogImage;
 
     res.json({
       siteUrl, storeName, metaTitle, metaDesc, ogTitle, ogDesc, ogImage,
+      logoUrl,
       canonicalUrl:       siteUrl,
       googleVerification: s.seo_googleVerification || '',
       ga4Id:              s.seo_ga4Id    || '',
@@ -1035,16 +1037,16 @@ function buildHomeSeoContent({ storeName, siteUrl, categories = [], bestSellers 
 async function getSeoMeta() {
   try {
     const rows = await Settings.find({
-      key: { $in: ['seo_config','seo_metaTitle','seo_metaDesc','seo_ogTitle','seo_ogDesc','seo_ogImage','seo_googleVerification','storeName','storeLogoUrl','facebookUrl','instagramUrl','twitterUrl','linkedinUrl','youtubeUrl','tiktokUrl','whatsappUrl'] },
+      key: { $in: ['seo_config','seo_metaTitle','seo_metaDesc','seo_ogTitle','seo_ogDesc','seo_ogImage','seo_googleVerification','storeName','logoUrl','faviconUrl','facebookUrl','instagramUrl','twitterUrl','linkedinUrl','youtubeUrl','tiktokUrl','whatsappUrl'] },
     }).lean();
     const s = {};
     rows.forEach(r => { s[r.key] = r.value; });
     const siteUrl   = (s.seo_config?.siteUrl || process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
     const storeName = s.storeName || 'ShopZen';
     const ogImage   = s.seo_ogImage || `${siteUrl}/og-default.png`;
-    // storeLogoUrl is set in admin Settings → General → Logo upload (Cloudinary URL).
-    // Fall back to ogImage so the Organization schema always has a logo.
-    const logoUrl   = s.storeLogoUrl || ogImage;
+    // logoUrl / faviconUrl — set in admin Settings → General → Logo upload.
+    // Matches the getLogoUrl() logic in settings.js.
+    const logoUrl   = s.faviconUrl || s.logoUrl || ogImage;
     return {
       siteUrl,
       storeName,
