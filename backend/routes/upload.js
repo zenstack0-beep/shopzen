@@ -619,85 +619,144 @@ router.post('/sku-images', adminAuth, skuZipUpload.single('zipfile'), async (req
 
     totalFiles = entries.length;
 
-    // ── BATCH PROCESSING ──────────────────────────────────────────────────
-    // Process entries in fixed-size batches with bounded concurrency so we
-    // don't open hundreds of simultaneous Cloudinary upload streams / Sharp
-    // pipelines at once on large imports (which previously could exhaust
-    // memory or hit Cloudinary rate limits on big zips).
-    const BATCH_SIZE = 5;
-    for (let i = 0; i < entries.length; i += BATCH_SIZE) {
-      const batch = entries.slice(i, i + BATCH_SIZE);
+    // ── SORT: guarantee IMG_1 / _1 files are always processed first ───────
+    // ZIP archives yield entries in an undefined order, and Promise.all
+    // races mean whichever image finishes uploading first wins the thumbnail
+    // slot — so a _2 or _3 image could randomly beat IMG_1.
+    // Natural (numeric-aware) sort on fileName puts _1 before _10 before _2
+    // and IMG_1 before IMG_2 etc., so the first image of each SKU folder is
+    // deterministically the thumbnail every time.
+    entries.sort((a, b) => {
+      // Primary: group by SKU so same-SKU images stay together
+      if (a.skuRaw < b.skuRaw) return -1;
+      if (a.skuRaw > b.skuRaw) return 1;
+      // Secondary: natural (locale + numeric) sort on filename within the SKU
+      return a.fileName.localeCompare(b.fileName, undefined, { numeric: true, sensitivity: 'base' });
+    });
 
-      await Promise.all(batch.map(async ({ entry, skuRaw, fileName }) => {
-        try {
-          const rawBuffer = await entry.buffer();
-          totalBytesBefore += rawBuffer.length;
+    // ── GROUP by SKU so we can process each SKU's images in filename order ─
+    // This ensures the first image per SKU always becomes the thumbnail,
+    // regardless of concurrent upload timing.
+    const entriesBySku = {};
+    for (const e of entries) {
+      if (!entriesBySku[e.skuRaw]) entriesBySku[e.skuRaw] = [];
+      entriesBySku[e.skuRaw].push(e);
+    }
 
-          // Magic-byte guard (skip SVG — it's text)
-          const sourceExt = path.extname(fileName).toLowerCase().slice(1);
-          if (sourceExt !== 'svg' && !isValidImageBuffer(rawBuffer, fileName)) {
-            results[skuRaw].errors.push(`${fileName}: invalid image data`);
-            return;
-          }
+    // ── PER-SKU PROCESSING ────────────────────────────────────────────────
+    // Process each SKU sequentially so IMG_1 always finishes uploading and
+    // is set as thumbnail BEFORE the remaining images of that SKU are
+    // uploaded. Within a SKU, images are uploaded concurrently (bounded to
+    // CONCURRENT_PER_SKU) for speed. SKUs themselves are processed in small
+    // parallel batches (SKU_BATCH) to stay within Railway's 30 s request
+    // timeout even on large ZIPs.
+    //
+    // Key timeout-prevention changes vs the old flat batching:
+    //  1. Product is fetched ONCE per SKU, not once per image (fewer DB round-trips).
+    //  2. product.save() is called ONCE per SKU at the very end, not after
+    //     every single image (was the primary cause of timeouts on large imports).
+    //  3. Cloudinary uploads inside a SKU are still concurrent but bounded.
+    const CONCURRENT_PER_SKU = 3;  // parallel Cloudinary streams per SKU
+    const SKU_BATCH           = 4;  // how many SKUs to process in parallel
 
-          // Find matching product (case-insensitive SKU match)
-          const product = await Product.findOne({ sku: { $regex: `^${skuRaw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' } });
-          if (!product) {
-            noProduct.add(skuRaw);
+    const skuKeys = Object.keys(entriesBySku);
+
+    for (let si = 0; si < skuKeys.length; si += SKU_BATCH) {
+      const skuBatch = skuKeys.slice(si, si + SKU_BATCH);
+
+      await Promise.all(skuBatch.map(async (skuRaw) => {
+        const skuEntries = entriesBySku[skuRaw]; // already sorted: IMG_1 first
+
+        // ── Fetch product once per SKU ─────────────────────────────────
+        const product = await Product.findOne({
+          sku: { $regex: `^${skuRaw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
+        });
+        if (!product) {
+          noProduct.add(skuRaw);
+          for (const { fileName } of skuEntries) {
             results[skuRaw].errors.push(`${fileName}: no product found for SKU "${skuRaw}"`);
-            return;
           }
-
-          // ── ENHANCEMENT: Sharp processing pipeline ──────────────────────
-          // Resize to admin-configured max bounds, sharpen, convert format,
-          // and compress — all locally, before the bytes ever reach
-          // Cloudinary. Falls back to the original buffer if Sharp fails.
-          const processed = await processImageBuffer(rawBuffer, fileName, imgSettings);
-          totalBytesAfter += processed.buffer.length;
-          if (processed.wasProcessed) {
-            totalProcessed += 1;
-            results[skuRaw].processed += 1;
-          }
-
-          // ── ENHANCEMENT: optional AI Upscale ────────────────────────────
-          // Only applied when explicitly enabled in admin settings AND the
-          // ORIGINAL image's resolution is below the configured threshold
-          // (no point upscaling already-large images).
-          let applyAiUpscale = false;
-          if (
-            imgSettings.aiUpscale.enabled &&
-            processed.originalWidth && processed.originalHeight &&
-            (processed.originalWidth < imgSettings.aiUpscale.minWidthThreshold ||
-             processed.originalHeight < imgSettings.aiUpscale.minHeightThreshold)
-          ) {
-            applyAiUpscale = true;
-            totalUpscaled += 1;
-            results[skuRaw].upscaled += 1;
-          }
-
-          // Upload the (processed) image
-          const url = await uploadImageBuffer(processed.buffer, fileName, processed.ext, applyAiUpscale, processed.wasProcessed);
-
-          // Attach to product
-          // FIX: The first image uploaded for a product becomes the
-          // thumbnail only — it is NOT also pushed into product.images[],
-          // since the storefront gallery already prepends product.thumbnail
-          // to the front of that list. Pushing it too caused the same photo
-          // to render twice. Every subsequent image still gets pushed into
-          // images[] as before.
-          const isFirstImageForProduct = !product.thumbnail;
-          if (isFirstImageForProduct) {
-            product.thumbnail = url;
-          } else {
-            if (!Array.isArray(product.images)) product.images = [];
-            product.images.push(url);
-          }
-          await product.save();
-
-          results[skuRaw].uploaded.push(url);
-        } catch (entryErr) {
-          results[skuRaw].errors.push(`${fileName}: ${entryErr.message}`);
+          return;
         }
+
+        // ── Track whether this SKU already had a thumbnail before import ─
+        let thumbnailAlreadySet = !!product.thumbnail;
+
+        // ── Upload images in filename order, bounded concurrency ────────
+        // We process in sequential sub-batches (not pure Promise.all of
+        // all images) so that the FIRST sub-batch (which contains IMG_1)
+        // always completes and sets the thumbnail before later images run.
+        for (let ii = 0; ii < skuEntries.length; ii += CONCURRENT_PER_SKU) {
+          const imgBatch = skuEntries.slice(ii, ii + CONCURRENT_PER_SKU);
+
+          const batchUrls = await Promise.all(imgBatch.map(async ({ entry, fileName }) => {
+            try {
+              const rawBuffer = await entry.buffer();
+              totalBytesBefore += rawBuffer.length;
+
+              // Magic-byte guard (skip SVG — it's text)
+              const sourceExt = path.extname(fileName).toLowerCase().slice(1);
+              if (sourceExt !== 'svg' && !isValidImageBuffer(rawBuffer, fileName)) {
+                results[skuRaw].errors.push(`${fileName}: invalid image data`);
+                return null;
+              }
+
+              // ── Sharp processing pipeline ──────────────────────────────
+              const processed = await processImageBuffer(rawBuffer, fileName, imgSettings);
+              totalBytesAfter += processed.buffer.length;
+              if (processed.wasProcessed) {
+                totalProcessed += 1;
+                results[skuRaw].processed += 1;
+              }
+
+              // ── Optional AI Upscale ────────────────────────────────────
+              let applyAiUpscale = false;
+              if (
+                imgSettings.aiUpscale.enabled &&
+                processed.originalWidth && processed.originalHeight &&
+                (processed.originalWidth  < imgSettings.aiUpscale.minWidthThreshold ||
+                 processed.originalHeight < imgSettings.aiUpscale.minHeightThreshold)
+              ) {
+                applyAiUpscale = true;
+                totalUpscaled += 1;
+                results[skuRaw].upscaled += 1;
+              }
+
+              // Upload
+              const url = await uploadImageBuffer(processed.buffer, fileName, processed.ext, applyAiUpscale, processed.wasProcessed);
+              results[skuRaw].uploaded.push(url);
+              return { url, fileName };
+            } catch (entryErr) {
+              results[skuRaw].errors.push(`${fileName}: ${entryErr.message}`);
+              return null;
+            }
+          }));
+
+          // ── Assign URLs to product IN ORDER ───────────────────────────
+          // This runs after each sub-batch completes, so the first sub-batch
+          // (IMG_1 etc.) is fully assigned before the second sub-batch starts.
+          for (const result of batchUrls) {
+            if (!result) continue;
+            const { url } = result;
+            if (!thumbnailAlreadySet) {
+              // FIX: IMG_1 is the first image in the sorted order → it
+              // deterministically becomes the thumbnail. It is NOT also
+              // pushed into product.images[] to avoid rendering it twice
+              // (the storefront gallery already prepends thumbnail).
+              product.thumbnail = url;
+              thumbnailAlreadySet = true;
+            } else {
+              if (!Array.isArray(product.images)) product.images = [];
+              product.images.push(url);
+            }
+          }
+        }
+
+        // ── Save product ONCE per SKU (was: once per image) ───────────
+        // This is the primary fix for Railway timeouts: a 50-image ZIP
+        // previously triggered 50 sequential product.save() + 50 DB
+        // round-trips; now it is 1 save per SKU regardless of image count.
+        await product.save();
       }));
     }
 
