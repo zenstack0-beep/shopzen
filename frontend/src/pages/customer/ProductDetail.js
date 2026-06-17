@@ -499,7 +499,7 @@ export default function ProductDetail() {
           {/* Brand + title */}
           <div>
             {product.brand && <p className="text-xs font-black uppercase tracking-widest mb-1" style={{ color: 'var(--color-primary)', opacity: 0.7 }}>{product.brand}</p>}
-            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black leading-tight" style={{ fontFamily: 'var(--font-display)', color: 'var(--color-dark)', letterSpacing: '-0.025em' }}>
+            <h1 className="product-detail-title text-2xl sm:text-3xl lg:text-4xl font-black leading-tight" style={{ fontFamily: 'var(--font-display)', color: 'var(--color-dark)', letterSpacing: '-0.025em' }}>
               {product.name}
             </h1>
           </div>
@@ -554,7 +554,7 @@ export default function ProductDetail() {
 
           {/* Qty + Add */}
           {product.stock > 0 && (
-            <div className="flex gap-3 flex-wrap">
+            <div className="product-atc-row flex gap-3 flex-wrap">
               <div className="qty-stepper">
                 <button className="qty-stepper-btn" onClick={() => setQty(q => Math.max(1, q - 1))} disabled={qty<=1}>−</button>
                 <span className="qty-stepper-val">{qty}</span>
