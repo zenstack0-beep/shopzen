@@ -867,7 +867,40 @@ export default function Checkout() {
 
   // ── Main checkout form ────────────────────────────────────────────────────────
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8" style={{ background: 'var(--body-bg)' }}>
+    <div className="checkout-page max-w-7xl mx-auto px-4 sm:px-6 py-8" style={{ background: 'var(--body-bg)', width: '100%', maxWidth: '100vw', overflowX: 'hidden', boxSizing: 'border-box' }}>
+      {/* ── Self-contained responsive rules — work even if Tailwind utilities fail to compile ── */}
+      <style>{`
+        html, body { overflow-x: hidden; max-width: 100%; }
+        .checkout-page { width: 100%; box-sizing: border-box; }
+        .checkout-page *, .checkout-page *::before, .checkout-page *::after { box-sizing: border-box; }
+        .checkout-fields {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 16px;
+          width: 100%;
+        }
+        @media (min-width: 640px) {
+          .checkout-fields { grid-template-columns: 1fr 1fr; }
+        }
+        .checkout-fields > * { min-width: 0; width: 100%; }
+        .checkout-fields .field-full { grid-column: 1 / -1; }
+        .checkout-page input.form-input,
+        .checkout-page select.form-input,
+        .checkout-page textarea.form-input {
+          width: 100%;
+          max-width: 100%;
+          box-sizing: border-box;
+        }
+        .checkout-page .btn-primary {
+          width: 100%;
+          max-width: 100%;
+          box-sizing: border-box;
+        }
+        .checkout-card {
+          width: 100%;
+          box-sizing: border-box;
+        }
+      `}</style>
       {/* Payment modals */}
       {payHereData && (
         <PayHereModal
@@ -958,23 +991,23 @@ export default function Checkout() {
       <form onSubmit={handleSubmit}>
         <div className="grid lg:grid-cols-3 gap-8">
           {/* LEFT — Billing */}
-          <div className="lg:col-span-2 space-y-5">
-            <div className="rounded-2xl border border-gray-100 p-6" style={{ background: 'var(--card-bg)' }}>
+          <div className="lg:col-span-2 space-y-5" style={{ width: '100%', minWidth: 0 }}>
+            <div className="checkout-card rounded-2xl border border-gray-100 p-6" style={{ background: 'var(--card-bg)' }}>
               <h2 className="text-xl font-bold text-gray-900 mb-5" style={{ fontFamily: 'var(--font-display)' }}>Billing Details</h2>
-              <div className="grid sm:grid-cols-2 gap-4">
+              <div className="checkout-fields grid sm:grid-cols-2 gap-4">
                 <F label="First name" value={billing.firstName} onChange={e => setBilling(p => ({ ...p, firstName: e.target.value }))} required />
                 <F label="Last name"  value={billing.lastName}  onChange={e => setBilling(p => ({ ...p, lastName:  e.target.value }))} required />
-                <div className="sm:col-span-2">
+                <div className="field-full sm:col-span-2">
                   <label className="form-label">Country <span className="text-red-500">*</span></label>
                   <select value={billing.country} onChange={e => setBilling(p => ({ ...p, country: e.target.value, city: '' }))} required className="form-input">
                     {COUNTRIES.map(c => <option key={c}>{c}</option>)}
                   </select>
                 </div>
-                <div className="sm:col-span-2">
+                <div className="field-full sm:col-span-2">
                   <label className="form-label">Street address <span className="text-red-500">*</span></label>
                   <input value={billing.street} onChange={e => setBilling(p => ({ ...p, street: e.target.value }))} required className="form-input" placeholder="House number and street name" />
                 </div>
-                <div className="sm:col-span-2">
+                <div className="field-full sm:col-span-2">
                   <label className="form-label">Town / City <span className="text-red-500">*</span></label>
                   {billing.country === 'Sri Lanka' ? (
                     <select value={billing.city} onChange={e => setBilling(p => ({ ...p, city: e.target.value }))} required className="form-input">
@@ -994,39 +1027,39 @@ export default function Checkout() {
             </div>
 
             {/* Ship to different address */}
-            <div className="rounded-2xl border border-gray-100 p-5" style={{ background: 'var(--card-bg)' }}>
+            <div className="checkout-card rounded-2xl border border-gray-100 p-5" style={{ background: 'var(--card-bg)' }}>
               <label className="flex items-center gap-3 cursor-pointer">
                 <input type="checkbox" checked={shipDiff} onChange={e => setShipDiff(e.target.checked)} className="w-4 h-4 rounded" style={{ accentColor: 'var(--color-primary)' }} />
                 <span className="font-semibold text-gray-800 text-sm">Ship to a different address?</span>
               </label>
               {shipDiff && (
-                <div className="grid sm:grid-cols-2 gap-4 mt-5 pt-5 border-t border-gray-100">
+                <div className="checkout-fields grid sm:grid-cols-2 gap-4 mt-5 pt-5 border-t border-gray-100">
                   <F label="First name" value={shipping.firstName} onChange={e => setShipping(p => ({ ...p, firstName: e.target.value }))} required />
                   <F label="Last name"  value={shipping.lastName}  onChange={e => setShipping(p => ({ ...p, lastName:  e.target.value }))} required />
-                  <div className="sm:col-span-2">
+                  <div className="field-full sm:col-span-2">
                     <label className="form-label">Country</label>
                     <select value={shipping.country} onChange={e => setShipping(p => ({ ...p, country: e.target.value }))} className="form-input">
                       {COUNTRIES.map(c => <option key={c}>{c}</option>)}
                     </select>
                   </div>
-                  <div className="sm:col-span-2"><label className="form-label">Street address</label><input value={shipping.street} onChange={e => setShipping(p => ({ ...p, street: e.target.value }))} required className="form-input" /></div>
-                  <div className="sm:col-span-2"><label className="form-label">City</label><input value={shipping.city} onChange={e => setShipping(p => ({ ...p, city: e.target.value }))} required className="form-input" /></div>
+                  <div className="field-full sm:col-span-2"><label className="form-label">Street address</label><input value={shipping.street} onChange={e => setShipping(p => ({ ...p, street: e.target.value }))} required className="form-input" /></div>
+                  <div className="field-full sm:col-span-2"><label className="form-label">City</label><input value={shipping.city} onChange={e => setShipping(p => ({ ...p, city: e.target.value }))} required className="form-input" /></div>
                   <div><label className="form-label">Phone</label><input type="tel" value={shipping.phone} onChange={e => setShipping(p => ({ ...p, phone: e.target.value }))} className="form-input" /></div>
                 </div>
               )}
             </div>
 
             {/* Order Notes */}
-            <div className="rounded-2xl border border-gray-100 p-5" style={{ background: 'var(--card-bg)' }}>
+            <div className="checkout-card rounded-2xl border border-gray-100 p-5" style={{ background: 'var(--card-bg)' }}>
               <label className="form-label">Order notes (optional)</label>
               <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} placeholder="Special delivery instructions…" className="form-input resize-none" />
             </div>
           </div>
 
           {/* RIGHT — Order Summary + Payment */}
-          <div className="space-y-4">
+          <div className="space-y-4" style={{ width: '100%', minWidth: 0 }}>
             {/* Order Items */}
-            <div className="rounded-2xl border border-gray-100 p-5" style={{ background: 'var(--card-bg)' }}>
+            <div className="checkout-card rounded-2xl border border-gray-100 p-5" style={{ background: 'var(--card-bg)' }}>
               <h2 className="text-lg font-bold text-gray-900 mb-4" style={{ fontFamily: 'var(--font-display)' }}>Your Order</h2>
               <div className="space-y-3 mb-4 pb-4 border-b border-gray-100">
                 {items.map(item => (
@@ -1084,7 +1117,7 @@ export default function Checkout() {
 
             {/* Delivery Service Selection */}
             {deliveryServices.length > 0 && (
-              <div className="rounded-2xl border border-gray-100 p-4" style={{ background: 'var(--card-bg)' }}>
+              <div className="checkout-card rounded-2xl border border-gray-100 p-4" style={{ background: 'var(--card-bg)' }}>
                 <h3 className="font-semibold text-gray-800 mb-3 text-sm">🚚 Delivery Method</h3>
                 <div className="space-y-2">
                   {deliveryServices.map(svc => {
@@ -1101,19 +1134,19 @@ export default function Checkout() {
                     return (
                       <label key={svc.code}
                         className={`flex items-start justify-between gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${selectedDelivery === svc.code ? 'bg-primary/5' : 'border-gray-200 hover:border-gray-300'}`}
-                        style={selectedDelivery === svc.code ? { borderColor: 'var(--color-primary)' } : {}}>
-                        <div className="flex items-start gap-2">
-                          <input type="radio" name="delivery" value={svc.code} checked={selectedDelivery === svc.code} onChange={() => setSelectedDelivery(svc.code)} style={{ accentColor: 'var(--color-primary)', marginTop: '2px' }} />
-                          <div>
-                            <p className="text-sm font-semibold text-gray-800">{svc.name}</p>
+                        style={selectedDelivery === svc.code ? { borderColor: 'var(--color-primary)', width: '100%', boxSizing: 'border-box' } : { width: '100%', boxSizing: 'border-box' }}>
+                        <div className="flex items-start gap-2" style={{ minWidth: 0, flex: 1 }}>
+                          <input type="radio" name="delivery" value={svc.code} checked={selectedDelivery === svc.code} onChange={() => setSelectedDelivery(svc.code)} style={{ accentColor: 'var(--color-primary)', marginTop: '2px', flexShrink: 0 }} />
+                          <div style={{ minWidth: 0 }}>
+                            <p className="text-sm font-semibold text-gray-800" style={{ overflowWrap: 'break-word' }}>{svc.name}</p>
                             {eta && <p className="text-xs text-gray-500">🕐 {eta}</p>}
-                            {svc.coverageAreas && <p className="text-xs text-gray-400">{svc.coverageAreas}</p>}
+                            {svc.coverageAreas && <p className="text-xs text-gray-400" style={{ overflowWrap: 'break-word' }}>{svc.coverageAreas}</p>}
                             {rate?.freeAbove > 0 && subtotal < rate.freeAbove && (
                               <p className="text-xs text-primary font-medium mt-0.5">
                                 Add {sym} {(rate.freeAbove - subtotal).toLocaleString()} more for free delivery
                               </p>
                             )}
-                            {svc.deliveryNote && <p className="text-xs text-amber-600 mt-0.5">ℹ️ {svc.deliveryNote}</p>}
+                            {svc.deliveryNote && <p className="text-xs text-amber-600 mt-0.5" style={{ overflowWrap: 'break-word' }}>ℹ️ {svc.deliveryNote}</p>}
                           </div>
                         </div>
                         <span className={`text-sm font-bold flex-shrink-0 ${fee === 0 ? 'text-green-600' : 'text-gray-800'}`}>
@@ -1127,7 +1160,7 @@ export default function Checkout() {
             )}
 
             {/* Coupon */}
-            <div className="rounded-2xl border border-gray-100 p-4" style={{ background: 'var(--card-bg)' }}>
+            <div className="checkout-card rounded-2xl border border-gray-100 p-4" style={{ background: 'var(--card-bg)' }}>
               <h3 className="font-semibold text-gray-800 mb-2 text-sm">🏷️ Coupon Code</h3>
               {couponData ? (
                 <div className="flex items-center justify-between rounded-xl px-3 py-2 bg-green-50 border border-green-200">
@@ -1149,7 +1182,7 @@ export default function Checkout() {
             </div>
 
             {/* Gift Card */}
-            <div className="rounded-2xl border border-gray-100 p-4" style={{ background: 'var(--card-bg)' }}>
+            <div className="checkout-card rounded-2xl border border-gray-100 p-4" style={{ background: 'var(--card-bg)' }}>
               <h3 className="font-semibold text-gray-800 mb-2 text-sm">🎁 Gift Card <span className="font-normal text-xs text-gray-400">(used as payment)</span></h3>
               {giftCardData ? (
                 <div className="flex items-center justify-between rounded-xl px-3 py-2 bg-purple-50 border border-purple-200">
@@ -1169,7 +1202,7 @@ export default function Checkout() {
 
             {/* Payment Method */}
             {total > 0 && (
-              <div className="rounded-2xl border border-gray-100 p-5" style={{ background: 'var(--card-bg)' }}>
+              <div className="checkout-card rounded-2xl border border-gray-100 p-5" style={{ background: 'var(--card-bg)' }}>
                 <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">💳 Payment Method</h3>
                 {!hasAnyPayment && (
                   <p className="text-sm text-amber-600 bg-amber-50 rounded-xl p-3">No payment methods configured. Please contact the store admin.</p>
@@ -1234,7 +1267,7 @@ export default function Checkout() {
             )}
 
             {/* Terms & Submit */}
-            <div className="rounded-2xl border border-gray-100 p-5" style={{ background: 'var(--card-bg)' }}>
+            <div className="checkout-card rounded-2xl border border-gray-100 p-5" style={{ background: 'var(--card-bg)' }}>
               <label className="flex items-start gap-2 cursor-pointer mb-4">
                 <input type="checkbox" checked={agreedTerms} onChange={e => setAgreedTerms(e.target.checked)} className="mt-0.5 w-4 h-4 rounded flex-shrink-0" style={{ accentColor: 'var(--color-primary)' }} />
                 <span className="text-sm text-gray-600">I agree to the <span className="underline cursor-pointer" style={{ color: 'var(--color-primary)' }}>terms and conditions</span> <span className="text-red-500">*</span></span>

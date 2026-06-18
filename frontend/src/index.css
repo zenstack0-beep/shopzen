@@ -654,7 +654,9 @@ a:focus-visible      { outline: 2px solid var(--color-primary); outline-offset: 
   display:flex;align-items:center;gap:12px;
   transition:all 0.25s var(--ease-expo);
   background:var(--card-bg);
+  width:100%;box-sizing:border-box;
 }
+.pay-method-card > div:last-child{min-width:0;flex:1;overflow-wrap:break-word;word-break:break-word}
 .pay-method-card:hover{border-color:var(--color-primary);background:color-mix(in srgb, var(--color-primary) 2%, transparent);transform:translateY(-2px)}
 .pay-method-card.selected{
   border-color:var(--color-primary);
@@ -668,8 +670,9 @@ a:focus-visible      { outline: 2px solid var(--color-primary); outline-offset: 
 .pay-method-card.selected .pay-method-radio{border-color:var(--color-primary);background:var(--color-primary)}
 .pay-method-card.selected .pay-method-radio::after{content:'';width:8px;height:8px;background:white;border-radius:50%}
 .pay-method-icon{font-size:24px;width:40px;text-align:center;flex-shrink:0}
-.pay-method-label{font-weight:700;font-size:15px;color:#1a1a2e}
-.pay-method-desc{font-size:12px;color:#94a3b8;margin-top:1px}
+.pay-method-label{font-weight:700;font-size:15px;color:#1a1a2e;overflow-wrap:break-word;word-break:break-word}
+.pay-method-desc{font-size:12px;color:#94a3b8;margin-top:1px;overflow-wrap:break-word;word-break:break-word}
+
 
 /* Order summary sticky */
 .order-summary-sticky{
