@@ -198,11 +198,6 @@ async function validateCoupon(code, subtotal, opts = {}) {
     return { error: 'Coupon usage limit reached' };
   }
 
-  // ── Minimum order amount ────────────────────────────────────────────────
-  if (subtotal < (coupon.minOrderAmount || 0)) {
-    return { error: `Minimum order Rs. ${coupon.minOrderAmount} required` };
-  }
-
   // ── Per-user usage limit (logged-in users) ──────────────────────────────
   const userLimit = coupon.userLimit || 1;
   if (userId) {
@@ -239,10 +234,22 @@ async function validateCoupon(code, subtotal, opts = {}) {
   }
 
   // ── Scope restrictions — compute discount ONLY on eligible items ───────────
-  const hasCat   = coupon.applicableCategories?.length > 0;
-  const hasProd  = coupon.applicableProducts?.length  > 0;
-  const hasBrand = coupon.applicableBrands?.length    > 0;
-  const hasScope = hasCat || hasProd || hasBrand;
+  const hasCat      = coupon.applicableCategories?.length > 0;
+  const hasProd     = coupon.applicableProducts?.length   > 0;
+  const hasBrand    = coupon.applicableBrands?.length     > 0;
+  const hasExcluded = coupon.excludedProducts?.length     > 0;
+  const hasScope    = hasCat || hasProd || hasBrand;
+
+  // SECURITY: when a coupon is scoped (brand/category/product restrictions)
+  // we REQUIRE authoritative lineItems built server-side from the DB.
+  // If lineItems are missing for a scoped coupon we refuse rather than
+  // falling back to a coarse client-supplied check — the fallback path
+  // previously allowed a discount on the full subtotal even when no cart
+  // items matched the scope (the client-supplied brands array matched the
+  // coupon's brand but no individual product was actually eligible).
+  if (hasScope && lineItems.length === 0) {
+    return { error: 'Unable to verify coupon eligibility — please try again' };
+  }
 
   // When the coupon is scoped, only the matching items' subtotal is discounted.
   // Sitewide coupons (no scope) get the full order subtotal.
@@ -255,13 +262,38 @@ async function validateCoupon(code, subtotal, opts = {}) {
     const applicableBrands  = coupon.applicableBrands || [];
 
     const eligibleItems = lineItems.filter(item => {
-      const itemCat   = item.category?.toString();
-      const itemProd  = item.product?.toString();
-      const itemBrand = item.brand;
-      const catMatch   = hasCat   && itemCat   && applicableCatIds.includes(itemCat);
-      const prodMatch  = hasProd  && itemProd  && applicableProdIds.includes(itemProd);
-      const brandMatch = hasBrand && itemBrand && applicableBrands.includes(itemBrand);
-      return catMatch || prodMatch || brandMatch;
+      const itemCat    = item.category?.toString();
+      const itemSubCat = item.subCategory?.toString();
+      const itemProd   = item.product?.toString();
+      const itemBrand  = item.brand;
+
+      // ── PRIORITY MATCHING: most specific scope wins ──────────────────────
+      // When applicableProducts is set, it is the authoritative list — only
+      // those exact products qualify regardless of brand or category.
+      // This prevents a coupon configured as "brand=UGREEN, products=[charger,cable]"
+      // from discounting ALL UGREEN items because the brand OR matches.
+      //
+      //   hasProd only         → match by product ID
+      //   hasProd + hasBrand   → still match by product ID only (products are more specific)
+      //   hasProd + hasCat     → still match by product ID only
+      //   hasCat only          → match by category (top-level or sub)
+      //   hasCat + hasBrand    → item must match BOTH category AND brand (AND logic)
+      //   hasBrand only        → match by brand
+      if (hasProd) {
+        // Product list is set — it is the sole decider, brand/category ignored
+        return !!(itemProd && applicableProdIds.includes(itemProd));
+      }
+
+      // No product list: combine category + brand with AND when both are set
+      const catMatch   = hasCat && (
+        (itemCat    && applicableCatIds.includes(itemCat))    ||
+        (itemSubCat && applicableCatIds.includes(itemSubCat))
+      );
+      const brandMatch = hasBrand && !!(itemBrand && applicableBrands.includes(itemBrand));
+
+      if (hasCat && hasBrand) return catMatch && brandMatch; // AND: must match both
+      if (hasCat)             return catMatch;
+      return brandMatch;
     });
 
     if (eligibleItems.length === 0) {
@@ -270,18 +302,43 @@ async function validateCoupon(code, subtotal, opts = {}) {
 
     eligibleSubtotal  = eligibleItems.reduce((s, i) => s + i.subtotal, 0);
     eligibleLineItems = eligibleItems;
-  } else if (hasScope) {
-    // lineItems not provided — fall back to coarse array-based check
-    const catOk   = !hasCat   || categoryIds.some(id => coupon.applicableCategories.map(c => c.toString()).includes(id));
-    const prodOk  = !hasProd  || productIds.some(id  => coupon.applicableProducts.map(p => p.toString()).includes(id));
-    const brandOk = !hasBrand || brands.some(b        => coupon.applicableBrands.includes(b));
-    if (!catOk && !prodOk && !brandOk) return { error: 'This coupon is not applicable to your cart items' };
-    // Without lineItems we cannot compute eligible subtotal precisely — full subtotal used as fallback
   }
 
-  // ── Block on already-discounted products ────────────────────────────────
-  if (coupon.excludeSaleItems && eligibleLineItems.some(i => i.hasDiscount)) {
-    return { error: 'This coupon cannot be applied to items that are already on sale' };
+  // ── Excluded products — remove blacklisted items from eligible set ──────
+  // Even when a product matches brand/category scope it can be explicitly
+  // excluded (e.g. premium/already-discounted items the admin doesn't want
+  // discounted by a broad brand coupon).
+  if (hasExcluded && eligibleLineItems.length > 0) {
+    const excludedProdIds = coupon.excludedProducts.map(p => p.toString());
+    const afterExclusion  = eligibleLineItems.filter(i => !excludedProdIds.includes(i.product?.toString()));
+    if (afterExclusion.length === 0) {
+      return { error: 'This coupon is not applicable to your cart items' };
+    }
+    eligibleLineItems = afterExclusion;
+    eligibleSubtotal  = afterExclusion.reduce((s, i) => s + i.subtotal, 0);
+  }
+
+  // ── minOrderAmount — check against eligible subtotal for scoped coupons ─
+  // Previously checked against full order subtotal which allowed a user with
+  // Rs.10,000 of ineligible items + Rs.100 of eligible items to satisfy a
+  // "min Rs.5,000" scoped coupon. Now uses the eligible subtotal.
+  const effectiveMinOrderAmount = coupon.minOrderAmount || 0;
+  if (effectiveMinOrderAmount > 0 && eligibleSubtotal < effectiveMinOrderAmount) {
+    return { error: `Minimum eligible order Rs. ${effectiveMinOrderAmount.toLocaleString()} required for this coupon` };
+  }
+
+  // ── Filter out already-discounted products (excludeSaleItems) ───────────
+  // Filter sale items OUT of the eligible set rather than rejecting the whole
+  // coupon — so a mixed cart (some full-price, some on sale) still gets the
+  // coupon applied to the full-price items only.
+  // Only reject if ALL eligible items are on sale (nothing left to discount).
+  if (coupon.excludeSaleItems) {
+    const nonSaleItems = eligibleLineItems.filter(i => !i.hasDiscount);
+    if (nonSaleItems.length === 0) {
+      return { error: 'This coupon cannot be applied to items that are already on sale' };
+    }
+    eligibleLineItems = nonSaleItems;
+    eligibleSubtotal  = nonSaleItems.reduce((s, i) => s + i.subtotal, 0);
   }
 
   const discount = Math.round(

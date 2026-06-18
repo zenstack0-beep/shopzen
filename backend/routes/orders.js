@@ -623,6 +623,8 @@ router.post('/', orderRateLimiter, async (req, res) => {
       categoryIds,
       productIds,
       brands,
+      lineItems: orderItems,  // FIX: pass authoritative server-side line items so scope
+                               // and excludeSaleItems checks use real product data
     });
 
     // If the customer explicitly supplied a coupon code but it failed

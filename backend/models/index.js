@@ -35,6 +35,10 @@ const couponSchema = new mongoose.Schema({
   applicableCategories: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Category' }],
   applicableProducts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
   applicableBrands: [{ type: String }],
+  // Products explicitly excluded from this coupon even if they match brand/category scope.
+  // Useful when a broad brand/category coupon should skip specific premium or already-
+  // discounted products without having to enumerate every applicable product individually.
+  excludedProducts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
   // If true, this coupon cannot be applied when the cart contains any item
   // that is already on sale (price < salePrice... i.e. hasDiscount === true).
   // Prevents stacking a coupon on top of an existing promotional discount.

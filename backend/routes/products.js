@@ -607,20 +607,34 @@ router.get('/admin/brands', adminAuth, async (req, res) => {
 });
 
 // Admin — cascading lookup for the Coupon eligibility picker.
-// Supports two modes:
+// Supports three modes:
 //   1. Filter mode: ?brand=X&category=Y&subCategory=Z
 //      → returns the narrowed lists of categories, subCategories, and matching products
 //   2. ID mode: ?ids=id1,id2,...
 //      → returns those specific products by _id (used to re-hydrate chips when editing a coupon)
+//   3. Search mode: ?search=keyword
+//      → full-text name search across all active products (used by excluded products picker)
 router.get('/admin/lookup', adminAuth, async (req, res) => {
   try {
-    const { brand, category, subCategory, ids } = req.query;
+    const { brand, category, subCategory, ids, search } = req.query;
 
     // ── Mode 2: fetch by explicit IDs ──────────────────────────────────────
     if (ids) {
       const idList = ids.split(',').filter(Boolean);
       const products = await Product.find({ _id: { $in: idList } })
         .select('name price salePrice thumbnail brand category subCategory')
+        .lean();
+      return res.json({ products, categories: [], subCategories: [] });
+    }
+
+    // ── Mode 3: search by name keyword ─────────────────────────────────────
+    if (search) {
+      const products = await Product.find({
+        isActive: true,
+        name: { $regex: search.trim(), $options: 'i' },
+      })
+        .select('name price salePrice thumbnail brand category subCategory')
+        .limit(30)
         .lean();
       return res.json({ products, categories: [], subCategories: [] });
     }

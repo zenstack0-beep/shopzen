@@ -449,20 +449,25 @@ export default function ProductDetail() {
   const inWishlist = wishlist.includes(product._id);
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8" style={{ background: 'var(--body-bg)' }}>
-      {/* Breadcrumb */}
-      <nav className="flex items-center gap-2 text-xs text-gray-400 mb-6 flex-wrap">
-        <Link to="/" style={{ color: 'var(--color-primary)' }}>Home</Link><span>/</span>
-        <Link to="/shop" style={{ color: 'var(--color-primary)' }}>Shop</Link>
-        {product.category && <><span>/</span><Link to={`/shop/${product.category.slug}`} style={{ color: 'var(--color-primary)' }}>{product.category.name}</Link></>}
-        <span>/</span><span className="text-gray-600 font-medium truncate max-w-48">{product.name}</span>
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8" style={{ background: 'var(--body-bg)' }}>
+      {/* Breadcrumb - Mobile Optimized */}
+      <nav className="flex items-center gap-1 sm:gap-2 text-xs sm:text-sm text-gray-400 mb-4 sm:mb-6 flex-wrap overflow-hidden">
+        <Link to="/" className="flex-shrink-0 hover:text-primary transition-colors" style={{ color: 'var(--color-primary)' }}>Home</Link>
+        <span className="flex-shrink-0">/</span>
+        <Link to="/shop" className="flex-shrink-0 hover:text-primary transition-colors" style={{ color: 'var(--color-primary)' }}>Shop</Link>
+        {product.category && <>
+          <span className="flex-shrink-0">/</span>
+          <Link to={`/shop/${product.category.slug}`} className="flex-shrink-0 hover:text-primary transition-colors" style={{ color: 'var(--color-primary)' }}>{product.category.name}</Link>
+        </>}
+        <span className="flex-shrink-0">/</span>
+        <span className="text-gray-600 font-medium break-words min-w-0 flex-grow">{product.name}</span>
       </nav>
 
-      <div ref={heroRef} className="grid lg:grid-cols-2 gap-8 lg:gap-14">
+      <div ref={heroRef} className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8 lg:gap-14">
         {/* ── Image Gallery ── */}
-        <div>
+        <div className="w-full">
           {/* Main image */}
-          <div ref={imgRef} className="gallery-main mb-3"
+          <div ref={imgRef} className="gallery-main mb-3 w-full"
             onClick={() => setZoomed(true)}
             style={{ transformStyle: 'preserve-3d', willChange: 'transform' }}>
             <img src={images[selImg] || 'https://via.placeholder.com/600'} alt={product.name}
@@ -504,32 +509,32 @@ export default function ProductDetail() {
         </div>
 
         {/* ── Product Info ── */}
-        <div ref={infoRef} className="flex flex-col gap-4">
+        <div ref={infoRef} className="flex flex-col gap-3 sm:gap-4">
           {/* Brand + title */}
-          <div>
-            {product.brand && <p className="text-xs font-black uppercase tracking-widest mb-1" style={{ color: 'var(--color-primary)', opacity: 0.7 }}>{product.brand}</p>}
-            <h1 className="product-detail-title text-2xl sm:text-3xl lg:text-4xl font-black leading-tight" style={{ fontFamily: 'var(--font-display)', color: 'var(--color-dark)', letterSpacing: '-0.025em', wordBreak: 'break-word', overflowWrap: 'break-word' }}>
+          <div className="w-full">
+            {product.brand && <p className="text-xs font-black uppercase tracking-widest mb-1 sm:mb-2" style={{ color: 'var(--color-primary)', opacity: 0.7 }}>{product.brand}</p>}
+            <h1 className="product-detail-title text-xl sm:text-2xl lg:text-3xl xl:text-4xl font-black leading-tight break-words" style={{ fontFamily: 'var(--font-display)', color: 'var(--color-dark)', letterSpacing: '-0.025em', wordBreak: 'break-word', overflowWrap: 'break-word', hyphens: 'auto' }}>
               {product.name}
             </h1>
           </div>
 
           {/* Rating */}
           {product.ratings?.count > 0 && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <Stars rating={product.ratings.average} count={product.ratings.count}/>
-              <span className="text-sm text-gray-400">({product.ratings.count} reviews)</span>
+              <span className="text-xs sm:text-sm text-gray-400">({product.ratings.count} {product.ratings.count === 1 ? 'review' : 'reviews'})</span>
             </div>
           )}
 
           {/* Price */}
-          <div className="price-display">
-            <span className="price-current" style={{ color: 'var(--color-primary)' }}>
+          <div className="price-display flex flex-wrap items-center gap-2 sm:gap-3">
+            <span className="price-current text-lg sm:text-xl font-bold" style={{ color: 'var(--color-primary)' }}>
               {sym} {curPrice?.toLocaleString()}
             </span>
             {isOnSale && (
               <>
-                <span className="price-original">{sym} {product.price?.toLocaleString()}</span>
-                <span className="price-badge">-{discount}%</span>
+                <span className="price-original text-sm sm:text-base line-through">{sym} {product.price?.toLocaleString()}</span>
+                <span className="price-badge text-xs sm:text-sm">-{discount}%</span>
               </>
             )}
           </div>
@@ -538,46 +543,47 @@ export default function ProductDetail() {
           )}
 
           {/* Short desc */}
-          {product.shortDescription && <p className="text-gray-600 leading-relaxed text-sm sm:text-base">{product.shortDescription}</p>}
+          {product.shortDescription && <p className="text-gray-600 leading-relaxed text-xs sm:text-sm lg:text-base">{product.shortDescription}</p>}
 
           {/* Stock */}
-          <div className="stock-indicator">
+          <div className="stock-indicator flex items-center gap-2">
             <div className={`stock-dot ${product.stock > 10 ? 'in-stock' : product.stock > 0 ? 'low-stock' : 'out-stock'}`}/>
-            <span className={`${product.stock > 0 ? 'text-green-600' : 'text-red-500'}`}>
+            <span className={`text-xs sm:text-sm font-medium ${product.stock > 0 ? 'text-green-600' : 'text-red-500'}`}>
               {product.stock > 10 ? `In Stock (${product.stock} available)` : product.stock > 0 ? `Only ${product.stock} left!` : 'Out of Stock'}
             </span>
           </div>
 
           {/* Variants */}
           {product.variants?.length > 0 && (
-            <div className="border-t border-gray-100 pt-4">
+            <div className="border-t border-gray-100 pt-3 sm:pt-4">
               {product.variants.map(v => (
                 <VariantSelector key={v.name} variant={v} selected={selVars[v.name]}
                   onSelect={val => { setSelVars(p => ({ ...p, [v.name]: val })); setVarError(''); }}/>
               ))}
               {varError && (
-                <p className="text-red-500 text-sm font-bold flex items-center gap-1">⚠️ {varError}</p>
+                <p className="text-red-500 text-xs sm:text-sm font-bold flex items-center gap-1">⚠️ {varError}</p>
               )}
             </div>
           )}
 
-          {/* Qty + Add */}
+          {/* Qty + Add - Mobile Responsive */}
           {product.stock > 0 && (
-            <div ref={atcRowRef} className="product-atc-row flex gap-3" style={{ flexWrap: 'nowrap', alignItems: 'stretch' }}>
-              <div className="qty-stepper" style={{ flexShrink: 0 }}>
+            <div ref={atcRowRef} className="product-atc-row flex flex-col sm:flex-row gap-2 sm:gap-3 w-full">
+              <div className="qty-stepper flex-shrink-0" style={{ order: 2 }}>
                 <button className="qty-stepper-btn" onClick={() => setQty(q => Math.max(1, q - 1))} disabled={qty<=1}>−</button>
                 <span className="qty-stepper-val">{qty}</span>
                 <button className="qty-stepper-btn" onClick={() => setQty(q => Math.min(product.stock, q + 1))}>+</button>
               </div>
               <MagneticButton ref={btnRef} onClick={handleAdd}
-                className="btn-primary py-3.5 text-base font-black"
+                className="btn-primary py-3 sm:py-3.5 text-sm sm:text-base font-black w-full sm:flex-1 order-1 sm:order-2"
                 style={{ flex: '1 1 0', minWidth: 0, background: adding ? 'linear-gradient(135deg,#16a34a,#22c55e)' : undefined }}>
                 {adding ? '✓ Added!' : '🛒 Add to Cart'}
               </MagneticButton>
               <button onClick={toggleWishlist}
-                className={`wish-btn ${inWishlist?'active':''}`}
-                title={inWishlist?'Remove from wishlist':'Add to wishlist'}>
-                <svg className="w-5 h-5" fill={inWishlist ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{color:inWishlist?'#ef4444':'#94a3b8'}}>
+                className={`wish-btn flex-shrink-0 ${inWishlist?'active':''}`}
+                title={inWishlist?'Remove from wishlist':'Add to wishlist'}
+                style={{ order: 3 }}>
+                <svg className="w-5 h-5 sm:w-6 sm:h-6" fill={inWishlist ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{color:inWishlist?'#ef4444':'#94a3b8'}}>
                   <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/>
                 </svg>
               </button>
@@ -585,8 +591,8 @@ export default function ProductDetail() {
           )}
 
           {/* Delivery info */}
-          <div className="rounded-2xl p-4 border" style={{ background: 'rgba(181,69,27,0.03)', borderColor: 'rgba(181,69,27,0.12)' }}>
-            <div className="flex items-center gap-2 text-sm font-bold mb-1" style={{ color: 'var(--color-primary)' }}>
+          <div className="rounded-2xl p-3 sm:p-4 border text-xs sm:text-sm" style={{ background: 'rgba(181,69,27,0.03)', borderColor: 'rgba(181,69,27,0.12)' }}>
+            <div className="flex items-center gap-2 font-bold mb-1" style={{ color: 'var(--color-primary)' }}>
               🚚 Delivery from {sym} {settings?.standardDelivery || 600}
               {settings?.freeDeliveryThreshold && ` · Free over ${sym} ${settings.freeDeliveryThreshold.toLocaleString()}`}
             </div>
@@ -596,8 +602,8 @@ export default function ProductDetail() {
           {/* Trust signals */}
           <div className="grid grid-cols-2 gap-2">
             {[{icon:'🔒',text:'Secure Payment'},  {icon:'↩️',text:'Easy Returns'}, {icon:'⭐',text:'Quality Assured'}, {icon:'📦',text:'Fast Shipping'}].map(({icon,text})=>(
-              <div key={text} className="flex items-center gap-2 text-xs text-gray-500 font-semibold p-2.5 rounded-xl bg-gray-50">
-                <span>{icon}</span><span>{text}</span>
+              <div key={text} className="flex items-center gap-2 text-xs text-gray-500 font-semibold p-2 sm:p-2.5 rounded-xl bg-gray-50">
+                <span className="flex-shrink-0">{icon}</span><span className="break-words">{text}</span>
               </div>
             ))}
           </div>
@@ -614,18 +620,18 @@ export default function ProductDetail() {
 
           {/* Meta */}
           <div className="text-xs text-gray-400 space-y-1 border-t border-gray-100 pt-3">
-            {product.sku && <p>SKU: <span className="font-mono">{product.sku}</span></p>}
+            {product.sku && <p>SKU: <span className="font-mono text-xs break-all">{product.sku}</span></p>}
 {/* Tags are used for SEO meta keywords only — not displayed in UI */}
           </div>
         </div>
       </div>
 
       {/* ── Tabs ── */}
-      <div className="mt-14">
-        <div className="flex gap-1 border-b overflow-x-auto mb-6" style={{ borderColor: 'var(--card-border)' }}>
+      <div className="mt-8 sm:mt-14">
+        <div className="flex gap-1 border-b overflow-x-auto mb-4 sm:mb-6" style={{ borderColor: 'var(--card-border)' }}>
           {['description', 'specifications', 'reviews'].map(t => (
             <button key={t} onClick={() => setTab(t)}
-              className={`px-5 py-3 text-sm font-bold capitalize transition-all border-b-2 -mb-px whitespace-nowrap ${t === tab ? '' : 'border-transparent text-gray-400 hover:text-gray-700'}`}
+              className={`px-3 sm:px-5 py-2 sm:py-3 text-xs sm:text-sm font-bold capitalize transition-all border-b-2 -mb-px whitespace-nowrap ${t === tab ? '' : 'border-transparent text-gray-400 hover:text-gray-700'}`}
               style={t === tab ? { borderColor: 'var(--color-primary)', color: 'var(--color-primary)' } : {}}>
               {t}
               {t === 'reviews' && product.ratings?.count > 0 && ` (${product.ratings.count})`}
@@ -634,17 +640,17 @@ export default function ProductDetail() {
         </div>
 
         {tab === 'description' && (
-          <div className="prose max-w-none text-gray-600 leading-relaxed text-sm sm:text-base"
+          <div className="prose prose-sm sm:prose max-w-none text-gray-600 leading-relaxed text-xs sm:text-sm lg:text-base"
             dangerouslySetInnerHTML={{ __html: sanitizeHtml(product.description) }} />
         )}
 
         {tab === 'specifications' && (
           product.specifications?.length > 0 ? (
-            <div className="grid sm:grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {product.specifications.map((s, i) => (
-                <Card3D key={i} className="flex gap-4 rounded-2xl p-4 border" style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)' }} rotMax={8}>
-                  <span className="text-sm font-black text-gray-500 w-32 flex-shrink-0">{s.key}</span>
-                  <span className="text-sm text-gray-800 font-semibold">{s.value}</span>
+                <Card3D key={i} className="flex gap-4 rounded-2xl p-3 sm:p-4 border text-xs sm:text-sm" style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)' }} rotMax={8}>
+                  <span className="text-xs sm:text-sm font-black text-gray-500 w-24 sm:w-32 flex-shrink-0 break-words">{s.key}</span>
+                  <span className="text-xs sm:text-sm text-gray-800 font-semibold break-words">{s.value}</span>
                 </Card3D>
               ))}
             </div>
