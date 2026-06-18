@@ -44,8 +44,30 @@ const router     = express.Router();
 const axios      = require('axios');
 const https      = require('https');
 const { URL }    = require('url');
-const cloudinary = require('cloudinary').v2;
 const { adminAuth } = require('../middleware/auth');
+
+// ─── Cloudinary (optional) ────────────────────────────────────────────────────
+// FIX (production): scrape.js must configure Cloudinary itself — it cannot rely
+// on upload.js having run first, because each require() is a separate module.
+// If the Cloudinary env vars are absent we skip the upload step and return the
+// original scraped image URLs instead (admin can still pick/upload them manually).
+const USE_CLOUDINARY =
+  process.env.CLOUDINARY_CLOUD_NAME &&
+  process.env.CLOUDINARY_API_KEY    &&
+  process.env.CLOUDINARY_API_SECRET;
+
+let cloudinary = null;
+if (USE_CLOUDINARY) {
+  cloudinary = require('cloudinary').v2;
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key:    process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+  });
+  console.log('[Scraper] Cloudinary configured for image re-hosting');
+} else {
+  console.warn('[Scraper] Cloudinary env vars not set — scraped images will not be re-hosted');
+}
 
 // ─── SSRF Guard ───────────────────────────────────────────────────────────────
 const PRIVATE_IP_RE = /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|::1$|localhost)/i;
@@ -281,7 +303,14 @@ function unique(arr) {
 }
 
 // ─── Cloudinary upload from URL ───────────────────────────────────────────────
+// FIX (production): Guard against cloudinary being null (env vars not set).
+// When Cloudinary is unavailable the function returns null so the route falls
+// back to returning the original scraped URL unchanged.
 async function uploadImageFromUrl(imageUrl) {
+  if (!cloudinary) {
+    // No Cloudinary — return the original URL so the admin can still see it
+    return imageUrl;
+  }
   try {
     const response = await axios.get(imageUrl, {
       responseType: 'arraybuffer',
@@ -424,10 +453,17 @@ router.post('/product', adminAuth, async (req, res) => {
     let finalImages = scraped.imageUrls;
 
     if (uploadImages && scraped.imageUrls.length > 0) {
-      const uploadResults = await Promise.all(
-        scraped.imageUrls.slice(0, 20).map(uploadImageFromUrl)
-      );
-      finalImages = uploadResults.filter(Boolean);
+      if (USE_CLOUDINARY) {
+        // Re-host images on Cloudinary so they are served from a stable CDN URL
+        // and bypass hotlink protection on the source site.
+        const uploadResults = await Promise.all(
+          scraped.imageUrls.slice(0, 20).map(uploadImageFromUrl)
+        );
+        // Keep only successfully uploaded URLs; fall back to original scraped
+        // URLs for any that failed so the admin still sees something.
+        finalImages = uploadResults.map((r, i) => r || scraped.imageUrls[i]).filter(Boolean);
+      }
+      // If Cloudinary is not configured, finalImages stays as scraped.imageUrls
     }
 
     return res.json({

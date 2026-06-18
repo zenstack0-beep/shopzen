@@ -353,7 +353,20 @@ if (USE_CLOUDINARY) {
 }
 
 // ─── URL helper ───────────────────────────────────────────────────────────────
+// FIX (production): When running behind a reverse proxy (Railway → Vercel),
+// req.get('host') resolves to the internal Railway hostname which is not
+// reachable from browsers.  Use BACKEND_URL from env when available so the
+// stored URL is always the public-facing address.
+// Format BACKEND_URL without trailing slash, e.g.:
+//   https://shopzen-production.up.railway.app
 function localUrl(req, filename) {
+  if (process.env.BACKEND_URL) {
+    // Normalise: ensure https scheme and strip trailing slash
+    let base = process.env.BACKEND_URL.trim().replace(/\/$/, '');
+    if (!/^https?:\/\//i.test(base)) base = 'https://' + base;
+    return `${base}/uploads/${filename}`;
+  }
+  // Localhost dev fallback — derive from the request as before
   const proto = req.headers['x-forwarded-proto'] || req.protocol;
   const host  = req.headers['x-forwarded-host']  || req.get('host');
   return `${proto}://${host}/uploads/${filename}`;
