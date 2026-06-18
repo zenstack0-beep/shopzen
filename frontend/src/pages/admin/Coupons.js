@@ -1,86 +1,130 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import API from '../../utils/api';
 import toast from 'react-hot-toast';
 
-// ─── Reusable form field ───────────────────────────────────────────────────────
-const F = ({ label, hint, children, ...props }) => (
-  <div>
-    <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
-    {children || <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" {...props} />}
-    {hint && <p className="text-xs text-gray-400 mt-1">{hint}</p>}
-  </div>
-);
-
-// ─── Toggle switch ─────────────────────────────────────────────────────────────
-const Toggle = ({ value, onChange, label, hint }) => (
-  <div className="flex items-start justify-between gap-4 py-2">
-    <div>
-      <p className="text-sm font-medium text-gray-700">{label}</p>
-      {hint && <p className="text-xs text-gray-400 mt-0.5">{hint}</p>}
+// ─── Modal shell (matches Deals/GiftCards pattern) ─────────────────────────────
+const Modal = ({ title, subtitle, onClose, children }) => (
+  <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+      <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white z-10">
+        <div>
+          <h2 className="font-display font-bold text-xl text-gray-900">{title}</h2>
+          {subtitle && <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>}
+        </div>
+        <button onClick={onClose} className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center hover:bg-gray-200 text-gray-500 text-sm flex-shrink-0">✕</button>
+      </div>
+      <div className="p-5">{children}</div>
     </div>
-    <button
-      type="button"
-      onClick={() => onChange(!value)}
-      className={`relative flex-shrink-0 w-11 h-6 rounded-full transition-colors ${value ? 'bg-blue-500' : 'bg-gray-200'}`}
-    >
-      <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${value ? 'translate-x-5' : 'translate-x-0.5'}`} />
-    </button>
   </div>
 );
 
-// ─── Multi-select dropdown with removable chips ────────────────────────────────
-// Renders a <select> that adds the chosen option to `values` on change, plus
-// chips below showing current selections (each removable). Used for the
-// coupon "Applicable Categories / Subcategories / Brands" pickers — all of
-// which are arrays on the Coupon schema.
-const MultiSelectChips = ({ label, hint, values, onChange, options, placeholder, getLabel }) => {
-  const selected = values || [];
-  const available = options.filter(o => !selected.includes(o.value));
+// ─── Toggle (matches Deals pattern) ────────────────────────────────────────────
+const Toggle = ({ value, onChange, label, hint }) => (
+  <label className="flex items-center gap-3 cursor-pointer p-3 rounded-xl border border-gray-100 hover:bg-gray-50">
+    <div
+      className={`w-10 h-6 rounded-full transition-colors relative flex-shrink-0 ${value ? 'bg-green-500' : 'bg-gray-200'}`}
+      onClick={() => onChange(!value)}
+    >
+      <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${value ? 'translate-x-5' : 'translate-x-1'}`} />
+    </div>
+    <div>
+      <p className="text-sm font-semibold text-gray-800">{label}</p>
+      {hint && <p className="text-xs text-gray-400">{hint}</p>}
+    </div>
+  </label>
+);
+
+// ─── Product picker (search + checkboxes) ──────────────────────────────────────
+function ProductPicker({ selected = [], onChange }) {
+  const [all, setAll]         = useState([]);
+  const [search, setSearch]   = useState('');
+  const [loading, setLoading] = useState(false);
+  const timer = useRef(null);
+
+  const fetchProducts = useCallback(async (q = '') => {
+    setLoading(true);
+    try {
+      const { data } = await API.get(`/products/admin/all?search=${encodeURIComponent(q)}&limit=25`);
+      setAll(data.products || []);
+    } catch {} finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchProducts(''); }, [fetchProducts]);
+
+  const onSearch = (v) => {
+    setSearch(v);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => fetchProducts(v), 350);
+  };
+
+  const toggle = (product) => {
+    const ids = selected.map(p => (typeof p === 'object' ? p._id : p));
+    if (ids.includes(product._id)) {
+      onChange(selected.filter(p => (typeof p === 'object' ? p._id : p) !== product._id));
+    } else {
+      onChange([...selected, product]);
+    }
+  };
+
+  const isSelected = (id) => selected.some(p => (typeof p === 'object' ? p._id : p) === id);
+  const selectedFull = selected.filter(p => typeof p === 'object' && p._id);
 
   return (
     <div>
-      <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
-      <select
-        className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 bg-white disabled:bg-gray-50 disabled:text-gray-400"
-        value=""
-        disabled={available.length === 0}
-        onChange={e => {
-          if (!e.target.value) return;
-          onChange([...selected, e.target.value]);
-        }}
-      >
-        <option value="">{available.length === 0 ? 'All selected' : (placeholder || 'Select…')}</option>
-        {available.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </select>
-      {hint && <p className="text-xs text-gray-400 mt-1">{hint}</p>}
-      {selected.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 mt-2">
-          {selected.map(v => (
-            <span key={v} className="inline-flex items-center gap-1 text-xs bg-blue-50 text-blue-700 font-medium px-2.5 py-1 rounded-full">
-              {getLabel(v)}
-              <button
-                type="button"
-                onClick={() => onChange(selected.filter(s => s !== v))}
-                className="text-blue-400 hover:text-blue-700 leading-none"
-              >
-                ✕
-              </button>
-            </span>
+      {selectedFull.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {selectedFull.map(p => (
+            <div key={p._id} className="flex items-center gap-1.5 bg-blue-50 border border-blue-200 rounded-lg px-2 py-1">
+              {p.thumbnail && <img src={p.thumbnail} alt="" className="w-5 h-5 rounded object-cover" />}
+              <span className="text-xs font-medium text-blue-700 max-w-[120px] truncate">{p.name}</span>
+              <button type="button" onClick={() => toggle(p)} className="text-blue-400 hover:text-red-500 text-xs leading-none">✕</button>
+            </div>
           ))}
         </div>
       )}
+      <input
+        value={search}
+        onChange={e => onSearch(e.target.value)}
+        placeholder="Search products…"
+        className="form-input text-sm mb-2"
+      />
+      <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-xl divide-y divide-gray-50">
+        {loading && <div className="p-4 text-center text-gray-400 text-sm">Searching…</div>}
+        {!loading && all.length === 0 && <div className="p-4 text-center text-gray-400 text-sm">No products found</div>}
+        {!loading && all.map(p => {
+          const sel = isSelected(p._id);
+          return (
+            <button
+              key={p._id}
+              type="button"
+              onClick={() => toggle(p)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors ${sel ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+            >
+              <div className={`w-4 h-4 rounded flex-shrink-0 border-2 flex items-center justify-center transition-all ${sel ? 'border-blue-500 bg-blue-500' : 'border-gray-300'}`}>
+                {sel && <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>}
+              </div>
+              {p.thumbnail && <img src={p.thumbnail} alt="" className="w-9 h-9 rounded-lg object-cover flex-shrink-0 bg-gray-100" />}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-gray-800 truncate">{p.name}</p>
+                <p className="text-xs text-gray-400">Rs. {p.price?.toLocaleString()} {p.salePrice ? `→ Rs. ${p.salePrice?.toLocaleString()}` : ''}</p>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-xs text-gray-400 mt-1">{selectedFull.length} product{selectedFull.length !== 1 ? 's' : ''} selected · leave empty to apply to all</p>
     </div>
   );
-};
+}
 
-// ─── Empty blank slate ─────────────────────────────────────────────────────────
+// ─── Helpers ───────────────────────────────────────────────────────────────────
 const EMPTY = {
   code: '', description: '', type: 'percentage', value: '',
   minOrderAmount: 0, maxDiscount: '', usageLimit: '', userLimit: 1,
-  validFrom: new Date().toISOString().slice(0, 10),
+  validFrom:  new Date().toISOString().slice(0, 10),
   validUntil: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
-  isActive: true, isNewUserOnly: false,
-  excludeSaleItems: false, maxDiscountPercentOfProfit: 0,
+  isActive: true, isNewUserOnly: false, excludeSaleItems: false,
+  maxDiscountPercentOfProfit: 0,
   applicableCategories: [], applicableProducts: [], applicableBrands: [],
 };
 
@@ -88,20 +132,30 @@ function fmtDate(d) {
   if (!d) return '—';
   return new Date(d).toLocaleDateString('en-LK', { day: 'numeric', month: 'short', year: 'numeric' });
 }
-
-function isExpired(d) { return d && new Date(d) < new Date(); }
+function isExpired(d)  { return d && new Date(d) < new Date(); }
 function isUpcoming(d) { return d && new Date(d) > new Date(); }
 
+const StatusBadge = ({ c }) => {
+  if (!c.isActive)             return <span className="badge bg-gray-100 text-gray-500 text-xs">Inactive</span>;
+  if (isExpired(c.validUntil)) return <span className="badge bg-red-100 text-red-600 text-xs">Expired</span>;
+  if (isUpcoming(c.validFrom)) return <span className="badge bg-yellow-100 text-yellow-700 text-xs">Upcoming</span>;
+  return                              <span className="badge bg-green-100 text-green-700 text-xs font-bold">● Active</span>;
+};
+
+// ─── Main component ────────────────────────────────────────────────────────────
 export default function AdminCoupons() {
-  const [coupons, setCoupons]     = useState([]);
-  const [loading, setLoading]     = useState(true);
-  const [form, setForm]           = useState(null);   // null = list view, object = edit/create
-  const [saving, setSaving]       = useState(false);
-  const [deleting, setDeleting]   = useState(null);
-  const [filter, setFilter]       = useState('all');  // all | active | expired | inactive
-  const [search, setSearch]       = useState('');
-  const [categories, setCategories] = useState([]);   // flat list (parents + subcategories)
-  const [brandOptions, setBrandOptions] = useState([]); // distinct brand names across products
+  const [coupons, setCoupons]   = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [modal, setModal]       = useState(null); // null | 'add' | 'edit'
+  const [form, setForm]         = useState(EMPTY);
+  const [saving, setSaving]     = useState(false);
+  const [editId, setEditId]     = useState(null);
+  const [deleting, setDeleting] = useState(null);
+  const [filter, setFilter]     = useState('all');
+  const [search, setSearch]     = useState('');
+  const [brandOptions, setBrandOptions] = useState([]);
+
+  const upd = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -109,21 +163,13 @@ export default function AdminCoupons() {
       const { data } = await API.get('/coupons');
       setCoupons(data);
     } catch { toast.error('Failed to load coupons'); }
-    finally  { setLoading(false); }
+    finally { setLoading(false); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
-
-  // Load categories + brands once, used to populate the Applicability dropdowns
   useEffect(() => {
-    API.get('/categories/all').then(r => setCategories(r.data)).catch(() => {});
     API.get('/products/admin/brands').then(r => setBrandOptions(r.data)).catch(() => {});
   }, []);
-
-  // ── Category helpers (top-level vs subcategory, same convention as Products.js) ──
-  const parentCategories = categories.filter(c => !c.parent);
-  const subCategoriesOf  = (parentId) => categories.filter(c => (c.parent?._id || c.parent) === parentId);
-  const categoryById     = (id) => categories.find(c => c._id === id);
 
   // ── Derived list ──────────────────────────────────────────────────────────
   const filtered = coupons.filter(c => {
@@ -135,36 +181,67 @@ export default function AdminCoupons() {
     return true;
   });
 
-  // ── Save (create or update) ───────────────────────────────────────────────
+  const now = new Date();
+  const activeCount  = coupons.filter(c => c.isActive && !isExpired(c.validUntil)).length;
+  const expiredCount = coupons.filter(c => isExpired(c.validUntil)).length;
+
+  // ── Open forms ────────────────────────────────────────────────────────────
+  const openAdd = () => {
+    setForm({ ...EMPTY });
+    setEditId(null);
+    setModal('add');
+  };
+
+  const openEdit = async (c) => {
+    // Resolve product details for chips
+    let selectedProductDetails = [];
+    if (c.applicableProducts?.length > 0) {
+      try {
+        const { data } = await API.get(`/products/admin/lookup?ids=${c.applicableProducts.join(',')}`);
+        selectedProductDetails = (data.products || []).map(p => ({ _id: p._id, name: p.name, thumbnail: p.thumbnail, price: p.price, salePrice: p.salePrice }));
+      } catch {}
+    }
+    setForm({
+      ...EMPTY, ...c,
+      validFrom:  c.validFrom?.slice(0, 10),
+      validUntil: c.validUntil?.slice(0, 10),
+      applicableProducts: selectedProductDetails,  // use full objects for picker
+    });
+    setEditId(c._id);
+    setModal('edit');
+  };
+
+  // ── Save ──────────────────────────────────────────────────────────────────
   const handleSave = async () => {
-    if (!form.code.trim())    return toast.error('Code is required');
-    if (!form.value)          return toast.error('Discount value is required');
-    if (!form.validUntil)     return toast.error('Expiry date is required');
+    if (!form.code.trim())  return toast.error('Code is required');
+    if (!form.value)        return toast.error('Discount value is required');
+    if (!form.validUntil)   return toast.error('Expiry date is required');
 
     setSaving(true);
     try {
       const payload = {
         ...form,
-        code:                      form.code.toUpperCase().trim(),
-        value:                     Number(form.value),
-        minOrderAmount:            Number(form.minOrderAmount) || 0,
-        maxDiscount:               form.maxDiscount ? Number(form.maxDiscount) : undefined,
-        usageLimit:                form.usageLimit  ? Number(form.usageLimit)  : undefined,
-        userLimit:                 Number(form.userLimit) || 1,
-        maxDiscountPercentOfProfit:Number(form.maxDiscountPercentOfProfit) || 0,
-        applicableCategories:      form.applicableCategories || [],
-        applicableProducts:        form.applicableProducts || [],
-        applicableBrands:          form.applicableBrands || [],
+        code:                       form.code.toUpperCase().trim(),
+        value:                      Number(form.value),
+        minOrderAmount:             Number(form.minOrderAmount) || 0,
+        maxDiscount:                form.maxDiscount ? Number(form.maxDiscount) : undefined,
+        usageLimit:                 form.usageLimit  ? Number(form.usageLimit)  : undefined,
+        userLimit:                  Number(form.userLimit) || 1,
+        maxDiscountPercentOfProfit: Number(form.maxDiscountPercentOfProfit) || 0,
+        applicableCategories:       form.applicableCategories || [],
+        applicableBrands:           form.applicableBrands || [],
+        // strip full objects down to IDs for the API
+        applicableProducts:         (form.applicableProducts || []).map(p => (typeof p === 'object' ? p._id : p)),
       };
 
-      if (form._id) {
-        await API.put(`/coupons/${form._id}`, payload);
+      if (modal === 'edit' && editId) {
+        await API.put(`/coupons/${editId}`, payload);
         toast.success('Coupon updated ✓');
       } else {
         await API.post('/coupons', payload);
         toast.success('Coupon created ✓');
       }
-      setForm(null);
+      setModal(null);
       load();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Save failed');
@@ -180,7 +257,7 @@ export default function AdminCoupons() {
       toast.success('Deleted');
       load();
     } catch { toast.error('Delete failed'); }
-    finally  { setDeleting(null); }
+    finally { setDeleting(null); }
   };
 
   // ── Toggle active ─────────────────────────────────────────────────────────
@@ -191,282 +268,50 @@ export default function AdminCoupons() {
     } catch { toast.error('Update failed'); }
   };
 
-  // ── Status badge ──────────────────────────────────────────────────────────
-  const StatusBadge = ({ c }) => {
-    if (!c.isActive)              return <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">Inactive</span>;
-    if (isExpired(c.validUntil))  return <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600 font-medium">Expired</span>;
-    if (isUpcoming(c.validFrom))  return <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 font-medium">Upcoming</span>;
-    return                               <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">Active</span>;
-  };
-
   // ─────────────────────────────────────────────────────────────────────────
-  // FORM VIEW
-  // ─────────────────────────────────────────────────────────────────────────
-  if (form) return (
-    <div className="max-w-2xl mx-auto py-6 px-4">
-      {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
-        <button onClick={() => setForm(null)} className="text-gray-400 hover:text-gray-700 text-xl">←</button>
-        <div>
-          <h2 className="font-bold text-xl text-gray-900">{form._id ? 'Edit Coupon' : 'New Coupon'}</h2>
-          <p className="text-xs text-gray-400 mt-0.5">All discount rules enforced by the central Discount Engine</p>
-        </div>
-      </div>
-
-      <div className="space-y-5">
-
-        {/* ── Basic Info ─────────────────────────────────────── */}
-        <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
-          <h3 className="font-semibold text-gray-800 text-sm">Basic Info</h3>
-          <div className="grid sm:grid-cols-2 gap-4">
-            <F label="Coupon Code *">
-              <input
-                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-mono uppercase focus:outline-none focus:ring-2 focus:ring-blue-200"
-                value={form.code}
-                onChange={e => setForm(p => ({ ...p, code: e.target.value.toUpperCase() }))}
-                placeholder="SAVE20"
-              />
-            </F>
-            <F label="Status">
-              <select
-                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
-                value={form.isActive ? 'active' : 'inactive'}
-                onChange={e => setForm(p => ({ ...p, isActive: e.target.value === 'active' }))}
-              >
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
-            </F>
-          </div>
-          <F label="Description" value={form.description || ''} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} placeholder="e.g. 20% off sitewide for new customers" />
-          <div className="grid sm:grid-cols-2 gap-4">
-            <F label="Valid From" type="date" value={form.validFrom?.slice(0,10)} onChange={e => setForm(p => ({ ...p, validFrom: e.target.value }))} />
-            <F label="Valid Until *" type="date" value={form.validUntil?.slice(0,10)} onChange={e => setForm(p => ({ ...p, validUntil: e.target.value }))} />
-          </div>
-        </div>
-
-        {/* ── Discount Value ─────────────────────────────────── */}
-        <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
-          <h3 className="font-semibold text-gray-800 text-sm">Discount Value</h3>
-          <div className="grid sm:grid-cols-3 gap-4">
-            <F label="Type">
-              <select
-                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
-                value={form.type}
-                onChange={e => setForm(p => ({ ...p, type: e.target.value }))}
-              >
-                <option value="percentage">Percentage (%)</option>
-                <option value="fixed">Fixed Amount (Rs.)</option>
-              </select>
-            </F>
-            <F
-              label={form.type === 'percentage' ? 'Discount (%)' : 'Discount (Rs.)'}
-              type="number" min="0"
-              value={form.value}
-              onChange={e => setForm(p => ({ ...p, value: e.target.value }))}
-              placeholder={form.type === 'percentage' ? '20' : '500'}
-            />
-            {form.type === 'percentage' && (
-              <F
-                label="Max Discount Cap (Rs.)"
-                type="number" min="0"
-                value={form.maxDiscount || ''}
-                onChange={e => setForm(p => ({ ...p, maxDiscount: e.target.value }))}
-                hint="Leave blank for no cap"
-                placeholder="1000"
-              />
-            )}
-          </div>
-          <F
-            label="Minimum Order Amount (Rs.)"
-            type="number" min="0"
-            value={form.minOrderAmount || 0}
-            onChange={e => setForm(p => ({ ...p, minOrderAmount: e.target.value }))}
-            hint="Customer must spend at least this amount to use the coupon"
-          />
-        </div>
-
-        {/* ── Applicability (Category / Subcategory / Brand) ──── */}
-        <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
-          <div>
-            <h3 className="font-semibold text-gray-800 text-sm">Applicability</h3>
-            <p className="text-xs text-gray-400 mt-0.5">Restrict this coupon to specific categories, subcategories, or brands. Leave all empty to apply sitewide.</p>
-          </div>
-
-          <MultiSelectChips
-            label="Categories"
-            hint="Top-level categories this coupon applies to"
-            values={form.applicableCategories}
-            onChange={vals => setForm(p => ({ ...p, applicableCategories: vals }))}
-            options={parentCategories.map(c => ({ value: c._id, label: c.name }))}
-            placeholder="Select a category…"
-            getLabel={id => categoryById(id)?.name || 'Unknown'}
-          />
-
-          <MultiSelectChips
-            label="Subcategories"
-            hint={
-              form.applicableCategories?.some(id => subCategoriesOf(id).length > 0)
-                ? 'Narrow further to specific subcategories within the categories selected above'
-                : 'Select a category above to see its subcategories, or pick any subcategory directly'
-            }
-            values={form.applicableCategories}
-            onChange={vals => setForm(p => ({ ...p, applicableCategories: vals }))}
-            options={
-              (form.applicableCategories?.length
-                ? [...new Set(form.applicableCategories.flatMap(id => subCategoriesOf(id)))]
-                : categories.filter(c => c.parent)
-              ).map(c => ({ value: c._id, label: c.name }))
-            }
-            placeholder="Select a subcategory…"
-            getLabel={id => categoryById(id)?.name || 'Unknown'}
-          />
-
-          <MultiSelectChips
-            label="Brands"
-            hint="Limit this coupon to products from specific brands"
-            values={form.applicableBrands}
-            onChange={vals => setForm(p => ({ ...p, applicableBrands: vals }))}
-            options={brandOptions.map(b => ({ value: b, label: b }))}
-            placeholder="Select a brand…"
-            getLabel={b => b}
-          />
-        </div>
-
-        {/* ── Usage Limits ───────────────────────────────────── */}
-        <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
-          <h3 className="font-semibold text-gray-800 text-sm">Usage Limits</h3>
-          <div className="grid sm:grid-cols-2 gap-4">
-            <F
-              label="Total Usage Limit"
-              type="number" min="1"
-              value={form.usageLimit || ''}
-              onChange={e => setForm(p => ({ ...p, usageLimit: e.target.value }))}
-              hint="Max times this coupon can be used across all customers. Leave blank = unlimited."
-              placeholder="e.g. 100"
-            />
-            <F
-              label="Uses Per Customer"
-              type="number" min="1"
-              value={form.userLimit || 1}
-              onChange={e => setForm(p => ({ ...p, userLimit: Number(e.target.value) }))}
-              hint="Max times one customer (or guest email) can use this coupon"
-            />
-          </div>
-          {form._id && (
-            <div className="bg-blue-50 rounded-xl px-4 py-3 text-sm text-blue-700">
-              Used <strong>{form.usedCount || 0}</strong> time{(form.usedCount || 0) !== 1 ? 's' : ''} so far
-              {form.usageLimit ? ` out of ${form.usageLimit}` : ''}
-            </div>
-          )}
-          <Toggle
-            value={form.isNewUserOnly}
-            onChange={v => setForm(p => ({ ...p, isNewUserOnly: v }))}
-            label="New Customers Only"
-            hint="Blocks customers (by account or billing email) who have placed any prior order"
-          />
-        </div>
-
-        {/* ── Discount Rules (the new section) ──────────────── */}
-        <div className="bg-white rounded-2xl border border-blue-100 p-5 space-y-4">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-lg">🛡️</span>
-            <div>
-              <h3 className="font-semibold text-gray-800 text-sm">Discount Rules & Protection</h3>
-              <p className="text-xs text-gray-400">Control how this coupon interacts with other discounts and profit margins</p>
-            </div>
-          </div>
-
-          <Toggle
-            value={form.excludeSaleItems}
-            onChange={v => setForm(p => ({ ...p, excludeSaleItems: v }))}
-            label="Block on Sale Items"
-            hint="Prevents this coupon from being used when any item in the cart already has a sale price — stops discount stacking"
-          />
-
-          <div className="border-t border-gray-100 pt-4">
-            <F
-              label="Maximum Discount % of Profit Margin"
-              type="number" min="0" max="100"
-              value={form.maxDiscountPercentOfProfit || 0}
-              onChange={e => setForm(p => ({ ...p, maxDiscountPercentOfProfit: Number(e.target.value) }))}
-              hint="Caps the discount so it never eats more than this % of the order's total profit margin (requires costPrice on products). Set 0 to disable."
-              placeholder="0"
-            />
-            {Number(form.maxDiscountPercentOfProfit) > 0 && (
-              <div className="mt-2 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 text-xs text-amber-700">
-                ⚠️ Profit protection active — if the calculated discount exceeds {form.maxDiscountPercentOfProfit}% of the order margin, it will be automatically reduced. Requires <strong>Cost Price</strong> to be set on each product.
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* ── Discount Priority Info ─────────────────────────── */}
-        <div className="bg-gray-50 rounded-2xl border border-gray-100 p-5">
-          <h3 className="font-semibold text-gray-700 text-sm mb-3">ℹ️ How Discount Priority Works</h3>
-          <div className="space-y-2 text-xs text-gray-500">
-            <div className="flex items-start gap-2">
-              <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-xs">1</span>
-              <span><strong>Only the best benefit applies.</strong> If a customer has both a coupon and a gift card, the Discount Engine automatically picks whichever gives the larger saving. They do not stack.</span>
-            </div>
-            <div className="flex items-start gap-2">
-              <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-xs">2</span>
-              <span><strong>Gift cards act as payment, not discount.</strong> They apply after all coupon discounts are calculated and can cover delivery fees too.</span>
-            </div>
-            <div className="flex items-start gap-2">
-              <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-xs">3</span>
-              <span><strong>Only the highest product discount applies.</strong> If a product has both a sale price and is in a deal/campaign, only the lowest final price is used — never combined.</span>
-            </div>
-            <div className="flex items-start gap-2">
-              <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-xs">4</span>
-              <span><strong>Coupon is revalidated at order creation.</strong> A coupon passing the pre-check does not guarantee it will apply at checkout — usage limits and eligibility are rechecked server-side.</span>
-            </div>
-          </div>
-        </div>
-
-        {/* ── Actions ───────────────────────────────────────── */}
-        <div className="flex gap-3 justify-end pt-2">
-          <button onClick={() => setForm(null)} className="px-5 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50">
-            Cancel
-          </button>
-          <button onClick={handleSave} disabled={saving} className="px-6 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-60 flex items-center gap-2">
-            {saving && <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>}
-            {saving ? 'Saving…' : form._id ? '✓ Update Coupon' : '✓ Create Coupon'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // LIST VIEW
+  // RENDER
   // ─────────────────────────────────────────────────────────────────────────
   return (
-    <div className="max-w-5xl mx-auto py-6 px-4">
+    <div>
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>
-          <h2 className="font-bold text-2xl text-gray-900">Coupons</h2>
-          <p className="text-xs text-gray-400 mt-1">All pricing enforced by the central Discount Engine — no stacking, profit-protected</p>
+          <h2 className="font-display text-xl font-bold text-gray-900">Coupons</h2>
+          <p className="text-sm text-gray-500">Create and manage discount codes for your store</p>
         </div>
-        <button onClick={() => setForm({ ...EMPTY })} className="px-4 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700">
-          + New Coupon
-        </button>
+        <button onClick={openAdd} className="btn-primary text-sm">+ New Coupon</button>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-3 gap-3 mb-6">
+        {[
+          { label: 'Total',   value: coupons.length, icon: '🏷️', color: 'bg-blue-50 text-blue-700' },
+          { label: 'Active',  value: activeCount,    icon: '✅',  color: 'bg-green-50 text-green-700' },
+          { label: 'Expired', value: expiredCount,   icon: '⏰',  color: 'bg-red-50 text-red-600' },
+        ].map(s => (
+          <div key={s.label} className={`rounded-2xl p-4 ${s.color} flex items-center gap-3`}>
+            <span className="text-2xl">{s.icon}</span>
+            <div>
+              <p className="text-2xl font-black leading-none">{s.value}</p>
+              <p className="text-xs font-semibold mt-0.5 opacity-70">{s.label}</p>
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3 mb-5">
+      <div className="flex flex-wrap items-center gap-2 mb-5">
         <input
-          className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 w-48"
+          className="form-input text-sm w-48 min-h-0 py-2"
           placeholder="Search code or description…"
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
-        {['all','active','expired','inactive'].map(f => (
+        {['all', 'active', 'expired', 'inactive'].map(f => (
           <button
             key={f}
             onClick={() => setFilter(f)}
-            className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors capitalize ${filter === f ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            className={`text-xs px-3 py-1.5 rounded-lg font-semibold transition-colors capitalize ${filter === f ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
           >
             {f}
           </button>
@@ -474,77 +319,54 @@ export default function AdminCoupons() {
         <span className="text-xs text-gray-400 ml-auto">{filtered.length} coupon{filtered.length !== 1 ? 's' : ''}</span>
       </div>
 
-      {/* Discount Engine summary strip */}
-      <div className="grid sm:grid-cols-4 gap-3 mb-6">
-        {[
-          { icon:'🏷️', label:'Highest benefit wins', sub:'Coupon vs gift card — best saves more' },
-          { icon:'🚫', label:'No stacking', sub:'Only one customer benefit per order' },
-          { icon:'🛡️', label:'Profit protected', sub:'Discount capped by margin if set' },
-          { icon:'🔒', label:'Server revalidation', sub:'Coupon rechecked at order creation' },
-        ].map(({ icon, label, sub }) => (
-          <div key={label} className="bg-blue-50 rounded-xl p-3 border border-blue-100">
-            <div className="text-xl mb-1">{icon}</div>
-            <p className="text-xs font-semibold text-blue-800">{label}</p>
-            <p className="text-xs text-blue-500 mt-0.5">{sub}</p>
-          </div>
-        ))}
-      </div>
-
       {/* List */}
       {loading ? (
-        <div className="text-center py-16 text-gray-400">Loading…</div>
+        <div className="bg-white rounded-2xl border border-gray-100 p-12 text-center text-gray-400">Loading…</div>
       ) : filtered.length === 0 ? (
-        <div className="text-center py-16 text-gray-400">
-          <div className="text-5xl mb-3">🏷️</div>
-          <p className="font-semibold text-gray-600">No coupons found</p>
-          <p className="text-sm mt-1">Create your first coupon to get started</p>
+        <div className="bg-white rounded-2xl border border-gray-100 p-16 text-center">
+          <p className="text-5xl mb-4">🏷️</p>
+          <p className="text-lg font-bold text-gray-700 mb-1">No coupons found</p>
+          <p className="text-sm text-gray-400 mb-5">Create your first coupon to get started</p>
+          <button onClick={openAdd} className="btn-primary text-sm">+ New Coupon</button>
         </div>
       ) : (
         <div className="space-y-3">
           {filtered.map(c => (
             <div key={c._id} className="bg-white rounded-2xl border border-gray-100 p-4 flex flex-wrap gap-4 items-start">
-              {/* Code + badges */}
               <div className="flex-1 min-w-0">
                 <div className="flex flex-wrap items-center gap-2 mb-1">
                   <span className="font-mono font-bold text-gray-900 text-base tracking-wide">{c.code}</span>
                   <StatusBadge c={c} />
-                  {c.isNewUserOnly    && <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">New users</span>}
-                  {c.excludeSaleItems && <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 font-medium">No sale items</span>}
-                  {c.maxDiscountPercentOfProfit > 0 && <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 font-medium">Profit cap {c.maxDiscountPercentOfProfit}%</span>}
+                  {c.isNewUserOnly    && <span className="badge bg-purple-100 text-purple-700 text-xs">New users</span>}
+                  {c.excludeSaleItems && <span className="badge bg-orange-100 text-orange-700 text-xs">No sale items</span>}
+                  {c.maxDiscountPercentOfProfit > 0 && <span className="badge bg-yellow-100 text-yellow-700 text-xs">Profit cap {c.maxDiscountPercentOfProfit}%</span>}
                 </div>
                 {c.description && <p className="text-xs text-gray-500 mb-2">{c.description}</p>}
                 <div className="flex flex-wrap gap-3 text-xs text-gray-500">
                   <span>
                     {c.type === 'percentage'
                       ? `${c.value}% off${c.maxDiscount ? ` (max Rs. ${c.maxDiscount.toLocaleString()})` : ''}`
-                      : `Rs. ${c.value?.toLocaleString()} off`
-                    }
+                      : `Rs. ${c.value?.toLocaleString()} off`}
                   </span>
                   {c.minOrderAmount > 0 && <span>Min: Rs. {c.minOrderAmount.toLocaleString()}</span>}
-                  <span>Valid until {fmtDate(c.validUntil)}</span>
+                  <span>Until {fmtDate(c.validUntil)}</span>
                   <span>Used: {c.usedCount || 0}{c.usageLimit ? `/${c.usageLimit}` : ''}</span>
-                  <span>Per user: {c.userLimit || 1}×</span>
                 </div>
               </div>
-
-              {/* Actions */}
               <div className="flex items-center gap-2 flex-shrink-0">
                 <button
                   onClick={() => toggleActive(c)}
-                  className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${c.isActive ? 'bg-red-50 text-red-500 hover:bg-red-100' : 'bg-green-50 text-green-600 hover:bg-green-100'}`}
+                  className={`text-xs px-3 py-1.5 rounded-lg font-semibold transition-colors ${c.isActive ? 'bg-red-50 text-red-500 hover:bg-red-100' : 'bg-green-50 text-green-600 hover:bg-green-100'}`}
                 >
                   {c.isActive ? 'Disable' : 'Enable'}
                 </button>
-                <button
-                  onClick={() => setForm({ ...EMPTY, ...c, validFrom: c.validFrom?.slice(0,10), validUntil: c.validUntil?.slice(0,10) })}
-                  className="text-xs px-3 py-1.5 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 font-medium"
-                >
+                <button onClick={() => openEdit(c)} className="text-xs px-3 py-1.5 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 font-semibold">
                   Edit
                 </button>
                 <button
                   onClick={() => handleDelete(c._id)}
                   disabled={deleting === c._id}
-                  className="text-xs px-3 py-1.5 rounded-lg bg-gray-50 text-gray-400 hover:bg-red-50 hover:text-red-500 font-medium"
+                  className="text-xs px-3 py-1.5 rounded-lg bg-gray-50 text-gray-400 hover:bg-red-50 hover:text-red-500 font-semibold"
                 >
                   {deleting === c._id ? '…' : 'Delete'}
                 </button>
@@ -552,6 +374,199 @@ export default function AdminCoupons() {
             </div>
           ))}
         </div>
+      )}
+
+      {/* ── Create / Edit Modal ── */}
+      {modal && (
+        <Modal
+          title={modal === 'edit' ? '✏️ Edit Coupon' : '🏷️ New Coupon'}
+          subtitle="All discounts are enforced server-side at checkout"
+          onClose={() => setModal(null)}
+        >
+          <div className="space-y-5">
+
+            {/* ── Basic Info ───────────────────────────────────── */}
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label className="form-label">Coupon Code *</label>
+                <input
+                  className="form-input font-mono uppercase"
+                  value={form.code}
+                  onChange={e => upd('code', e.target.value.toUpperCase())}
+                  placeholder="SAVE20"
+                />
+              </div>
+              <div>
+                <label className="form-label">Status</label>
+                <select className="form-input" value={form.isActive ? 'active' : 'inactive'} onChange={e => upd('isActive', e.target.value === 'active')}>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="form-label">Description</label>
+              <input className="form-input" value={form.description || ''} onChange={e => upd('description', e.target.value)} placeholder="e.g. 20% off sitewide for new customers" />
+            </div>
+
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label className="form-label">Valid From *</label>
+                <input className="form-input" type="date" value={form.validFrom?.slice(0, 10)} onChange={e => upd('validFrom', e.target.value)} />
+              </div>
+              <div>
+                <label className="form-label">Valid Until *</label>
+                <input className="form-input" type="date" value={form.validUntil?.slice(0, 10)} onChange={e => upd('validUntil', e.target.value)} />
+                <div className="flex gap-2 mt-1.5">
+                  {[
+                    { label: '+7 days',  fn: () => { const d = new Date(); d.setDate(d.getDate() + 7);  upd('validUntil', d.toISOString().slice(0, 10)); } },
+                    { label: '+30 days', fn: () => { const d = new Date(); d.setDate(d.getDate() + 30); upd('validUntil', d.toISOString().slice(0, 10)); } },
+                    { label: '+90 days', fn: () => { const d = new Date(); d.setDate(d.getDate() + 90); upd('validUntil', d.toISOString().slice(0, 10)); } },
+                  ].map(btn => (
+                    <button key={btn.label} type="button" onClick={btn.fn} className="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">{btn.label}</button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* ── Discount Value ───────────────────────────────── */}
+            <div className="border-t border-gray-100 pt-5">
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">Discount</p>
+              <div className="grid sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="form-label">Type *</label>
+                  <select className="form-input" value={form.type} onChange={e => upd('type', e.target.value)}>
+                    <option value="percentage">Percentage (%)</option>
+                    <option value="fixed">Fixed Amount (Rs.)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">{form.type === 'percentage' ? 'Discount (%)' : 'Discount (Rs.)'} *</label>
+                  <input className="form-input" type="number" min="0" value={form.value} onChange={e => upd('value', e.target.value)} placeholder={form.type === 'percentage' ? '20' : '500'} />
+                </div>
+                {form.type === 'percentage' && (
+                  <div>
+                    <label className="form-label">Max Cap (Rs.)</label>
+                    <input className="form-input" type="number" min="0" value={form.maxDiscount || ''} onChange={e => upd('maxDiscount', e.target.value)} placeholder="No cap" />
+                  </div>
+                )}
+              </div>
+              <div className="mt-4">
+                <label className="form-label">Minimum Order (Rs.)</label>
+                <input className="form-input" type="number" min="0" value={form.minOrderAmount || 0} onChange={e => upd('minOrderAmount', e.target.value)} placeholder="0 = no minimum" />
+              </div>
+            </div>
+
+            {/* ── Usage Limits ─────────────────────────────────── */}
+            <div className="border-t border-gray-100 pt-5">
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">Usage Limits</p>
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="form-label">Total Usage Limit</label>
+                  <input className="form-input" type="number" min="1" value={form.usageLimit || ''} onChange={e => upd('usageLimit', e.target.value)} placeholder="Unlimited" />
+                  <p className="text-xs text-gray-400 mt-1">Max redemptions across all customers</p>
+                </div>
+                <div>
+                  <label className="form-label">Uses Per Customer</label>
+                  <input className="form-input" type="number" min="1" value={form.userLimit || 1} onChange={e => upd('userLimit', Number(e.target.value))} />
+                  <p className="text-xs text-gray-400 mt-1">Max times one customer can use this</p>
+                </div>
+              </div>
+              {editId && (
+                <div className="mt-3 bg-blue-50 rounded-xl px-4 py-3 text-sm text-blue-700">
+                  Used <strong>{form.usedCount || 0}</strong> time{(form.usedCount || 0) !== 1 ? 's' : ''} so far
+                  {form.usageLimit ? ` out of ${form.usageLimit}` : ''}
+                </div>
+              )}
+            </div>
+
+            {/* ── Eligibility ──────────────────────────────────── */}
+            <div className="border-t border-gray-100 pt-5">
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Eligibility</p>
+              <p className="text-xs text-gray-400 mb-3">Leave all blank for sitewide. Only matching items are discounted.</p>
+
+              <div className="space-y-4">
+                {/* Brand filter */}
+                <div>
+                  <label className="form-label">Brands</label>
+                  <div className="flex flex-wrap gap-2">
+                    {brandOptions.map(b => {
+                      const sel = (form.applicableBrands || []).includes(b);
+                      return (
+                        <button
+                          key={b}
+                          type="button"
+                          onClick={() => {
+                            const cur = form.applicableBrands || [];
+                            upd('applicableBrands', sel ? cur.filter(x => x !== b) : [...cur, b]);
+                          }}
+                          className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-colors ${sel ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-200 text-gray-600 hover:border-gray-300 bg-white'}`}
+                        >
+                          {b}
+                        </button>
+                      );
+                    })}
+                    {brandOptions.length === 0 && <p className="text-xs text-gray-400">No brands found</p>}
+                  </div>
+                </div>
+
+                {/* Product picker */}
+                <div>
+                  <label className="form-label">Specific Products</label>
+                  <ProductPicker
+                    selected={form.applicableProducts || []}
+                    onChange={v => upd('applicableProducts', v)}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* ── Rules & Restrictions ─────────────────────────── */}
+            <div className="border-t border-gray-100 pt-5">
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">Rules & Restrictions</p>
+              <div className="space-y-2">
+                <Toggle
+                  value={form.isNewUserOnly}
+                  onChange={v => upd('isNewUserOnly', v)}
+                  label="New Customers Only"
+                  hint="Blocks customers who have placed any prior order"
+                />
+                <Toggle
+                  value={form.excludeSaleItems}
+                  onChange={v => upd('excludeSaleItems', v)}
+                  label="Exclude Sale Items"
+                  hint="Prevents use when eligible cart items already have a sale price"
+                />
+              </div>
+              <div className="mt-4">
+                <label className="form-label">Max Discount % of Profit Margin</label>
+                <input
+                  className="form-input"
+                  type="number" min="0" max="100"
+                  value={form.maxDiscountPercentOfProfit || 0}
+                  onChange={e => upd('maxDiscountPercentOfProfit', Number(e.target.value))}
+                  placeholder="0 = disabled"
+                />
+                <p className="text-xs text-gray-400 mt-1">Caps the discount to X% of the order's profit margin. Requires Cost Price set on products. 0 = off.</p>
+                {Number(form.maxDiscountPercentOfProfit) > 0 && (
+                  <div className="mt-2 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 text-xs text-amber-700">
+                    ⚠️ Profit protection active — discount will be reduced if it exceeds {form.maxDiscountPercentOfProfit}% of the order margin.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ── Actions ──────────────────────────────────────── */}
+            <div className="flex gap-3 pt-2 border-t border-gray-100">
+              <button onClick={handleSave} disabled={saving} className="btn-primary flex-1">
+                {saving ? 'Saving…' : modal === 'edit' ? 'Save Changes' : 'Create Coupon'}
+              </button>
+              <button onClick={() => setModal(null)} className="btn-outline px-6">Cancel</button>
+            </div>
+
+          </div>
+        </Modal>
       )}
     </div>
   );

@@ -83,7 +83,7 @@ const AdminCustomers = (props) => {
   return <Suspense fallback={<PageLoader/>}><Mod {...props}/></Suspense>;
 };
 const AdminCoupons = (props) => {
-  const Mod = lazy(() => import('./pages/admin/Categories').then(m => ({ default: m.AdminCoupons })));
+  const Mod = lazy(() => import('./pages/admin/Coupons'));
   return <Suspense fallback={<PageLoader/>}><Mod {...props}/></Suspense>;
 };
 const AdminBanners = (props) => {

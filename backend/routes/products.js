@@ -606,6 +606,53 @@ router.get('/admin/brands', adminAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
+// Admin — cascading lookup for the Coupon eligibility picker.
+// Supports two modes:
+//   1. Filter mode: ?brand=X&category=Y&subCategory=Z
+//      → returns the narrowed lists of categories, subCategories, and matching products
+//   2. ID mode: ?ids=id1,id2,...
+//      → returns those specific products by _id (used to re-hydrate chips when editing a coupon)
+router.get('/admin/lookup', adminAuth, async (req, res) => {
+  try {
+    const { brand, category, subCategory, ids } = req.query;
+
+    // ── Mode 2: fetch by explicit IDs ──────────────────────────────────────
+    if (ids) {
+      const idList = ids.split(',').filter(Boolean);
+      const products = await Product.find({ _id: { $in: idList } })
+        .select('name price salePrice thumbnail brand category subCategory')
+        .lean();
+      return res.json({ products, categories: [], subCategories: [] });
+    }
+
+    // ── Mode 1: cascading filter ───────────────────────────────────────────
+    // Build the product filter incrementally
+    const productFilter = { isActive: true };
+    if (brand)       productFilter.brand       = brand;
+    if (category)    productFilter.category    = category;
+    if (subCategory) productFilter.subCategory = subCategory;
+
+    // Fetch matching products (capped at 200 for performance)
+    const products = await Product.find(productFilter)
+      .select('name price salePrice thumbnail brand category subCategory')
+      .limit(200)
+      .lean();
+
+    // Derive the narrowed category list from those products
+    const categoryIds = [...new Set(products.map(p => p.category?.toString()).filter(Boolean))];
+    const categories  = await Category.find({ _id: { $in: categoryIds } })
+      .select('name')
+      .lean();
+
+    // Derive the distinct subCategories from those products
+    const subCategories = [...new Set(products.map(p => p.subCategory).filter(Boolean))]
+      .sort()
+      .map(name => ({ _id: name, name })); // treat subCategory string as both id and name
+
+    res.json({ products, categories, subCategories });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
 router.get('/admin/all', adminAuth, async (req, res) => {
   try {
     const { search, category, page = 1, limit = 20 } = req.query;

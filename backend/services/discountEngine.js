@@ -238,32 +238,62 @@ async function validateCoupon(code, subtotal, opts = {}) {
     }
   }
 
-  // ── Scope restrictions — must match at least one dimension if any are set ─
+  // ── Scope restrictions — compute discount ONLY on eligible items ───────────
   const hasCat   = coupon.applicableCategories?.length > 0;
   const hasProd  = coupon.applicableProducts?.length  > 0;
   const hasBrand = coupon.applicableBrands?.length    > 0;
-  if (hasCat || hasProd || hasBrand) {
+  const hasScope = hasCat || hasProd || hasBrand;
+
+  // When the coupon is scoped, only the matching items' subtotal is discounted.
+  // Sitewide coupons (no scope) get the full order subtotal.
+  let eligibleSubtotal  = subtotal;
+  let eligibleLineItems = lineItems;
+
+  if (hasScope && lineItems.length > 0) {
+    const applicableCatIds  = (coupon.applicableCategories || []).map(c => c.toString());
+    const applicableProdIds = (coupon.applicableProducts   || []).map(p => p.toString());
+    const applicableBrands  = coupon.applicableBrands || [];
+
+    const eligibleItems = lineItems.filter(item => {
+      const itemCat   = item.category?.toString();
+      const itemProd  = item.product?.toString();
+      const itemBrand = item.brand;
+      const catMatch   = hasCat   && itemCat   && applicableCatIds.includes(itemCat);
+      const prodMatch  = hasProd  && itemProd  && applicableProdIds.includes(itemProd);
+      const brandMatch = hasBrand && itemBrand && applicableBrands.includes(itemBrand);
+      return catMatch || prodMatch || brandMatch;
+    });
+
+    if (eligibleItems.length === 0) {
+      return { error: 'This coupon is not applicable to your cart items' };
+    }
+
+    eligibleSubtotal  = eligibleItems.reduce((s, i) => s + i.subtotal, 0);
+    eligibleLineItems = eligibleItems;
+  } else if (hasScope) {
+    // lineItems not provided — fall back to coarse array-based check
     const catOk   = !hasCat   || categoryIds.some(id => coupon.applicableCategories.map(c => c.toString()).includes(id));
     const prodOk  = !hasProd  || productIds.some(id  => coupon.applicableProducts.map(p => p.toString()).includes(id));
     const brandOk = !hasBrand || brands.some(b        => coupon.applicableBrands.includes(b));
     if (!catOk && !prodOk && !brandOk) return { error: 'This coupon is not applicable to your cart items' };
+    // Without lineItems we cannot compute eligible subtotal precisely — full subtotal used as fallback
   }
 
   // ── Block on already-discounted products ────────────────────────────────
-  if (coupon.excludeSaleItems && lineItems.some(i => i.hasDiscount)) {
+  if (coupon.excludeSaleItems && eligibleLineItems.some(i => i.hasDiscount)) {
     return { error: 'This coupon cannot be applied to items that are already on sale' };
   }
 
   const discount = Math.round(
     coupon.type === 'percentage'
-      ? Math.min((subtotal * coupon.value) / 100, coupon.maxDiscount || Infinity)
-      : coupon.value
+      ? Math.min((eligibleSubtotal * coupon.value) / 100, coupon.maxDiscount || Infinity)
+      : Math.min(coupon.value, eligibleSubtotal)  // fixed discount can't exceed eligible subtotal
   );
 
   // ── Profit protection ────────────────────────────────────────────────────
   let finalDiscount = discount;
-  if (coupon.maxDiscountPercentOfProfit > 0 && lineItems.length > 0) {
-    const totalMargin = lineItems.reduce((sum, i) => {
+  if (coupon.maxDiscountPercentOfProfit > 0 && eligibleLineItems.length > 0) {
+    const totalMargin = eligibleLineItems.reduce((sum, i) => {
       if (i.costPrice == null || i.costPrice < 0) return sum;
       const margin = (i.price - i.costPrice) * i.quantity;
       return sum + Math.max(0, margin);
