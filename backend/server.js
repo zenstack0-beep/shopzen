@@ -138,6 +138,7 @@ app.use('/api/returns',       require('./routes/returns'));
 app.use('/api/gift-cards',    require('./routes/giftcards'));
 app.use('/api/seasonal',      require('./routes/seasonal'));
 app.use('/api/upload',        require('./routes/upload'));
+app.use('/api/scrape',        require('./routes/scrape'));
 app.use('/api/payments',      require('./routes/payments'));
 app.use('/api/delivery',      require('./routes/delivery'));
 app.use('/api/pages',         require('./routes/pages'));

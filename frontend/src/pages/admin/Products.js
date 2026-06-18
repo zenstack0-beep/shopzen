@@ -306,6 +306,13 @@ export default function AdminProducts() {
   const [loadingDescription, setLoadingDescription] = useState(false);
   const aiNameTimer = useRef(null);
 
+  // ── URL Import state ──────────────────────────────────────────────────────
+  const [urlImportValue, setUrlImportValue]         = useState('');
+  const [urlImporting, setUrlImporting]             = useState(false);
+  const [urlImportResult, setUrlImportResult]       = useState(null);
+  const [urlImportImages, setUrlImportImages]       = useState([]);
+  const [urlImportSelImages, setUrlImportSelImages] = useState([]);
+
   const updateForm = useCallback((updater) => {
     setForm(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
@@ -511,7 +518,57 @@ export default function AdminProducts() {
     setModal('edit'); setActiveTab('basic');
   };
 
-  const closeModal = () => { setModal(null); setTagSuggestions([]); shortDescManuallyEdited.current = false; };
+  const closeModal = () => {
+    setModal(null);
+    setTagSuggestions([]);
+    shortDescManuallyEdited.current = false;
+    setUrlImportValue('');
+    setUrlImportResult(null);
+    setUrlImportImages([]);
+    setUrlImportSelImages([]);
+  };
+
+  /* ── URL Import: fetch product data from URL ── */
+  const handleUrlImport = async () => {
+    if (!urlImportValue.trim()) { toast.error('Enter a product URL'); return; }
+    setUrlImporting(true);
+    setUrlImportResult(null);
+    setUrlImportImages([]);
+    setUrlImportSelImages([]);
+    try {
+      const { data } = await API.post('/scrape/product', { url: urlImportValue.trim() });
+      setUrlImportResult(data);
+      setUrlImportImages(data.images || []);
+      // Pre-select all images by default
+      setUrlImportSelImages(data.images || []);
+      toast.success('Product data fetched! Review and click "Apply to Form".');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not fetch product from that URL');
+    } finally {
+      setUrlImporting(false);
+    }
+  };
+
+  /* ── URL Import: apply scraped data into the product form ── */
+  const applyUrlImport = () => {
+    if (!urlImportResult) return;
+    const d = urlImportResult;
+    const selectedImages = urlImportSelImages;
+    updateForm(prev => ({
+      ...prev,
+      name:             d.name             || prev.name,
+      price:            d.price != null    ? String(d.price)     : prev.price,
+      salePrice:        d.salePrice != null ? String(d.salePrice) : prev.salePrice,
+      description:      d.description      || prev.description,
+      shortDescription: d.shortDescription || prev.shortDescription,
+      brand:            d.brand            || prev.brand,
+      sku:              d.sku              || prev.sku,
+      thumbnail:        selectedImages[0]  || prev.thumbnail,
+      images:           selectedImages.slice(1),
+    }));
+    toast.success('Fields filled from URL! Review them then save.');
+    setActiveTab('basic');
+  };
 
   /* ── Save ── */
   const handleSave = async () => {
@@ -787,6 +844,7 @@ export default function AdminProducts() {
   };
 
   const TABS = [
+    {id:'urlImport', label:'🔗 Import URL'},
     {id:'basic',    label:'📝 Basic Info'},
     {id:'images',   label:'🖼️ Images'},
     {id:'variants', label:'🎨 Variants'},
@@ -1284,6 +1342,164 @@ export default function AdminProducts() {
               </button>
             ))}
           </div>
+
+          {/* URL IMPORT */}
+          {activeTab==='urlImport' && (
+            <div className="space-y-5">
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                <h3 className="font-semibold text-blue-800 text-sm mb-1">🔗 Import Product from URL</h3>
+                <p className="text-xs text-blue-600">Paste a product page URL and we'll auto-fill the name, price, description, and images. You can review and edit everything before saving.</p>
+              </div>
+
+              {/* URL input */}
+              <div>
+                <label className="form-label">Product Page URL</label>
+                <div className="flex gap-2">
+                  <input
+                    value={urlImportValue}
+                    onChange={e => setUrlImportValue(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') handleUrlImport(); }}
+                    className="form-input flex-1"
+                    placeholder="https://example.com/products/some-product"
+                    disabled={urlImporting}
+                  />
+                  <button
+                    onClick={handleUrlImport}
+                    disabled={urlImporting || !urlImportValue.trim()}
+                    className="btn-primary px-5 flex-shrink-0 disabled:opacity-60"
+                  >
+                    {urlImporting ? (
+                      <span className="flex items-center gap-2">
+                        <span style={{display:'inline-block',width:12,height:12,border:'2px solid #fff',borderTopColor:'transparent',borderRadius:'50%',animation:'spin 0.7s linear infinite'}}></span>
+                        Fetching…
+                      </span>
+                    ) : '🔍 Fetch'}
+                  </button>
+                </div>
+                <p className="text-xs text-gray-400 mt-1">Works with most e-commerce sites (Shopify, WooCommerce, Daraz, etc.)</p>
+              </div>
+
+              {/* Results */}
+              {urlImportResult && (
+                <div className="space-y-4">
+                  <div className="border border-green-200 bg-green-50 rounded-xl p-4 space-y-3">
+                    <h4 className="font-semibold text-green-800 text-sm">✅ Data Extracted — Review before applying</h4>
+
+                    <div className="grid sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="form-label text-xs">Product Name</label>
+                        <input
+                          value={urlImportResult.name || ''}
+                          onChange={e => setUrlImportResult(r => ({ ...r, name: e.target.value }))}
+                          className="form-input text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="form-label text-xs">Brand</label>
+                        <input
+                          value={urlImportResult.brand || ''}
+                          onChange={e => setUrlImportResult(r => ({ ...r, brand: e.target.value }))}
+                          className="form-input text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="form-label text-xs">Price</label>
+                        <input
+                          type="number"
+                          value={urlImportResult.price || ''}
+                          onChange={e => setUrlImportResult(r => ({ ...r, price: e.target.value }))}
+                          className="form-input text-sm"
+                          placeholder="0.00"
+                        />
+                      </div>
+                      <div>
+                        <label className="form-label text-xs">Sale Price</label>
+                        <input
+                          type="number"
+                          value={urlImportResult.salePrice || ''}
+                          onChange={e => setUrlImportResult(r => ({ ...r, salePrice: e.target.value }))}
+                          className="form-input text-sm"
+                          placeholder="Optional"
+                        />
+                      </div>
+                      <div>
+                        <label className="form-label text-xs">SKU</label>
+                        <input
+                          value={urlImportResult.sku || ''}
+                          onChange={e => setUrlImportResult(r => ({ ...r, sku: e.target.value }))}
+                          className="form-input text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="form-label text-xs">Description</label>
+                      <textarea
+                        value={urlImportResult.description || ''}
+                        onChange={e => setUrlImportResult(r => ({ ...r, description: e.target.value }))}
+                        className="form-input text-sm"
+                        rows={4}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Image selection */}
+                  {urlImportImages.length > 0 && (
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="form-label mb-0">Select Images to Import ({urlImportSelImages.length} selected)</label>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => setUrlImportSelImages([...urlImportImages])}
+                            className="text-xs px-3 py-1 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-100"
+                          >Select All</button>
+                          <button
+                            onClick={() => setUrlImportSelImages([])}
+                            className="text-xs px-3 py-1 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-100"
+                          >None</button>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-64 overflow-y-auto p-1">
+                        {urlImportImages.map((img, idx) => {
+                          const selected = urlImportSelImages.includes(img);
+                          return (
+                            <div
+                              key={idx}
+                              onClick={() => setUrlImportSelImages(prev =>
+                                selected ? prev.filter(u => u !== img) : [...prev, img]
+                              )}
+                              className="relative cursor-pointer rounded-lg overflow-hidden border-2 transition-all"
+                              style={{ borderColor: selected ? 'var(--color-primary)' : '#e5e7eb', aspectRatio: '1' }}
+                            >
+                              <img
+                                src={img} alt={`img-${idx}`}
+                                className="w-full h-full object-cover"
+                                onError={e => { e.target.parentElement.style.display = 'none'; }}
+                              />
+                              {idx === 0 && selected && (
+                                <span className="absolute top-1 left-1 bg-blue-600 text-white text-xs px-1.5 py-0.5 rounded font-semibold">Main</span>
+                              )}
+                              {selected && (
+                                <span className="absolute top-1 right-1 bg-green-500 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center font-bold">✓</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <p className="text-xs text-gray-400 mt-1">First selected image becomes the thumbnail. The rest go to additional images.</p>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={applyUrlImport}
+                    className="btn-primary w-full"
+                  >
+                    ✅ Apply to Product Form
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* BASIC */}
           {activeTab==='basic' && (
