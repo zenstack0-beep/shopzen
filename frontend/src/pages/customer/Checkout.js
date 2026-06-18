@@ -550,7 +550,7 @@ export default function Checkout() {
     if (!couponCode.trim()) return;
     setCouponLoading(true);
     try {
-      const categoryIds = [...new Set(items.map(i => i.category?._id || i.category).filter(Boolean).map(String))];
+      const categoryIds = [...new Set(items.flatMap(i => [i.category?._id || i.category, i.subCategory?._id || i.subCategory]).filter(Boolean).map(String))];
       const productIds  = items.map(i => String(i._id));
       const brands      = [...new Set(items.map(i => i.brand).filter(Boolean))];
 

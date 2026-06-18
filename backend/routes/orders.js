@@ -586,7 +586,7 @@ router.post('/', orderRateLimiter, async (req, res) => {
 
     // ── 3. Resolve best customer benefit (coupon OR gift card) ────────────────
     //    Collect cart scope data for coupon eligibility checks
-    const categoryIds = [...new Set(orderItems.map(i => i.category?.toString()).filter(Boolean))];
+    const categoryIds = [...new Set(orderItems.flatMap(i => [i.category?.toString(), i.subCategory?.toString()]).filter(Boolean))];
     const productIds  = orderItems.map(i => i.product.toString());
     const brands      = [...new Set(orderItems.map(i => i.brand).filter(Boolean))];
 

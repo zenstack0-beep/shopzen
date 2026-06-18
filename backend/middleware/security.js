@@ -196,6 +196,13 @@ function xssClean(req, _res, next) {
 //               200 / 15 min is ≈ 13 req/min, comfortably above that.
 //               Bumping the window to 15 min (vs 1 min) avoids false positives
 //               from bursty page navigations.
+// DEV NOTE: localhost development re-renders, hot-reloads, and cascading
+//           admin pickers (e.g. the Coupon Eligibility picker) can easily
+//           fire more than 200 requests from one IP inside 15 minutes. This
+//           limiter is only meaningful against the public internet, so it's
+//           skipped entirely when NODE_ENV !== 'production' — production
+//           behaviour (200 req / 15 min per IP) is completely unchanged.
+const isProd = process.env.NODE_ENV === 'production';
 const globalLimiter = rateLimit({
   windowMs:          15 * 60 * 1000,  // 15 minutes
   max:               200,              // per IP per window
@@ -204,8 +211,9 @@ const globalLimiter = rateLimit({
   // SECURITY: Generic message — do not hint at whether the account exists.
   message: { message: 'Too many requests from this IP, please try again later.' },
   // SECURITY: Skip rate limiting for the health-check endpoint so monitoring
-  //           tools never get blocked by their own probes.
-  skip: (req) => req.path === '/api/health',
+  //           tools never get blocked by their own probes. Also skip
+  //           entirely outside production (see DEV NOTE above).
+  skip: (req) => !isProd || req.path === '/api/health',
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

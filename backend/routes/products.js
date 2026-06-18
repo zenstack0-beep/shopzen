@@ -597,7 +597,15 @@ router.post('/admin/import/excel', adminAuth, bulkUpload.single('file'), async (
   }
 });
 
-// Admin — get all products
+// Admin — distinct list of brands across all products (used by the Coupon
+// "Applicable Brands" dropdown). Returns a clean, sorted, de-duplicated list.
+router.get('/admin/brands', adminAuth, async (req, res) => {
+  try {
+    const brands = await Product.distinct('brand', { brand: { $nin: [null, ''] } });
+    res.json(brands.filter(Boolean).sort((a, b) => a.localeCompare(b)));
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
 router.get('/admin/all', adminAuth, async (req, res) => {
   try {
     const { search, category, page = 1, limit = 20 } = req.query;

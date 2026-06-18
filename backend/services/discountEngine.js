@@ -74,6 +74,7 @@ function buildLineItem(product, quantity) {
     name:          product.name,
     image:         product.thumbnail,
     category:      product.category,
+    subCategory:   product.subCategory,
     brand:         product.brand,
     price,
     originalPrice: product.price,          // kept for display / analytics

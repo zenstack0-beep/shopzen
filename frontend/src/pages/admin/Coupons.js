@@ -28,6 +28,51 @@ const Toggle = ({ value, onChange, label, hint }) => (
   </div>
 );
 
+// ─── Multi-select dropdown with removable chips ────────────────────────────────
+// Renders a <select> that adds the chosen option to `values` on change, plus
+// chips below showing current selections (each removable). Used for the
+// coupon "Applicable Categories / Subcategories / Brands" pickers — all of
+// which are arrays on the Coupon schema.
+const MultiSelectChips = ({ label, hint, values, onChange, options, placeholder, getLabel }) => {
+  const selected = values || [];
+  const available = options.filter(o => !selected.includes(o.value));
+
+  return (
+    <div>
+      <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
+      <select
+        className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 bg-white disabled:bg-gray-50 disabled:text-gray-400"
+        value=""
+        disabled={available.length === 0}
+        onChange={e => {
+          if (!e.target.value) return;
+          onChange([...selected, e.target.value]);
+        }}
+      >
+        <option value="">{available.length === 0 ? 'All selected' : (placeholder || 'Select…')}</option>
+        {available.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+      {hint && <p className="text-xs text-gray-400 mt-1">{hint}</p>}
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mt-2">
+          {selected.map(v => (
+            <span key={v} className="inline-flex items-center gap-1 text-xs bg-blue-50 text-blue-700 font-medium px-2.5 py-1 rounded-full">
+              {getLabel(v)}
+              <button
+                type="button"
+                onClick={() => onChange(selected.filter(s => s !== v))}
+                className="text-blue-400 hover:text-blue-700 leading-none"
+              >
+                ✕
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ─── Empty blank slate ─────────────────────────────────────────────────────────
 const EMPTY = {
   code: '', description: '', type: 'percentage', value: '',
@@ -55,6 +100,8 @@ export default function AdminCoupons() {
   const [deleting, setDeleting]   = useState(null);
   const [filter, setFilter]       = useState('all');  // all | active | expired | inactive
   const [search, setSearch]       = useState('');
+  const [categories, setCategories] = useState([]);   // flat list (parents + subcategories)
+  const [brandOptions, setBrandOptions] = useState([]); // distinct brand names across products
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -66,6 +113,17 @@ export default function AdminCoupons() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Load categories + brands once, used to populate the Applicability dropdowns
+  useEffect(() => {
+    API.get('/categories/all').then(r => setCategories(r.data)).catch(() => {});
+    API.get('/products/admin/brands').then(r => setBrandOptions(r.data)).catch(() => {});
+  }, []);
+
+  // ── Category helpers (top-level vs subcategory, same convention as Products.js) ──
+  const parentCategories = categories.filter(c => !c.parent);
+  const subCategoriesOf  = (parentId) => categories.filter(c => (c.parent?._id || c.parent) === parentId);
+  const categoryById     = (id) => categories.find(c => c._id === id);
 
   // ── Derived list ──────────────────────────────────────────────────────────
   const filtered = coupons.filter(c => {
@@ -94,6 +152,9 @@ export default function AdminCoupons() {
         usageLimit:                form.usageLimit  ? Number(form.usageLimit)  : undefined,
         userLimit:                 Number(form.userLimit) || 1,
         maxDiscountPercentOfProfit:Number(form.maxDiscountPercentOfProfit) || 0,
+        applicableCategories:      form.applicableCategories || [],
+        applicableProducts:        form.applicableProducts || [],
+        applicableBrands:          form.applicableBrands || [],
       };
 
       if (form._id) {
@@ -222,6 +283,53 @@ export default function AdminCoupons() {
             value={form.minOrderAmount || 0}
             onChange={e => setForm(p => ({ ...p, minOrderAmount: e.target.value }))}
             hint="Customer must spend at least this amount to use the coupon"
+          />
+        </div>
+
+        {/* ── Applicability (Category / Subcategory / Brand) ──── */}
+        <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
+          <div>
+            <h3 className="font-semibold text-gray-800 text-sm">Applicability</h3>
+            <p className="text-xs text-gray-400 mt-0.5">Restrict this coupon to specific categories, subcategories, or brands. Leave all empty to apply sitewide.</p>
+          </div>
+
+          <MultiSelectChips
+            label="Categories"
+            hint="Top-level categories this coupon applies to"
+            values={form.applicableCategories}
+            onChange={vals => setForm(p => ({ ...p, applicableCategories: vals }))}
+            options={parentCategories.map(c => ({ value: c._id, label: c.name }))}
+            placeholder="Select a category…"
+            getLabel={id => categoryById(id)?.name || 'Unknown'}
+          />
+
+          <MultiSelectChips
+            label="Subcategories"
+            hint={
+              form.applicableCategories?.some(id => subCategoriesOf(id).length > 0)
+                ? 'Narrow further to specific subcategories within the categories selected above'
+                : 'Select a category above to see its subcategories, or pick any subcategory directly'
+            }
+            values={form.applicableCategories}
+            onChange={vals => setForm(p => ({ ...p, applicableCategories: vals }))}
+            options={
+              (form.applicableCategories?.length
+                ? [...new Set(form.applicableCategories.flatMap(id => subCategoriesOf(id)))]
+                : categories.filter(c => c.parent)
+              ).map(c => ({ value: c._id, label: c.name }))
+            }
+            placeholder="Select a subcategory…"
+            getLabel={id => categoryById(id)?.name || 'Unknown'}
+          />
+
+          <MultiSelectChips
+            label="Brands"
+            hint="Limit this coupon to products from specific brands"
+            values={form.applicableBrands}
+            onChange={vals => setForm(p => ({ ...p, applicableBrands: vals }))}
+            options={brandOptions.map(b => ({ value: b, label: b }))}
+            placeholder="Select a brand…"
+            getLabel={b => b}
           />
         </div>
 
