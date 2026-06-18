@@ -30,7 +30,47 @@ function setLink(rel, href) {
   el.setAttribute('href', href);
 }
 
-function setJsonLd(id, data) {
+/**
+ * Checks whether the initial SSR HTML already contains a <script type="application/ld+json">
+ * block for the given schema @type AND that block does NOT have one of our
+ * client-side IDs (meaning it is a static SSR-rendered block, not one we wrote).
+ * If an SSR block exists, we must NOT inject a duplicate — we only manage our
+ * own id-tagged scripts.
+ */
+function ssrSchemaExists(schemaType) {
+  const scripts = document.querySelectorAll('script[type="application/ld+json"]');
+  for (const s of scripts) {
+    // Skip scripts we own (they have an id we set)
+    if (s.id && s.id.startsWith('ld-')) continue;
+    try {
+      const data = JSON.parse(s.textContent);
+      // Handle top-level @type match
+      if (data['@type'] === schemaType) return true;
+      // Handle @graph array (e.g. WebSite embeds Organization inside publisher)
+      if (Array.isArray(data['@graph'])) {
+        if (data['@graph'].some(node => node['@type'] === schemaType)) return true;
+      }
+    } catch {
+      // malformed JSON-LD — skip
+    }
+  }
+  return false;
+}
+
+/**
+ * Sets or updates a JSON-LD <script> block identified by `id`.
+ * If the same @type is already present in an SSR (non-id-tagged) script, the
+ * call is silently skipped to prevent duplicate structured data.
+ * For dynamic schemas (Product, BreadcrumbList) that are never in SSR HTML,
+ * `bypassSsrCheck` can be set true to skip the SSR guard entirely.
+ */
+function setJsonLd(id, data, { bypassSsrCheck = false } = {}) {
+  if (!bypassSsrCheck && data['@type'] && ssrSchemaExists(data['@type'])) {
+    // SSR already has this schema type — do not create a duplicate.
+    // Also clean up any previously injected client-side copy (e.g. on re-mount).
+    removeJsonLd(id);
+    return;
+  }
   let el = document.getElementById(id);
   if (!el) {
     el = document.createElement('script');
@@ -275,6 +315,7 @@ export default function useSEO({
     if (twitterHandle) setMeta('twitter:site', twitterHandle);
 
     // JSON-LD: WebSite
+    // Guarded: skipped if index.html already contains a static WebSite block.
     setJsonLd('ld-website', {
       '@context': 'https://schema.org',
       '@type': 'WebSite',
@@ -290,6 +331,7 @@ export default function useSEO({
     // JSON-LD: Organization — always emit so Google can show the logo next to
     // the site name in search results. `cfg.logoUrl` must be set in admin
     // Settings (stored in DB as storeLogoUrl, exposed via window.__SHOPZEN_SEO__).
+    // Guarded: skipped if index.html already contains a static Organization block.
     {
       const sameAs = [
         cfg.facebookUrl, cfg.instagramUrl, cfg.twitterUrl,
@@ -317,6 +359,7 @@ export default function useSEO({
     }
 
     // JSON-LD: Product (full Google Rich Results schema)
+    // Product schema is always dynamic (never in SSR HTML), so bypassSsrCheck is true.
     if (product) {
       const price = product.salePrice || product.price;
       const availability = product.stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock';
@@ -414,12 +457,13 @@ export default function useSEO({
         });
       }
 
-      setJsonLd('ld-product', productSchema);
+      setJsonLd('ld-product', productSchema, { bypassSsrCheck: true });
     } else {
       removeJsonLd('ld-product');
     }
 
     // JSON-LD: BreadcrumbList
+    // BreadcrumbList is always dynamic (never in SSR HTML), so bypassSsrCheck is true.
     if (breadcrumbs?.length) {
       setJsonLd('ld-breadcrumb', {
         '@context': 'https://schema.org',
@@ -433,7 +477,7 @@ export default function useSEO({
             item: b.url.startsWith('http') ? b.url : `${siteUrl}${b.url}`,
           })),
         ],
-      });
+      }, { bypassSsrCheck: true });
     } else {
       removeJsonLd('ld-breadcrumb');
     }
