@@ -288,13 +288,97 @@ function resolveUrl(base, src) {
   try { return new URL(src, base).href; } catch { return null; }
 }
 
-/** Check if a URL looks like a real product image (skip tiny icons/gifs/svg) */
+/**
+ * Strict product-image URL filter.
+ *
+ * Rejects:
+ *  • Non-image file formats (svg, gif, ico, webp used for UI, fonts)
+ *  • Common noise patterns: sprites, icons, logos, banners, avatars,
+ *    payment/social logos, category tiles, brand badges, review stars,
+ *    placeholders, tracking pixels, lazy-load blanks
+ *  • Thumbnail variants that sites append to URLs:
+ *      _50x50, _100x100, _thumb, _small, _xs, _mini, /thumb/, /50/
+ *      Shopify: _50x, _100x, _160x, _240x, _360x (keep _480x and above)
+ *    These are recognisable copies of the original at reduced resolution.
+ *  • Data URIs (base64 inline images are never real product photos)
+ *  • Query-string-only image proxies with suspicious keys (w=50, s=50, etc.)
+ */
 function looksLikeProductImage(url) {
   if (!url) return false;
+  if (url.startsWith('data:')) return false;
+
   const lower = url.toLowerCase();
-  if (/\.(svg|gif|ico|webfont|font)/.test(lower)) return false;
-  if (/sprite|icon|logo|placeholder|blank|pixel|tracking|beacon/.test(lower)) return false;
+
+  // ── Format rejects ──────────────────────────────────────────────────────────
+  if (/\.(svg|gif|ico|webfont|woff2?|ttf|eot)(\?|$)/.test(lower)) return false;
+
+  // ── Noise path/filename patterns ────────────────────────────────────────────
+  const NOISE = [
+    'sprite', 'icon', 'logo', 'banner', 'avatar', 'profile',
+    'placeholder', 'blank', 'pixel', 'tracking', 'beacon',
+    'payment', 'visa', 'mastercard', 'paypal', 'stripe',
+    'facebook', 'twitter', 'instagram', 'whatsapp', 'youtube',
+    'star-', 'rating', 'badge', 'ribbon', 'tag-',
+    'category-tile', 'brand-logo', 'brand_logo',
+    'footer', 'header', 'nav-', 'menu-', 'sidebar',
+    'no-image', 'noimage', 'default-', 'generic-',
+    'lazy-placeholder', 'lazyload', 'lp-placeholder',
+  ];
+  if (NOISE.some(n => lower.includes(n))) return false;
+
+  // ── Thumbnail-size variants in URL path ─────────────────────────────────────
+  // Shopify: _50x.jpg  _100x.jpg  _160x.jpg  _240x.jpg  _360x.jpg
+  //          (keep _480x, _600x, _1024x, _2048x — those are full size)
+  if (/_(?:[1-9]\d|[1-3]\d{2})x(?:_crop_\w+)?\.(?:jpe?g|png|webp)/.test(lower)) {
+    // Only reject if the dimension is below 400
+    const m = lower.match(/_(\d+)x/);
+    if (m && parseInt(m[1], 10) < 400) return false;
+  }
+
+  // WooCommerce / generic: -150x150  -300x200  -100x100  etc.
+  if (/-\d{2,3}x\d{2,3}\.(?:jpe?g|png|webp)/.test(lower)) return false;
+
+  // Path segments like /50/ /100/ /thumb/ /small/ /xs/ /mini/ /tiny/
+  if (/\/(?:thumb|small|xs|mini|tiny|50|100|75|80)\//.test(lower)) return false;
+
+  // Query params: w=50&h=50, s=100, size=50
+  try {
+    const qs = new URL(url).search;
+    if (qs) {
+      const params = new URLSearchParams(qs);
+      const w = parseInt(params.get('w') || params.get('width') || '9999', 10);
+      const h = parseInt(params.get('h') || params.get('height') || '9999', 10);
+      const s = parseInt(params.get('s') || params.get('size') || '9999', 10);
+      if (Math.min(w, h, s) < 300) return false;
+    }
+  } catch { /* malformed URL — let it pass */ }
+
   return true;
+}
+
+/**
+ * Score an image URL — higher = more likely to be the main product image.
+ * Used to sort candidates before capping at MAX_IMAGES.
+ */
+function scoreImage(url) {
+  const lower = url.toLowerCase();
+  let score = 0;
+
+  // Cloudinary / CDN transforms that hint at large size
+  if (/w_[4-9]\d{2,}|w_[1-9]\d{3,}/.test(lower)) score += 3;    // w_400+
+  if (/\/large\/|\/full\/|\/original\/|\/zoom\//.test(lower)) score += 3;
+  if (/_(?:large|full|main|zoom|hero|primary)/.test(lower)) score += 2;
+
+  // Shopify large variants
+  if (/_(?:480|600|800|1024|2048)x/.test(lower)) score += 3;
+
+  // Likely a primary gallery image
+  if (/product.image|gallery.image|main.image|featured.image/i.test(lower)) score += 2;
+
+  // URL contains dimension hints suggesting a big image
+  if (/[_-](?:800|1000|1200|1500|2000)[_x-]/.test(lower)) score += 2;
+
+  return score;
 }
 
 /** Deduplicate while preserving order */
