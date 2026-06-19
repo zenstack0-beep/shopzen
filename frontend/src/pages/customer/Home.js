@@ -675,7 +675,11 @@ export default function Home() {
   // Sync sectionOrder from ThemeContext settings (no extra API call needed)
   useEffect(() => {
     if (!settings) return;
-    const layout = settings.homepage_layout;
+    // LayoutEditor saves to settings.layout_builder.homepage (object keyed by page id)
+    const layoutBuilder = settings.layout_builder;
+    const layout = (layoutBuilder && typeof layoutBuilder === 'object')
+      ? layoutBuilder.homepage
+      : null;
     if (Array.isArray(layout)) {
       setSectionOrder([...layout].sort((a,b)=>a.order-b.order));
     }
