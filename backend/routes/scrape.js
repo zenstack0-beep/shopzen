@@ -45,7 +45,7 @@ const axios      = require('axios');
 const https      = require('https');
 const { URL }    = require('url');
 const { adminAuth } = require('../middleware/auth');
-const { generateProductDescription, generateProductSpecs, generateBrand } = require('./ai');
+const { generateProductDescription, generateProductSpecs, generateBrand, generateShortDescription } = require('./ai');
 
 // ─── Cloudinary (optional) ────────────────────────────────────────────────────
 // FIX (production): scrape.js must configure Cloudinary itself — it cannot rely
@@ -567,6 +567,21 @@ router.post('/product', adminAuth, async (req, res) => {
       console.warn('[Scraper] AI description generation skipped:', aiErr.message);
     }
 
+    // Generate AI short description if scraper didn't find one. Non-fatal.
+    let aiShortDescription = scraped.shortDescription || '';
+    if (!aiShortDescription) {
+      try {
+        aiShortDescription = await generateShortDescription({
+          name:      scraped.name    || '',
+          brand:     scraped.brand   || '',
+          price:     scraped.price   || '',
+          salePrice: scraped.salePrice || '',
+        });
+      } catch (aiErr) {
+        console.warn('[Scraper] AI short description generation skipped:', aiErr.message);
+      }
+    }
+
     // Generate AI specifications table. Non-fatal — returns [] if AI unavailable.
     let aiSpecs = [];
     try {
@@ -587,7 +602,7 @@ router.post('/product', adminAuth, async (req, res) => {
       price:            scraped.price            || '',
       salePrice:        scraped.salePrice        || '',
       description:      aiDescription,
-      shortDescription: scraped.shortDescription || '',
+      shortDescription: aiShortDescription,
       brand:            scraped.brand            || '',
       sku:              scraped.sku              || '',
       images:           finalImages,
@@ -737,6 +752,21 @@ router.post('/bulk', adminAuth, async (req, res) => {
         console.warn('[Bulk Scraper] AI description skipped:', aiErr.message);
       }
 
+      // Generate AI short description if scraper didn't find one. Non-fatal.
+      let aiShortDescription = scraped.shortDescription || '';
+      if (!aiShortDescription) {
+        try {
+          aiShortDescription = await generateShortDescription({
+            name:      scraped.name      || '',
+            brand:     scraped.brand     || '',
+            price:     scraped.price     || '',
+            salePrice: scraped.salePrice || '',
+          });
+        } catch (aiErr) {
+          console.warn('[Bulk Scraper] AI short description skipped:', aiErr.message);
+        }
+      }
+
       // Generate AI specifications table before saving.
       // Non-fatal: saves with empty specs array if AI unavailable.
       let aiSpecs = [];
@@ -783,7 +813,7 @@ router.post('/bulk', adminAuth, async (req, res) => {
             name,
             slug,
             description:      aiDescription              || name,
-            shortDescription: scraped.shortDescription || '',
+            shortDescription: aiShortDescription         || '',
             price:            scraped.price            || 0,
             salePrice:        scraped.salePrice        || undefined,
             brand:            resolvedBrand,

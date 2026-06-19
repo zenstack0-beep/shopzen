@@ -574,7 +574,67 @@ async function generateBrand(name = '') {
   }
 }
 
+/* ── generateShortDescription — exported helper for scrape.js ────────────────
+ * Generates a 110-155 char SEO-optimised short description using the same
+ * prompt rules as the /api/ai/autofill endpoint.
+ * Returns a string (empty string if AI unavailable).
+ * ─────────────────────────────────────────────────────────────────────────── */
+async function generateShortDescription({ name = '', brand = '', category = '', price = '', salePrice = '' } = {}) {
+  if (!name || name.trim().length < 3) return '';
+  try {
+    const ctxLines = [
+      brand    && `Brand: ${brand}`,
+      category && `Category: ${category}`,
+      price    && `Price: Rs.${price}${salePrice ? ` (sale Rs.${salePrice})` : ''}`,
+    ].filter(Boolean).join('\n');
+
+    const systemMsg = 'You are an expert e-commerce SEO copywriter for a Sri Lankan online store. You output ONLY valid JSON. No markdown. No explanation.';
+
+    const userMsg = [
+      `Generate autofill fields for this product on shopzen.lk (Sri Lanka e-commerce).`,
+      ``,
+      `Product name: "${name.trim()}"`,
+      ctxLines ? `Context:\n${ctxLines}` : '',
+      ``,
+      `Reply ONLY with this JSON, nothing else:`,
+      `{"brand":"BRAND_HERE","shortDescription":"DESC_HERE"}`,
+      ``,
+      `BRAND_HERE rules:`,
+      `- The manufacturer/brand name (extract from product name or context)`,
+      `- Empty string "" if genuinely unknown`,
+      ``,
+      `DESC_HERE rules — this appears directly in Google search results:`,
+      `- Length: 110-155 characters EXACTLY`,
+      `- Open with the key feature or benefit — NOT the product name`,
+      `- Include ONE buying-intent phrase: "buy online in Sri Lanka", "best price in Sri Lanka", or "fast delivery across Sri Lanka"`,
+      `- Mention a real spec or use-case that differentiates this product`,
+      `- End with: "Fast delivery across Sri Lanka." or "Order now at ShopZen."`,
+      `- Plain English only — no markdown, no asterisks, no ALL CAPS, no emoji`,
+      `- Do NOT open with the brand name or product name`,
+      `- Do NOT use vague filler like "high quality", "perfect for everyone"`,
+      ``,
+      `GOOD example for "Sony XV800 X-Series Wireless Party Speaker":`,
+      `"Powerful 360-degree party sound with built-in mic input, LED lighting and IPX4 splash-proof body. Buy the Sony XV800 online with fast delivery across Sri Lanka."`,
+      ``,
+      `BAD example (too short, generic, no Sri Lanka signal):`,
+      `"Wireless party speaker with great sound quality."`,
+    ].filter(s => s !== undefined).join('\n');
+
+    const raw    = await callAI(systemMsg, userMsg, 500);
+    const parsed = extractJSON(raw, 'object');
+    const sd     = (parsed.shortDescription || '').trim();
+    if (sd.length < 50) {
+      console.warn('[AI generateShortDescription] too short (' + sd.length + ' chars):', sd);
+    }
+    return sd;
+  } catch (err) {
+    console.warn('[AI generateShortDescription] skipped:', err.message);
+    return '';
+  }
+}
+
 module.exports = router;
 module.exports.generateProductDescription = generateProductDescription;
 module.exports.generateProductSpecs       = generateProductSpecs;
+module.exports.generateShortDescription   = generateShortDescription;
 module.exports.generateBrand              = generateBrand;
