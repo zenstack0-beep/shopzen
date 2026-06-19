@@ -45,6 +45,7 @@ const axios      = require('axios');
 const https      = require('https');
 const { URL }    = require('url');
 const { adminAuth } = require('../middleware/auth');
+const { generateProductDescription, generateProductSpecs, generateBrand } = require('./ai');
 
 // ─── Cloudinary (optional) ────────────────────────────────────────────────────
 // FIX (production): scrape.js must configure Cloudinary itself — it cannot rely
@@ -550,15 +551,47 @@ router.post('/product', adminAuth, async (req, res) => {
       // If Cloudinary is not configured, finalImages stays as scraped.imageUrls
     }
 
+    // Generate AI-formatted description in the background.
+    // Non-fatal: if AI is unavailable we fall back to the scraped description.
+    let aiDescription = scraped.description || '';
+    try {
+      aiDescription = await generateProductDescription({
+        name:             scraped.name        || '',
+        brand:            scraped.brand       || '',
+        sku:              scraped.sku         || '',
+        price:            scraped.price       || '',
+        salePrice:        scraped.salePrice   || '',
+        shortDescription: scraped.shortDescription || '',
+      });
+    } catch (aiErr) {
+      console.warn('[Scraper] AI description generation skipped:', aiErr.message);
+    }
+
+    // Generate AI specifications table. Non-fatal — returns [] if AI unavailable.
+    let aiSpecs = [];
+    try {
+      aiSpecs = await generateProductSpecs({
+        name:        scraped.name        || '',
+        brand:       scraped.brand       || '',
+        sku:         scraped.sku         || '',
+        price:       scraped.price       || '',
+        salePrice:   scraped.salePrice   || '',
+        description: aiDescription,
+      });
+    } catch (aiErr) {
+      console.warn('[Scraper] AI specs generation skipped:', aiErr.message);
+    }
+
     return res.json({
       name:             scraped.name             || '',
       price:            scraped.price            || '',
       salePrice:        scraped.salePrice        || '',
-      description:      scraped.description      || '',
+      description:      aiDescription,
       shortDescription: scraped.shortDescription || '',
       brand:            scraped.brand            || '',
       sku:              scraped.sku              || '',
       images:           finalImages,
+      specifications:   aiSpecs,
     });
 
   } catch (err) {
@@ -582,6 +615,230 @@ router.post('/product', adminAuth, async (req, res) => {
 
     return res.status(500).json({ message: 'Scraping failed: ' + err.message });
   }
+});
+
+// ─── Bulk URL Import ───────────────────────────────────────────────────────────
+/**
+ * POST /api/scrape/bulk
+ * Body: { urls: string[], categoryId: string, uploadImages?: boolean }
+ *
+ * Processes URLs one-by-one (sequential, not parallel — avoids hammering sites
+ * and Railway memory limits).  Streams progress via Server-Sent Events so the
+ * admin can watch live.
+ *
+ * Each successfully scraped product is saved to MongoDB as a DRAFT
+ * (isActive: false) so the admin can review/edit before publishing.
+ *
+ * Response: SSE stream
+ *   data: { type:'progress', index, total, url, status:'scraping'|'saving'|'done'|'error', message?, product? }
+ *   data: { type:'complete', saved, failed, errors }
+ */
+router.post('/bulk', adminAuth, async (req, res) => {
+  const { urls: rawUrls = [], categoryId, uploadImages = true, ratePerMinute = 10 } = req.body;
+  // Clamp rate to 1–60 per minute; convert to milliseconds between requests
+  const clampedRate  = Math.min(60, Math.max(1, Number(ratePerMinute) || 10));
+  const intervalMs   = Math.floor(60000 / clampedRate);
+
+  if (!Array.isArray(rawUrls) || rawUrls.length === 0) {
+    return res.status(400).json({ message: 'urls array is required' });
+  }
+  if (!categoryId) {
+    return res.status(400).json({ message: 'categoryId is required' });
+  }
+
+  const urls   = rawUrls.map(u => u.trim()).filter(Boolean);
+  const total  = urls.length;
+  const MAX    = 200;
+
+  if (total > MAX) {
+    return res.status(400).json({ message: `Maximum ${MAX} URLs per batch` });
+  }
+
+  // ── Set up SSE ────────────────────────────────────────────────────────────
+  res.setHeader('Content-Type',  'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection',    'keep-alive');
+  res.flushHeaders();
+
+  const send = (obj) => {
+    try { res.write(`data: ${JSON.stringify(obj)}\n\n`); } catch (_) {}
+  };
+
+  // ── Lazy-load Product model (avoid circular dep at module load time) ───────
+  let Product;
+  try { Product = require('../models/Product'); } catch (e) {
+    send({ type: 'complete', saved: 0, failed: total, errors: ['Server config error: ' + e.message] });
+    return res.end();
+  }
+
+  const results = { saved: 0, failed: 0, errors: [] };
+
+  // ── Process each URL sequentially ─────────────────────────────────────────
+  for (let i = 0; i < urls.length; i++) {
+    const url = urls[i];
+
+    // Skip obviously bad URLs
+    if (!isSafeUrl(url)) {
+      send({ type: 'progress', index: i, total, url, status: 'error', message: 'Invalid or unsafe URL' });
+      results.failed++;
+      results.errors.push(`[${i + 1}] ${url} — Invalid URL`);
+      continue;
+    }
+
+    // 1. Scrape
+    send({ type: 'progress', index: i, total, url, status: 'scraping', message: 'Fetching page…' });
+
+    let scraped;
+    try {
+      scraped = await scrapeProduct(url);
+    } catch (err) {
+      const msg = err.message || 'Scrape failed';
+      send({ type: 'progress', index: i, total, url, status: 'error', message: msg });
+      results.failed++;
+      results.errors.push(`[${i + 1}] ${url} — ${msg}`);
+      // Small gap before next URL to avoid hammering
+      await new Promise(r => setTimeout(r, 500));
+      continue;
+    }
+
+    // 2. Upload images to Cloudinary (optional)
+    send({ type: 'progress', index: i, total, url, status: 'saving', message: 'Uploading images…' });
+
+    let finalImages = scraped.imageUrls;
+    if (uploadImages && scraped.imageUrls.length > 0 && USE_CLOUDINARY) {
+      try {
+        const uploaded = await Promise.all(
+          scraped.imageUrls.slice(0, 10).map(uploadImageFromUrl)
+        );
+        finalImages = uploaded.map((r, idx) => r || scraped.imageUrls[idx]).filter(Boolean);
+      } catch (_) {
+        // Image upload failure is non-fatal — continue with original URLs
+      }
+    }
+
+    // 3. Save to DB as draft (isActive: false)
+    // Retries up to 5 times on duplicate key errors (E11000) for both
+    // `sku` and `slug` fields, appending -1, -2 ... -5 suffixes until unique.
+    let product;
+    try {
+      // Generate AI-formatted description before saving.
+      // Non-fatal: falls back to scraped description if AI unavailable.
+      let aiDescription = scraped.description || '';
+      try {
+        aiDescription = await generateProductDescription({
+          name:             scraped.name        || '',
+          brand:            scraped.brand       || '',
+          sku:              scraped.sku         || '',
+          price:            scraped.price       || '',
+          salePrice:        scraped.salePrice   || '',
+          shortDescription: scraped.shortDescription || '',
+        });
+      } catch (aiErr) {
+        console.warn('[Bulk Scraper] AI description skipped:', aiErr.message);
+      }
+
+      // Generate AI specifications table before saving.
+      // Non-fatal: saves with empty specs array if AI unavailable.
+      let aiSpecs = [];
+      try {
+        aiSpecs = await generateProductSpecs({
+          name:        scraped.name        || '',
+          brand:       scraped.brand       || '',
+          sku:         scraped.sku         || '',
+          price:       scraped.price       || '',
+          salePrice:   scraped.salePrice   || '',
+          description: aiDescription,
+        });
+      } catch (aiErr) {
+        console.warn('[Bulk Scraper] AI specs skipped:', aiErr.message);
+      }
+
+      // Auto-generate brand via AI if scraper couldn't extract it
+      let resolvedBrand = scraped.brand || '';
+      if (!resolvedBrand) {
+        try {
+          resolvedBrand = await generateBrand(scraped.name || '');
+        } catch (_) { /* non-fatal */ }
+      }
+
+      const name = scraped.name || `Imported Product ${Date.now()}`;
+
+      // Build base slug (max 70 chars, url-safe)
+      const baseSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 70);
+      const baseSku  = scraped.sku || '';
+
+      // Resolve a unique slug
+      const candidateSlug = await Product.findOne({ slug: baseSlug }).lean().select('_id')
+        ? `${baseSlug}-${Math.random().toString(36).slice(2, 7)}`
+        : baseSlug;
+
+      let slug = candidateSlug;
+      let sku  = baseSku;
+
+      // Attempt save, retrying on duplicate key errors (sku or slug collision)
+      const MAX_RETRIES = 5;
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          product = await Product.create({
+            name,
+            slug,
+            description:      aiDescription              || name,
+            shortDescription: scraped.shortDescription || '',
+            price:            scraped.price            || 0,
+            salePrice:        scraped.salePrice        || undefined,
+            brand:            resolvedBrand,
+            sku,
+            category:         categoryId,
+            thumbnail:        finalImages[0]           || '',
+            images:           finalImages.slice(1),
+            specifications:   aiSpecs,
+            stock:            5,
+            lowStockThreshold: 2,
+            isActive:         false,
+          });
+          break; // success
+        } catch (dupErr) {
+          if (dupErr.code !== 11000 || attempt === MAX_RETRIES) throw dupErr;
+          const keyPattern = dupErr.keyPattern || {};
+          if (keyPattern.sku || (dupErr.message || '').includes('sku')) {
+            sku = baseSku ? `${baseSku}-${attempt}` : '';
+          }
+          if (keyPattern.slug || (dupErr.message || '').includes('slug')) {
+            slug = `${baseSlug}-${attempt}`;
+          }
+        }
+      }
+
+      const skuChanged = sku !== baseSku && baseSku;
+      send({
+        type:    'progress',
+        index:   i,
+        total,
+        url,
+        status:  'done',
+        message: `Saved as draft: "${product.name}"` + (skuChanged ? ` (SKU: ${sku})` : ''),
+        product: { _id: product._id, name: product.name, thumbnail: product.thumbnail },
+      });
+
+      results.saved++;
+    } catch (err) {
+      const msg = 'DB save failed: ' + err.message;
+      send({ type: 'progress', index: i, total, url, status: 'error', message: msg });
+      results.failed++;
+      results.errors.push(`[${i + 1}] ${url} — ${msg}`);
+    }
+
+    // Rate-controlled delay between requests based on admin-configured rate
+    if (i < urls.length - 1) {
+      // Add ±10% jitter so requests don't look perfectly metronomic
+      const jitter = Math.floor(intervalMs * 0.1 * (Math.random() * 2 - 1));
+      await new Promise(r => setTimeout(r, Math.max(500, intervalMs + jitter)));
+    }
+  }
+
+  // ── Done ──────────────────────────────────────────────────────────────────
+  send({ type: 'complete', saved: results.saved, failed: results.failed, errors: results.errors });
+  res.end();
 });
 
 module.exports = router;

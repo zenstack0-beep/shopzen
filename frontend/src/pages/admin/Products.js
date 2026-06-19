@@ -137,7 +137,7 @@ function RichEditor({ value, onChange }) {
 }
 
 /* ── Specifications Panel ── */
-function SpecsPanel({ specs, onChange }) {
+function SpecsPanel({ specs, onChange, onAIGenerate, aiGeneratingSpecs }) {
   const [specKey,    setSpecKey]   = useState('');
   const [specVal,    setSpecVal]   = useState('');
   const [pasteText,  setPasteText] = useState('');
@@ -180,7 +180,20 @@ function SpecsPanel({ specs, onChange }) {
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-gray-500">Add technical specifications shown on the product page.</p>
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-500">Add technical specifications shown on the product page.</p>
+        {onAIGenerate && (
+          <button
+            onClick={onAIGenerate}
+            disabled={aiGeneratingSpecs}
+            style={{fontSize:11,padding:'4px 12px',borderRadius:20,border:'1.5px solid var(--color-primary)',color:'var(--color-primary)',background:'transparent',cursor:'pointer',fontWeight:600,display:'flex',alignItems:'center',gap:5,opacity:aiGeneratingSpecs?0.5:1,flexShrink:0}}
+          >
+            {aiGeneratingSpecs
+              ? <><span style={{display:'inline-block',width:10,height:10,border:'2px solid var(--color-primary)',borderTopColor:'transparent',borderRadius:'50%',animation:'spin 0.7s linear infinite'}}></span>Generating…</>
+              : <>✨ AI Generate Specs</>}
+          </button>
+        )}
+      </div>
       <div className="flex gap-2">
         <input value={specKey} onChange={e=>setSpecKey(e.target.value)}
           onKeyDown={e=>{if(e.key==='Tab'){e.preventDefault();document.getElementById('spec-val')?.focus();}}}
@@ -304,6 +317,7 @@ export default function AdminProducts() {
   const [tagSuggestions, setTagSuggestions]     = useState([]);
   const [loadingTags, setLoadingTags]           = useState(false);
   const [loadingDescription, setLoadingDescription] = useState(false);
+  const [aiGeneratingSpecs, setAiGeneratingSpecs]   = useState(false);
   const aiNameTimer = useRef(null);
 
   // ── URL Import state ──────────────────────────────────────────────────────
@@ -312,6 +326,17 @@ export default function AdminProducts() {
   const [urlImportResult, setUrlImportResult]       = useState(null);
   const [urlImportImages, setUrlImportImages]       = useState([]);
   const [urlImportSelImages, setUrlImportSelImages] = useState([]);
+
+  // ── Bulk URL Import modal ──
+  const [bulkUrlModal, setBulkUrlModal]             = useState(false);
+  const [bulkUrlText, setBulkUrlText]               = useState('');
+  const [bulkUrlCategory, setBulkUrlCategory]       = useState('');
+  const [bulkUrlRunning, setBulkUrlRunning]         = useState(false);
+  const [bulkUrlProgress, setBulkUrlProgress]       = useState([]);
+  const [bulkUrlSummary, setBulkUrlSummary]         = useState(null);
+  const [bulkUrlRate, setBulkUrlRate]               = useState(10);
+  const [bulkUrlMinimized, setBulkUrlMinimized]     = useState(false);
+  const bulkUrlAbortRef                             = useRef(false);
 
   const updateForm = useCallback((updater) => {
     setForm(prev => {
@@ -401,6 +426,37 @@ export default function AdminProducts() {
       toast.error(err?.response?.data?.message || 'Could not generate description', { id: toastId });
     } finally {
       setLoadingDescription(false);
+    }
+  };
+
+  const generateAISpecs = async () => {
+    const current = formRef.current;
+    if (!current.name || current.name.trim().length < 3) {
+      toast.error('Enter a product name first'); return;
+    }
+    setAiGeneratingSpecs(true);
+    const toastId = toast.loading('✨ Generating specifications…');
+    try {
+      const categoryName = categories.find(c => c._id === current.category)?.name || '';
+      const { data } = await API.post('/ai/specs', {
+        name:        current.name,
+        category:    categoryName,
+        brand:       current.brand       || '',
+        sku:         current.sku         || '',
+        price:       current.price       || '',
+        salePrice:   current.salePrice   || '',
+        description: current.description || '',
+      });
+      if (Array.isArray(data.specs) && data.specs.length > 0) {
+        updateForm(p => ({ ...p, specifications: data.specs }));
+        toast.success(`✅ ${data.specs.length} specs generated!`, { id: toastId });
+      } else {
+        throw new Error('Empty response');
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Could not generate specs', { id: toastId });
+    } finally {
+      setAiGeneratingSpecs(false);
     }
   };
 
@@ -565,11 +621,80 @@ export default function AdminProducts() {
       sku:              d.sku              || prev.sku,
       thumbnail:        selectedImages[0]  || prev.thumbnail,
       images:           selectedImages.slice(1),
+      specifications:   (Array.isArray(d.specifications) && d.specifications.length > 0)
+                          ? d.specifications
+                          : prev.specifications,
     }));
     toast.success('Fields filled from URL! Review them then save.');
     setActiveTab('basic');
   };
 
+
+  /* ── Bulk URL Import ── */
+  const handleBulkUrlStart = async () => {
+    const urls = bulkUrlText.split(/\n/).map(u => u.trim()).filter(Boolean);
+    if (urls.length === 0) { toast.error('Paste at least one URL'); return; }
+    if (!bulkUrlCategory) { toast.error('Select a category first'); return; }
+    if (urls.length > 200) { toast.error('Max 200 URLs per batch'); return; }
+
+    setBulkUrlRunning(true);
+    setBulkUrlProgress([]);
+    setBulkUrlSummary(null);
+    setBulkUrlMinimized(false);
+    bulkUrlAbortRef.current = false;
+
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
+    const baseURL = (API.defaults?.baseURL || '').replace(/\/$/, '');
+
+    try {
+      const resp = await fetch(`${baseURL}/scrape/bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ urls, categoryId: bulkUrlCategory, uploadImages: true, ratePerMinute: bulkUrlRate }),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ message: 'Server error' }));
+        toast.error(err.message || 'Bulk import failed');
+        setBulkUrlRunning(false);
+        return;
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+
+      while (true) {
+        if (bulkUrlAbortRef.current) { reader.cancel(); break; }
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split('\n\n');
+        buf = parts.pop();
+        for (const part of parts) {
+          const line = part.replace(/^data:\s*/, '').trim();
+          if (!line) continue;
+          try {
+            const msg = JSON.parse(line);
+            if (msg.type === 'progress') {
+              setBulkUrlProgress(prev => {
+                const next = [...prev];
+                next[msg.index] = { url: msg.url, status: msg.status, message: msg.message, product: msg.product };
+                return next;
+              });
+            } else if (msg.type === 'complete') {
+              setBulkUrlSummary({ saved: msg.saved, failed: msg.failed, errors: msg.errors });
+              if (msg.saved > 0) fetchProducts();
+            }
+          } catch (_) {}
+        }
+      }
+    } catch (err) {
+      toast.error('Connection error: ' + err.message);
+    } finally {
+      setBulkUrlRunning(false);
+    }
+  };
   /* ── Save ── */
   const handleSave = async () => {
     const f = formRef.current;
@@ -896,6 +1021,12 @@ export default function AdminProducts() {
             title="Bulk upload products via Excel">
             📥 Bulk Upload
           </button>
+          <button onClick={()=>{setBulkUrlModal(true); setBulkUrlProgress([]); setBulkUrlSummary(null); setBulkUrlRunning(false);}}
+            className="text-sm font-semibold px-3 py-1.5 rounded-lg border flex items-center gap-1.5 transition-all"
+            style={{ background:"#f0fdf4", borderColor:"#16a34a", color:"#15803d" }}
+            title="Paste 100s of product URLs and auto-import them as drafts">
+            🔗 Bulk URL Import
+          </button>
           <button onClick={openAdd} className="btn-primary text-sm">+ Add Product</button>
         </div>
       </div>
@@ -1018,6 +1149,232 @@ export default function AdminProducts() {
         </Modal>
       )}
 
+
+      {/* ── Bulk URL Import Modal (hidden when minimized, process keeps running) ── */}
+      {bulkUrlModal && !bulkUrlMinimized && (
+        <Modal title="🔗 Bulk URL Import" onClose={()=>{ setBulkUrlModal(false); }} wide>
+          <div className="space-y-5">
+
+            {/* Intro */}
+            <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-sm">
+              <p className="font-semibold text-green-800 mb-1">How it works</p>
+              <ol className="list-decimal list-inside text-green-700 space-y-1">
+                <li>Paste one product URL per line (up to 200 at a time)</li>
+                <li>Select the default category for all imported products</li>
+                <li>Set your fetch rate, then click <strong>Start Import</strong> — products are saved as drafts automatically</li>
+                <li>You can minimize this window and keep working while import runs in the background</li>
+              </ol>
+            </div>
+
+            {/* Category + Rate row */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="form-label">Default Category <span className="text-red-500">*</span></label>
+                <select
+                  value={bulkUrlCategory}
+                  onChange={e => setBulkUrlCategory(e.target.value)}
+                  className="form-input"
+                  disabled={bulkUrlRunning}
+                >
+                  <option value="">— Select a category —</option>
+                  {categories.filter(c=>!c.parent).map(c=>
+                    <option key={c._id} value={c._id}>{c.name}</option>
+                  )}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">Editable per product later</p>
+              </div>
+              <div>
+                <label className="form-label">Fetch Rate (products / min)</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1} max={60}
+                    value={bulkUrlRate}
+                    onChange={e => setBulkUrlRate(Math.min(60, Math.max(1, Number(e.target.value) || 10)))}
+                    className="form-input text-center"
+                    disabled={bulkUrlRunning}
+                    style={{width:80}}
+                  />
+                  <div className="text-xs text-gray-500 leading-tight">
+                    <p>~{Math.round(60/bulkUrlRate)}s between each</p>
+                    <p className="text-gray-400">Max 60 / min</p>
+                  </div>
+                </div>
+                <p className="text-xs text-gray-400 mt-1">Lower rate = less chance of being blocked</p>
+              </div>
+            </div>
+
+            {/* URL textarea */}
+            <div>
+              <label className="form-label">Product URLs <span className="text-xs text-gray-400 font-normal">(one per line)</span></label>
+              <textarea
+                value={bulkUrlText}
+                onChange={e => setBulkUrlText(e.target.value)}
+                placeholder={"https://example.com/product-1\nhttps://example.com/product-2\nhttps://example.com/product-3"}
+                className="form-input font-mono text-xs"
+                rows={8}
+                disabled={bulkUrlRunning}
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                {bulkUrlText.split("\n").filter(u=>u.trim()).length} URL{bulkUrlText.split("\n").filter(u=>u.trim()).length!==1?"s":""} entered
+              </p>
+            </div>
+
+            {/* Progress list */}
+            {bulkUrlProgress.length > 0 && (
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="form-label mb-0">Progress</label>
+                  <span className="text-xs text-gray-500">
+                    {bulkUrlProgress.filter(p=>p&&p.status==="done").length} done ·{" "}
+                    {bulkUrlProgress.filter(p=>p&&p.status==="error").length} failed ·{" "}
+                    {bulkUrlRunning ? "running…" : "finished"}
+                  </span>
+                </div>
+                <div className="border border-gray-100 rounded-xl overflow-hidden max-h-64 overflow-y-auto">
+                  {bulkUrlProgress.map((item, idx) => item && (
+                    <div key={idx} className={"flex items-start gap-3 px-3 py-2 text-sm border-b border-gray-50 last:border-0 " + (item.status==="done"?"bg-green-50":item.status==="error"?"bg-red-50":"bg-white")}>
+                      <span className="mt-0.5 flex-shrink-0 text-base">
+                        {item.status==="done"?"✅":item.status==="error"?"❌":item.status==="scraping"?"🔍":"💾"}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs text-gray-500 font-mono">{item.url}</p>
+                        {item.product
+                          ? <p className="text-xs font-semibold text-green-700 truncate">{item.product.name}</p>
+                          : <p className="text-xs text-gray-600">{item.message}</p>
+                        }
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Summary */}
+            {bulkUrlSummary && (
+              <div className={"rounded-xl p-4 border " + (bulkUrlSummary.failed===0?"bg-green-50 border-green-200":"bg-amber-50 border-amber-200")}>
+                <p className={"font-semibold mb-1 " + (bulkUrlSummary.failed===0?"text-green-800":"text-amber-800")}>
+                  Import complete — {bulkUrlSummary.saved} saved as draft{bulkUrlSummary.saved!==1?"s":""}{bulkUrlSummary.failed>0?`, ${bulkUrlSummary.failed} failed`:""}
+                </p>
+                {bulkUrlSummary.errors.length > 0 && (
+                  <ul className="text-xs text-red-600 space-y-0.5 max-h-32 overflow-y-auto">
+                    {bulkUrlSummary.errors.map((e,i)=><li key={i}>{e}</li>)}
+                  </ul>
+                )}
+                {bulkUrlSummary.saved > 0 && (
+                  <p className="text-xs text-gray-600 mt-2">📋 Draft products are now in your product list with <strong>Hidden</strong> status. Click Edit on each one to review and publish.</p>
+                )}
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex gap-3">
+              {!bulkUrlRunning && !bulkUrlSummary && (
+                <button
+                  onClick={handleBulkUrlStart}
+                  disabled={!bulkUrlCategory || !bulkUrlText.trim()}
+                  className="btn-primary flex-1 disabled:opacity-60"
+                >
+                  🚀 Start Import
+                </button>
+              )}
+              {bulkUrlRunning && (
+                <>
+                  <button
+                    onClick={()=>{ bulkUrlAbortRef.current = true; }}
+                    className="flex-1 py-2.5 rounded-xl font-semibold text-sm border-2 border-red-300 text-red-600 hover:bg-red-50"
+                  >
+                    ⏹ Stop Import
+                  </button>
+                  <button
+                    onClick={()=>{ setBulkUrlMinimized(true); setBulkUrlModal(false); }}
+                    className="py-2.5 px-5 rounded-xl font-semibold text-sm border border-gray-200 hover:bg-gray-50"
+                    title="Minimize — import keeps running in background"
+                  >
+                    ⬇ Minimize
+                  </button>
+                </>
+              )}
+              {bulkUrlSummary && (
+                <button
+                  onClick={()=>{ setBulkUrlText(""); setBulkUrlProgress([]); setBulkUrlSummary(null); setBulkUrlCategory(""); }}
+                  className="flex-1 py-2.5 rounded-xl font-semibold text-sm border border-gray-200 hover:bg-gray-50"
+                >
+                  🔄 Import More URLs
+                </button>
+              )}
+              <button
+                onClick={()=>setBulkUrlModal(false)}
+                className="py-2.5 px-5 rounded-xl font-semibold text-sm border border-gray-200 hover:bg-gray-50"
+              >
+                {bulkUrlRunning ? "Close (keeps running)" : "Close"}
+              </button>
+            </div>
+
+          </div>
+        </Modal>
+      )}
+
+      {/* ── Bulk Import Floating Widget (shown when minimized or running with modal closed) ── */}
+      {bulkUrlRunning && !bulkUrlModal && (
+        <div style={{
+          position:'fixed', bottom:24, right:24, zIndex:9999,
+          background:'#fff', borderRadius:16, boxShadow:'0 8px 32px rgba(0,0,0,0.18)',
+          border:'1.5px solid #e5e7eb', minWidth:320, maxWidth:400, overflow:'hidden'
+        }}>
+          {/* Header */}
+          <div style={{background:'var(--color-primary)',padding:'10px 16px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+            <div style={{display:'flex',alignItems:'center',gap:8}}>
+              <span style={{display:'inline-block',width:10,height:10,border:'2px solid #fff',borderTopColor:'transparent',borderRadius:'50%',animation:'spin 0.7s linear infinite',flexShrink:0}}></span>
+              <span style={{color:'#fff',fontWeight:700,fontSize:13}}>Bulk Import Running</span>
+            </div>
+            <div style={{display:'flex',gap:6}}>
+              <button
+                onClick={()=>{ setBulkUrlModal(true); setBulkUrlMinimized(false); }}
+                style={{background:'rgba(255,255,255,0.2)',border:'none',borderRadius:6,color:'#fff',fontSize:12,padding:'2px 8px',cursor:'pointer',fontWeight:600}}
+                title="Expand"
+              >⬆ Expand</button>
+              <button
+                onClick={()=>{ bulkUrlAbortRef.current = true; }}
+                style={{background:'rgba(220,38,38,0.7)',border:'none',borderRadius:6,color:'#fff',fontSize:12,padding:'2px 8px',cursor:'pointer',fontWeight:600}}
+                title="Stop import"
+              >⏹ Stop</button>
+            </div>
+          </div>
+          {/* Progress summary */}
+          <div style={{padding:'10px 16px'}}>
+            <div style={{display:'flex',justifyContent:'space-between',marginBottom:6}}>
+              <span style={{fontSize:12,color:'#6b7280'}}>
+                ✅ {bulkUrlProgress.filter(p=>p&&p.status==="done").length} done &nbsp;·&nbsp;
+                ❌ {bulkUrlProgress.filter(p=>p&&p.status==="error").length} failed &nbsp;·&nbsp;
+                🔄 {bulkUrlProgress.filter(p=>p&&(p.status==="scraping"||p.status==="saving")).length} active
+              </span>
+              <span style={{fontSize:12,color:'#6b7280'}}>
+                {bulkUrlProgress.filter(Boolean).length} / {bulkUrlProgress.length || "?"}
+              </span>
+            </div>
+            {/* Mini progress bar */}
+            <div style={{background:'#f3f4f6',borderRadius:99,height:6,overflow:'hidden'}}>
+              <div style={{
+                height:'100%', borderRadius:99, background:'var(--color-primary)',
+                width: bulkUrlProgress.length
+                  ? `${Math.round(bulkUrlProgress.filter(p=>p&&(p.status==="done"||p.status==="error")).length / bulkUrlProgress.length * 100)}%`
+                  : '0%',
+                transition:'width 0.4s ease'
+              }}></div>
+            </div>
+            {/* Last item */}
+            {(() => {
+              const last = [...bulkUrlProgress].reverse().find(p=>p);
+              return last ? (
+                <p style={{fontSize:11,color:'#9ca3af',marginTop:6,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                  {last.status==="done"?"✅":last.status==="error"?"❌":"🔍"} {last.product?.name || last.message || last.url}
+                </p>
+              ) : null;
+            })()}
+          </div>
+        </div>
+      )}
       {bulkModal && (
         <Modal title="📥 Bulk Upload Products" onClose={closeBulkModal}>
           <div className="space-y-4">
@@ -1684,6 +2041,8 @@ export default function AdminProducts() {
             <SpecsPanel
               specs={form.specifications || []}
               onChange={newSpecs => updateForm(p => ({ ...p, specifications: newSpecs }))}
+              onAIGenerate={generateAISpecs}
+              aiGeneratingSpecs={aiGeneratingSpecs}
             />
           )}
 
