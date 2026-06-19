@@ -280,6 +280,11 @@ export default function AdminProducts() {
   const [search, setSearch]       = useState('');
   const [page, setPage]           = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [filterCategory, setFilterCategory] = useState('');
+  const [filterBrand, setFilterBrand]       = useState('');
+  const [filterStatus, setFilterStatus]     = useState('');
+  const [filterStock, setFilterStock]       = useState('');
+  const [brandsList, setBrandsList]         = useState([]);
   const [activeTab, setActiveTab] = useState('basic');
   const [draftSavedAt, setDraftSavedAt] = useState(null);
   const [hasDraft, setHasDraft]   = useState(false);
@@ -481,13 +486,20 @@ export default function AdminProducts() {
   const fetchProducts = useCallback(async () => {
     setLoading(true);
     try {
-      const { data } = await API.get(`/products/admin/all?search=${search}&page=${page}&limit=15`);
+      const params = new URLSearchParams({ page, limit: 15 });
+      if (search)         params.set('search',   search);
+      if (filterCategory) params.set('category', filterCategory);
+      if (filterBrand)    params.set('brand',    filterBrand);
+      if (filterStatus)   params.set('status',   filterStatus);
+      if (filterStock)    params.set('stock',    filterStock);
+      const { data } = await API.get(`/products/admin/all?${params.toString()}`);
       setProducts(data.products); setTotalPages(data.pages);
     } catch {} finally { setLoading(false); }
-  }, [search, page]);
+  }, [search, page, filterCategory, filterBrand, filterStatus, filterStock]);
 
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
   useEffect(() => { API.get('/categories/all').then(r=>setCategories(r.data)).catch(()=>{ API.get('/categories').then(r=>setCategories(r.data)).catch(()=>{}); }); }, []);
+  useEffect(() => { API.get('/products/admin/brands').then(r=>setBrandsList(r.data)).catch(()=>{}); }, []);
 
   /* ── Check draft on mount ── */
   useEffect(() => {
@@ -1036,7 +1048,79 @@ export default function AdminProducts() {
       )}
 
       <div className="bg-white rounded-2xl border border-gray-100 p-4 mb-4">
-        <input value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}} placeholder="Search products..." className="form-input text-sm"/>
+        {/* Search row */}
+        <div className="flex gap-2 mb-3">
+          <input
+            value={search}
+            onChange={e=>{setSearch(e.target.value);setPage(1);}}
+            placeholder="Search by name, brand or SKU…"
+            className="form-input text-sm flex-1"
+          />
+          {(search||filterCategory||filterBrand||filterStatus||filterStock) && (
+            <button
+              onClick={()=>{setSearch('');setFilterCategory('');setFilterBrand('');setFilterStatus('');setFilterStock('');setPage(1);}}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 whitespace-nowrap"
+              title="Clear all filters"
+            >✕ Clear</button>
+          )}
+        </div>
+        {/* Filter chips row */}
+        <div className="flex flex-wrap gap-2">
+          {/* Category */}
+          <select
+            value={filterCategory}
+            onChange={e=>{setFilterCategory(e.target.value);setPage(1);}}
+            className="text-xs font-medium border rounded-lg px-2.5 py-1.5 bg-white text-gray-600 hover:border-gray-300 focus:outline-none focus:ring-2 cursor-pointer"
+            style={filterCategory ? {borderColor:'var(--color-primary)',color:'var(--color-primary)',background:'var(--color-primary)11'} : {borderColor:'#e5e7eb'}}
+          >
+            <option value="">All Categories</option>
+            {categories.map(c=><option key={c._id} value={c._id}>{c.name}</option>)}
+          </select>
+
+          {/* Brand */}
+          <select
+            value={filterBrand}
+            onChange={e=>{setFilterBrand(e.target.value);setPage(1);}}
+            className="text-xs font-medium border rounded-lg px-2.5 py-1.5 bg-white text-gray-600 hover:border-gray-300 focus:outline-none focus:ring-2 cursor-pointer"
+            style={filterBrand ? {borderColor:'var(--color-primary)',color:'var(--color-primary)',background:'var(--color-primary)11'} : {borderColor:'#e5e7eb'}}
+          >
+            <option value="">All Brands</option>
+            {brandsList.map(b=><option key={b} value={b}>{b}</option>)}
+          </select>
+
+          {/* Status */}
+          <select
+            value={filterStatus}
+            onChange={e=>{setFilterStatus(e.target.value);setPage(1);}}
+            className="text-xs font-medium border rounded-lg px-2.5 py-1.5 bg-white text-gray-600 hover:border-gray-300 focus:outline-none focus:ring-2 cursor-pointer"
+            style={filterStatus ? {borderColor:'var(--color-primary)',color:'var(--color-primary)',background:'var(--color-primary)11'} : {borderColor:'#e5e7eb'}}
+          >
+            <option value="">All Statuses</option>
+            <option value="active">✅ Active</option>
+            <option value="hidden">🙈 Hidden</option>
+            <option value="featured">⭐ Featured</option>
+            <option value="sale">🏷️ On Sale</option>
+          </select>
+
+          {/* Stock */}
+          <select
+            value={filterStock}
+            onChange={e=>{setFilterStock(e.target.value);setPage(1);}}
+            className="text-xs font-medium border rounded-lg px-2.5 py-1.5 bg-white text-gray-600 hover:border-gray-300 focus:outline-none focus:ring-2 cursor-pointer"
+            style={filterStock ? {borderColor:'#ef4444',color:'#ef4444',background:'#fef2f2'} : {borderColor:'#e5e7eb'}}
+          >
+            <option value="">All Stock</option>
+            <option value="out">🚫 Out of Stock</option>
+            <option value="low">⚠️ Low Stock</option>
+          </select>
+
+          {/* Active filter count badge */}
+          {[filterCategory,filterBrand,filterStatus,filterStock].filter(Boolean).length > 0 && (
+            <span className="text-xs font-semibold px-2 py-1 rounded-full text-white" style={{background:'var(--color-primary)'}}>
+              {[filterCategory,filterBrand,filterStatus,filterStock].filter(Boolean).length} filter{[filterCategory,filterBrand,filterStatus,filterStock].filter(Boolean).length>1?'s':''} on
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">

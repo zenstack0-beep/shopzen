@@ -669,10 +669,21 @@ router.get('/admin/lookup', adminAuth, async (req, res) => {
 
 router.get('/admin/all', adminAuth, async (req, res) => {
   try {
-    const { search, category, page = 1, limit = 20 } = req.query;
+    const { search, category, brand, status, stock, page = 1, limit = 20 } = req.query;
     const filter = {};
-    if (search)   filter.name     = new RegExp(search, 'i');
+    if (search)   filter.$or = [
+      { name:  new RegExp(search, 'i') },
+      { brand: new RegExp(search, 'i') },
+      { sku:   new RegExp(search, 'i') },
+    ];
     if (category) filter.category = category;
+    if (brand)    filter.brand    = new RegExp(`^${brand}$`, 'i');
+    if (status === 'active')   filter.isActive = true;
+    if (status === 'hidden')   filter.isActive = false;
+    if (status === 'featured') filter.isFeatured = true;
+    if (status === 'sale')     filter.isOnSale = true;
+    if (stock  === 'out')      filter.stock = 0;
+    if (stock  === 'low')      { filter.stock = { $gt: 0, $lte: 5 }; }
     const total    = await Product.countDocuments(filter);
     const products = await Product.find(filter)
       .populate('category', 'name')
