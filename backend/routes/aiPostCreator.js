@@ -513,28 +513,66 @@ router.post('/remove-background', async (req, res) => {
 
     let inputBuffer;
 
-    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-      // External URL (e.g. Cloudinary) — fetch with Node built-in https
+    // Detect URLs that point back at OUR OWN server (e.g.
+    // https://<this-backend>.up.railway.app/uploads/xyz.jpg). In production
+    // these used to be re-fetched over the public internet, which can come
+    // back as "HTTP 403 fetching image" depending on the platform's edge/
+    // proxy behaviour. Since these files live on our own disk, read them
+    // directly — same as the existing local /uploads/... branch — and skip
+    // the network round-trip entirely. Only genuinely external URLs (e.g.
+    // Cloudinary) go over HTTP.
+    const path = require('path');
+    const fs = require('fs');
+    const uploadsDir = path.join(__dirname, '../uploads');
+
+    function localUploadsPathFor(url) {
+      try {
+        const u = new URL(url, 'http://placeholder.local');
+        if (!u.pathname.startsWith('/uploads/')) return null;
+        const filename = u.pathname.replace(/^\/uploads\//, '');
+        return path.join(uploadsDir, filename);
+      } catch {
+        return null;
+      }
+    }
+
+    const isAbsoluteUrl = imageUrl.startsWith('http://') || imageUrl.startsWith('https://');
+    const ownServerPath = isAbsoluteUrl ? localUploadsPathFor(imageUrl) : null;
+
+    if (ownServerPath) {
+      // Absolute URL, but it's our own /uploads/... file — read from disk.
+      if (!fs.existsSync(ownServerPath)) {
+        return res.status(404).json({ message: `Image file not found: ${path.basename(ownServerPath)}` });
+      }
+      inputBuffer = fs.readFileSync(ownServerPath);
+    } else if (isAbsoluteUrl) {
+      // Genuinely external URL (e.g. Cloudinary) — fetch with Node built-in https.
       inputBuffer = await new Promise((resolve, reject) => {
         const mod = imageUrl.startsWith('https') ? require('https') : require('http');
-        mod.get(imageUrl, resp => {
+        const req = mod.get(imageUrl, {
+          headers: {
+            // Some hosts/CDNs 403 requests with no User-Agent header.
+            'User-Agent': 'Mozilla/5.0 (compatible; ShopzenBot/1.0; +backend-image-fetch)',
+            'Accept': 'image/*'
+          }
+        }, resp => {
           if (resp.statusCode !== 200) return reject(new Error(`HTTP ${resp.statusCode} fetching image`));
           const chunks = [];
           resp.on('data', c => chunks.push(c));
           resp.on('end', () => resolve(Buffer.concat(chunks)));
           resp.on('error', reject);
-        }).on('error', reject);
+        });
+        req.on('error', reject);
       });
     } else {
-      // Local /uploads/... — read directly from disk, no HTTP round-trip
+      // Relative /uploads/... — read directly from disk, no HTTP round-trip
       const rel = imageUrl.startsWith('/') ? imageUrl : '/' + imageUrl;
-      const uploadsDir = require('path').join(__dirname, '../uploads');
       const filename = rel.replace(/^\/uploads\//, '');
-      const localPath = require('path').join(uploadsDir, filename);
-      if (!require('fs').existsSync(localPath)) {
+      const localPath = path.join(uploadsDir, filename);
+      if (!fs.existsSync(localPath)) {
         return res.status(404).json({ message: `Image file not found: ${filename}` });
       }
-      inputBuffer = require('fs').readFileSync(localPath);
+      inputBuffer = fs.readFileSync(localPath);
     }
 
     // Decode to raw RGBA
