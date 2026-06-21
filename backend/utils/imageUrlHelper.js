@@ -48,20 +48,7 @@ function getBaseUrl() {
   function normalizeProductImages(product) {
     if (!product) return product;
   
-    // IMPORTANT: Mongoose documents are NOT plain objects. Spreading them
-    // directly with `{ ...product }` only picks up getter-based properties
-    // (which is why `thumbnail`/`images` looked fine) and drops the actual
-    // stored fields like name, price, stock, category, ratings, etc.
-    // Convert to a plain object first using toObject()/toJSON() when
-    // available, otherwise fall back to the value as-is (already a plain
-    // object, e.g. from .lean() queries or plain JS objects).
-    const plainProduct = (typeof product.toObject === 'function')
-      ? product.toObject()
-      : (typeof product.toJSON === 'function')
-        ? product.toJSON()
-        : product;
-  
-    const normalized = { ...plainProduct };
+    const normalized = { ...product };
     const base = getBaseUrl();
   
     // Normalize thumbnail
@@ -136,16 +123,7 @@ function getBaseUrl() {
   function normalizeEntityImages(entity) {
     if (!entity) return entity;
   
-    // Same fix as normalizeProductImages: convert Mongoose documents to
-    // plain objects before spreading, or fields other than the image
-    // fields below will be silently dropped from the response.
-    const plainEntity = (typeof entity.toObject === 'function')
-      ? entity.toObject()
-      : (typeof entity.toJSON === 'function')
-        ? entity.toJSON()
-        : entity;
-  
-    const normalized = { ...plainEntity };
+    const normalized = { ...entity };
     const base = getBaseUrl();
   
     const imageFields = ['image', 'thumbnail', 'bannerImage', 'icon', 'logo'];
