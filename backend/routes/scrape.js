@@ -387,32 +387,107 @@ function unique(arr) {
   return [...new Set(arr)];
 }
 
+// ─── Image signature detection (content-type-independent) ───────────────────
+// Some CDNs (observed on Azure CDN / Blob Storage, e.g. singerwebcdn) serve
+// real image files with `content-type: application/octet-stream` because the
+// blob's content-type metadata was never set correctly at upload time on the
+// source site. Trusting the HTTP content-type header alone caused real,
+// valid images to be wrongly rejected. Instead, sniff the actual file bytes
+// (same approach already used in routes/upload.js for direct uploads) and
+// only fall back to the URL's file extension if byte-sniffing is inconclusive.
+const IMAGE_MAGIC_BYTES = [
+  { type: 'image/jpeg', magic: [0xFF, 0xD8, 0xFF] },
+  { type: 'image/png',  magic: [0x89, 0x50, 0x4E, 0x47] },
+  { type: 'image/gif',  magic: [0x47, 0x49, 0x46, 0x38] }, // GIF8
+  { type: 'image/webp', magic: [0x52, 0x49, 0x46, 0x46] }, // RIFF (need WEBP marker too)
+];
+
+/**
+ * Determine the real image MIME type from the actual file bytes.
+ * Returns null if the buffer doesn't look like a known image format.
+ */
+function detectImageType(buffer) {
+  if (!buffer || buffer.length < 12) return null;
+  for (const sig of IMAGE_MAGIC_BYTES) {
+    const matches = sig.magic.every((byte, i) => buffer[i] === byte);
+    if (!matches) continue;
+    if (sig.type === 'image/webp') {
+      // RIFF....WEBP — confirm the WEBP marker at bytes 8-12
+      if (buffer.slice(8, 12).toString('ascii') === 'WEBP') return 'image/webp';
+      continue;
+    }
+    return sig.type;
+  }
+  return null;
+}
+
+/** Fallback: guess content-type from the URL's file extension */
+function guessImageTypeFromUrl(url) {
+  const ext = (url.split('?')[0].split('.').pop() || '').toLowerCase();
+  const map = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp' };
+  return map[ext] || null;
+}
+
 // ─── Cloudinary upload from URL ───────────────────────────────────────────────
 // FIX (production): Guard against cloudinary being null (env vars not set).
 // When Cloudinary is unavailable the function returns null so the route falls
 // back to returning the original scraped URL unchanged.
-async function uploadImageFromUrl(imageUrl) {
+async function uploadImageFromUrl(imageUrl, sourcePageUrl) {
   if (!cloudinary) {
     // No Cloudinary — return the original URL so the admin can still see it
     return imageUrl;
   }
   try {
+    // IMPORTANT: Referer must be the page the image was found on (or at
+    // minimum that site's homepage), NOT the image URL itself. Many sites'
+    // hotlink protection checks that Referer is same-origin with their own
+    // domain; sending the image URL as its own Referer satisfies nothing
+    // and gets the request 403'd exactly like a bare/no-Referer request.
+    let referer;
+    try {
+      referer = sourcePageUrl
+        ? new URL(sourcePageUrl).origin + '/'
+        : new URL(imageUrl).origin + '/';
+    } catch {
+      referer = imageUrl;
+    }
+
     const response = await axios.get(imageUrl, {
       responseType: 'arraybuffer',
       timeout: 15000,
       headers: {
         'User-Agent': UA_POOL[0],
-        'Referer':    imageUrl,
+        'Referer':    referer,
         'Accept':     'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
       },
       httpsAgent: new https.Agent({ rejectUnauthorized: false }),
       decompress: true,
     });
 
-    const contentType = response.headers['content-type'] || 'image/jpeg';
-    if (!contentType.startsWith('image/')) return null;
+    console.log(`[Scraper] Download OK: ${imageUrl} → status ${response.status}, content-type ${response.headers['content-type']}, ${response.data?.length || 0} bytes`);
 
-    const b64     = Buffer.from(response.data).toString('base64');
+    const buffer = Buffer.from(response.data);
+
+    // Don't trust the HTTP content-type header alone — some CDNs (observed
+    // on Azure CDN) serve real images as application/octet-stream because
+    // the blob metadata was never set correctly at the source. Sniff the
+    // actual bytes first; only reject if BOTH the bytes and the URL
+    // extension fail to indicate a real image format.
+    const sniffedType = detectImageType(buffer);
+    const headerType  = response.headers['content-type'];
+    const extType      = guessImageTypeFromUrl(imageUrl);
+    const contentType  = sniffedType || (headerType && headerType.startsWith('image/') ? headerType : null) || extType;
+
+    if (!contentType) {
+      console.warn(`[Scraper] Rejected — could not confirm this is an image (header: ${headerType}, byte-sniff: ${sniffedType}, url ext guess: ${extType}):`, imageUrl);
+      return null;
+    }
+
+    if (headerType !== contentType) {
+      console.log(`[Scraper] Note: server sent content-type "${headerType}" but file is really ${contentType} (detected via ${sniffedType ? 'byte signature' : 'URL extension'}) — proceeding anyway:`, imageUrl);
+    }
+
+    const b64     = buffer.toString('base64');
     const dataUri = `data:${contentType};base64,${b64}`;
 
     const result = await cloudinary.uploader.upload(dataUri, {
@@ -420,9 +495,21 @@ async function uploadImageFromUrl(imageUrl) {
       resource_type: 'image',
     });
 
+    console.log(`[Scraper] Cloudinary upload OK: ${imageUrl} → ${result.secure_url}`);
     return result.secure_url;
   } catch (err) {
-    console.warn('[Scraper] Image upload failed:', imageUrl, err.message);
+    // FULL diagnostic detail — this is what tells us WHY it failed
+    // (network error vs HTTP status vs Cloudinary rejecting the upload).
+    const detail = {
+      url: imageUrl,
+      referer,
+      errorCode: err.code,                          // e.g. ECONNREFUSED, ETIMEDOUT
+      httpStatus: err.response?.status,              // e.g. 403, 404 from axios
+      httpStatusText: err.response?.statusText,
+      responseHeaders: err.response?.headers,
+      message: err.message,
+    };
+    console.error('[Scraper] Image upload FAILED — full detail:', JSON.stringify(detail, null, 2));
     return null;
   }
 }
@@ -540,13 +627,24 @@ router.post('/product', adminAuth, async (req, res) => {
     if (uploadImages && scraped.imageUrls.length > 0) {
       if (USE_CLOUDINARY) {
         // Re-host images on Cloudinary so they are served from a stable CDN URL
-        // and bypass hotlink protection on the source site.
+        // and bypass hotlink protection on the source site. Pass rawUrl as the
+        // source page so the correct Referer is sent (fixes 403s from sites
+        // with hotlink/referer protection, e.g. ugreen.lk).
         const uploadResults = await Promise.all(
-          scraped.imageUrls.slice(0, 20).map(uploadImageFromUrl)
+          scraped.imageUrls.slice(0, 20).map(u => uploadImageFromUrl(u, rawUrl))
         );
-        // Keep only successfully uploaded URLs; fall back to original scraped
-        // URLs for any that failed so the admin still sees something.
-        finalImages = uploadResults.map((r, i) => r || scraped.imageUrls[i]).filter(Boolean);
+        // Keep successfully uploaded (Cloudinary) URLs. Any that still failed
+        // fall back to the original scraped URL — but log it clearly, since a
+        // raw external URL stored as thumbnail will break features like
+        // server-side background removal later (hotlink-protected sites 403
+        // that fetch too).
+        finalImages = uploadResults.map((r, i) => {
+          if (!r) {
+            console.warn('[Scraper] Could not re-host image on Cloudinary, falling back to original URL (may be hotlink-protected):', scraped.imageUrls[i]);
+            return scraped.imageUrls[i];
+          }
+          return r;
+        }).filter(Boolean);
       }
       // If Cloudinary is not configured, finalImages stays as scraped.imageUrls
     }
@@ -723,9 +821,15 @@ router.post('/bulk', adminAuth, async (req, res) => {
     if (uploadImages && scraped.imageUrls.length > 0 && USE_CLOUDINARY) {
       try {
         const uploaded = await Promise.all(
-          scraped.imageUrls.slice(0, 10).map(uploadImageFromUrl)
+          scraped.imageUrls.slice(0, 10).map(u => uploadImageFromUrl(u, url))
         );
-        finalImages = uploaded.map((r, idx) => r || scraped.imageUrls[idx]).filter(Boolean);
+        finalImages = uploaded.map((r, idx) => {
+          if (!r) {
+            console.warn('[Scraper] Could not re-host image on Cloudinary, falling back to original URL (may be hotlink-protected):', scraped.imageUrls[idx]);
+            return scraped.imageUrls[idx];
+          }
+          return r;
+        }).filter(Boolean);
       } catch (_) {
         // Image upload failure is non-fatal — continue with original URLs
       }
