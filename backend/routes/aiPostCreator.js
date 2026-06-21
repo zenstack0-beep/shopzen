@@ -539,6 +539,10 @@ router.post('/remove-background', async (req, res) => {
     const isAbsoluteUrl = imageUrl.startsWith('http://') || imageUrl.startsWith('https://');
     const ownServerPath = isAbsoluteUrl ? localUploadsPathFor(imageUrl) : null;
 
+    // TEMP DIAGNOSTIC LOGGING — remove once the 403 cause is confirmed.
+    console.log(`[remove-background] imageUrl received: ${imageUrl}`);
+    console.log(`[remove-background] branch: ${ownServerPath ? 'own-server-disk' : isAbsoluteUrl ? 'external-http' : 'relative-disk'}`);
+
     if (ownServerPath) {
       // Absolute URL, but it's our own /uploads/... file — read from disk.
       if (!fs.existsSync(ownServerPath)) {
@@ -546,23 +550,39 @@ router.post('/remove-background', async (req, res) => {
       }
       inputBuffer = fs.readFileSync(ownServerPath);
     } else if (isAbsoluteUrl) {
-      // Genuinely external URL (e.g. Cloudinary) — fetch with Node built-in https.
+      // Genuinely external URL (e.g. Cloudinary) — fetch with Node built-in
+      // https, following redirects (Cloudinary can redirect between hosts).
       inputBuffer = await new Promise((resolve, reject) => {
-        const mod = imageUrl.startsWith('https') ? require('https') : require('http');
-        const req = mod.get(imageUrl, {
-          headers: {
-            // Some hosts/CDNs 403 requests with no User-Agent header.
-            'User-Agent': 'Mozilla/5.0 (compatible; ShopzenBot/1.0; +backend-image-fetch)',
-            'Accept': 'image/*'
-          }
-        }, resp => {
-          if (resp.statusCode !== 200) return reject(new Error(`HTTP ${resp.statusCode} fetching image`));
-          const chunks = [];
-          resp.on('data', c => chunks.push(c));
-          resp.on('end', () => resolve(Buffer.concat(chunks)));
-          resp.on('error', reject);
-        });
-        req.on('error', reject);
+        function doFetch(url, redirectsLeft) {
+          const mod = url.startsWith('https') ? require('https') : require('http');
+          const req = mod.get(url, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (compatible; ShopzenBot/1.0; +backend-image-fetch)',
+              'Accept': 'image/*'
+            }
+          }, resp => {
+            console.log(`[remove-background] fetch status ${resp.statusCode} for ${url}`);
+            if ([301, 302, 303, 307, 308].includes(resp.statusCode) && resp.headers.location && redirectsLeft > 0) {
+              resp.resume(); // discard body
+              const nextUrl = new URL(resp.headers.location, url).toString();
+              console.log(`[remove-background] following redirect to ${nextUrl}`);
+              return doFetch(nextUrl, redirectsLeft - 1);
+            }
+            if (resp.statusCode !== 200) {
+              console.log(`[remove-background] non-200 response headers:`, resp.headers);
+              return reject(new Error(`HTTP ${resp.statusCode} fetching image`));
+            }
+            const chunks = [];
+            resp.on('data', c => chunks.push(c));
+            resp.on('end', () => resolve(Buffer.concat(chunks)));
+            resp.on('error', reject);
+          });
+          req.on('error', err => {
+            console.log(`[remove-background] request error:`, err.message);
+            reject(err);
+          });
+        }
+        doFetch(imageUrl, 5);
       });
     } else {
       // Relative /uploads/... — read directly from disk, no HTTP round-trip
@@ -726,7 +746,7 @@ router.post('/remove-background', async (req, res) => {
     res.json({ dataUrl: `data:image/png;base64,${resultBuf.toString('base64')}` });
 
   } catch (err) {
-    console.error('[remove-background]', err.message);
+    console.error('[remove-background]', err.message, '| imageUrl:', req.body?.imageUrl);
     res.status(500).json({ message: err.message });
   }
 });
