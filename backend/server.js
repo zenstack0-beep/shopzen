@@ -158,6 +158,7 @@ app.use('/api/admin', auditLog, require('./routes/admin'));
 // ─── Other routes ─────────────────────────────────────────────────────────────
 app.use('/api/whatsapp',      require('./routes/whatsapp'));
 app.use('/api/social-media',  require('./routes/socialMedia'));
+app.use('/api/ai-post-creator', require('./routes/aiPostCreator'));
 app.use('/api/automation',    require('./routes/automation'));
 app.use('/api/deals',         require('./routes/deals'));
 app.use('/api/ai',            require('./routes/ai'));

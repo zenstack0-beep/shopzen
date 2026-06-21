@@ -1,9 +1,11 @@
 /**
- * routes/products.js  — with automation hooks + Excel export
+ * routes/products.js  — with automation hooks + Excel export + IMAGE NORMALIZATION
  *
  *   POST /       → fires 'new_product'      trigger after product create
  *   PUT  /:id    → fires 'product_discount' trigger when salePrice is set/changed
  *   GET  /admin/export/excel → streams a full product list as .xlsx
+ * 
+ *   NEW: All routes that return products now include image URL normalization middleware
  */
 const express = require('express');
 const router  = express.Router();
@@ -12,6 +14,9 @@ const Product = require('../models/Product');
 const { Category } = require('../models/index');
 const { adminAuth } = require('../middleware/auth');
 const { dispatchForTrigger, manualPublish } = require('../services/publisherService');
+
+// ─── IMAGE URL NORMALIZATION MIDDLEWARE ─────────────────────────────────────
+const { normalizeImagesMiddleware } = require('../utils/imageUrlHelper');
 
 // In-memory upload for bulk-import excel files (not saved to disk)
 const bulkUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -614,7 +619,7 @@ router.get('/admin/brands', adminAuth, async (req, res) => {
 //      → returns those specific products by _id (used to re-hydrate chips when editing a coupon)
 //   3. Search mode: ?search=keyword
 //      → full-text name search across all active products (used by excluded products picker)
-router.get('/admin/lookup', adminAuth, async (req, res) => {
+router.get('/admin/lookup', normalizeImagesMiddleware(), adminAuth, async (req, res) => {
   try {
     const { brand, category, subCategory, ids, search } = req.query;
 
@@ -667,7 +672,7 @@ router.get('/admin/lookup', adminAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
-router.get('/admin/all', adminAuth, async (req, res) => {
+router.get('/admin/all', normalizeImagesMiddleware(), adminAuth, async (req, res) => {
   try {
     const { search, category, brand, status, stock, page = 1, limit = 20 } = req.query;
     const filter = {};
@@ -804,8 +809,8 @@ router.delete('/:id', adminAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
-// Public — list with filters
-router.get('/', async (req, res) => {
+// Public — list with filters (✅ WITH IMAGE NORMALIZATION)
+router.get('/', normalizeImagesMiddleware(), async (req, res) => {
   try {
     const { category, subCategory, search, minPrice, maxPrice, sort, page = 1, limit = 12, featured, onSale, brand } = req.query;
     const filter = { isActive: true };
@@ -853,9 +858,9 @@ router.get('/', async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
-// Public — similar products by product ID (scored by tags, category, brand, price range)
+// Public — similar products by product ID (scored by tags, category, brand, price range) (✅ WITH IMAGE NORMALIZATION)
 // GET /api/products/:id/similar?limit=6
-router.get('/:id/similar', async (req, res) => {
+router.get('/:id/similar', normalizeImagesMiddleware(), async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit) || 6, 12);
     const source = await Product.findById(req.params.id).populate('category', 'name slug').lean();
@@ -922,8 +927,8 @@ router.get('/:id/similar', async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
-// Public — single product by slug (wildcard — MUST be last)
-router.get('/:slug', async (req, res) => {
+// Public — single product by slug (wildcard — MUST be last) (✅ WITH IMAGE NORMALIZATION)
+router.get('/:slug', normalizeImagesMiddleware(), async (req, res) => {
   try {
     const product = await Product.findOneAndUpdate(
       { slug: req.params.slug, isActive: true },

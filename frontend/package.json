@@ -5,6 +5,7 @@
   "dependencies": {
     "@headlessui/react": "^1.7.17",
     "@heroicons/react": "^2.0.18",
+    "@imgly/background-removal": "^1.5.7",
     "autoprefixer": "^10.4.19",
     "axios": "^1.4.0",
     "gsap": "^3.12.5",

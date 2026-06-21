@@ -213,7 +213,14 @@ const globalLimiter = rateLimit({
   // SECURITY: Skip rate limiting for the health-check endpoint so monitoring
   //           tools never get blocked by their own probes. Also skip
   //           entirely outside production (see DEV NOTE above).
-  skip: (req) => !isProd || req.path === '/api/health',
+  skip: (req) => {
+    if (!isProd) return true;                              // dev: no limit
+    if (req.path === '/api/health') return true;           // health probes
+    // Exempt cheap read-only admin endpoints that would otherwise be
+    // hammered by rapid UI navigation (e.g. template list, product picker).
+    if (req.path === '/api/ai-post-creator/templates') return true;
+    return false;
+  },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
