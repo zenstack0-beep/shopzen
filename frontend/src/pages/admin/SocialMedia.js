@@ -1,12 +1,18 @@
 /**
- * SocialMedia.js  — Admin Social Media Automation Settings
+ * SocialMedia.js  — Admin Social Media Automation Settings + Post Management
  * Path: frontend/src/pages/admin/SocialMedia.js
  *
- * Matches ShopZen's existing design system (form-input, form-label, btn-primary,
- * Toggle, SaveBar patterns from Settings.js) and uses the same API utility.
+ * MODIFIED: Added "Post Management" tab for bulk product posting with:
+ *   - Filter by brand / category
+ *   - Product selection with checkboxes
+ *   - Platform selection
+ *   - Rate-limiting config (posts per minute + delay between posts)
+ *   - Live progress display
+ *   - Results summary (posted / failed)
+ *   - Posted products marked; unlimited repost support
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import API from '../../utils/api';
 import toast from 'react-hot-toast';
 
@@ -115,7 +121,7 @@ const PLATFORMS = [
 
 const PLATFORM_IDS = PLATFORMS.map(p => p.id);
 
-// ─── Shared UI primitives (must be module-level to avoid remount on re-render) ─
+// ─── Shared UI primitives ─────────────────────────────────────────────────────
 
 const F = ({ label, value, onChange, type = 'text', placeholder, hint, col2, disabled }) => (
   <div className={col2 ? 'sm:col-span-2' : ''}>
@@ -234,7 +240,6 @@ function TokenHealthBanner({ platform, status, onRefresh, refreshing }) {
     );
   }
 
-  // isWarning
   return (
     <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-xl">
       <div className="flex items-start justify-between gap-3">
@@ -260,7 +265,6 @@ function TokenHealthBanner({ platform, status, onRefresh, refreshing }) {
   );
 }
 
-// ─── Token Expiry Badge (shown in connection status line) ─────────────────────
 function TokenExpiryBadge({ status }) {
   if (!status || !status.tokenExpiresAt) return null;
   const daysLeft = Math.ceil((new Date(status.tokenExpiresAt) - Date.now()) / 86400000);
@@ -269,36 +273,394 @@ function TokenExpiryBadge({ status }) {
   return <span className="text-xs text-gray-400">Token valid · {daysLeft}d left</span>;
 }
 
+// ─── Post Management Tab ──────────────────────────────────────────────────────
+function PostManagementTab({ connectedPlatforms }) {
+  // Filters
+  const [brands, setBrands]           = useState([]);
+  const [categories, setCategories]   = useState([]);
+  const [filterBrand, setFilterBrand] = useState('');
+  const [filterCat, setFilterCat]     = useState('');
+
+  // Products
+  const [products, setProducts]       = useState([]);
+  const [loadingProds, setLoadingProds] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+
+  // Platform selection
+  const [selPlatforms, setSelPlatforms] = useState(new Set());
+
+  // Rate-limit config
+  const [postsPerMin, setPostsPerMin] = useState(5);
+  const [delayBetweenMs, setDelayMs]  = useState(3000);
+
+  // Bulk post state
+  const [running, setRunning]         = useState(false);
+  const [progress, setProgress]       = useState(null); // { total, done, success, fail, current }
+  const [results, setResults]         = useState(null); // final summary
+  const abortRef                      = useRef(false);
+
+  // Track which productIds have been posted (per-session badge)
+  const [postedIds, setPostedIds]     = useState(new Set());
+
+  // ── Load brands + categories on mount ──────────────────────────────────────
+  useEffect(() => {
+    API.get('/products/admin/brands').then(r => setBrands(r.data || [])).catch(() => {});
+    API.get('/categories').then(r => setCategories(r.data || [])).catch(() => {});
+  }, []);
+
+  // ── Load products whenever filter changes ───────────────────────────────────
+  useEffect(() => {
+    const load = async () => {
+      setLoadingProds(true);
+      setSelectedIds(new Set());
+      try {
+        const params = new URLSearchParams({ limit: 200, status: 'active' });
+        if (filterBrand) params.set('brand', filterBrand);
+        if (filterCat)   params.set('category', filterCat);
+        const { data } = await API.get(`/products/admin/all?${params}`);
+        setProducts(data.products || []);
+      } catch {
+        toast.error('Failed to load products');
+      } finally {
+        setLoadingProds(false);
+      }
+    };
+    load();
+  }, [filterBrand, filterCat]);
+
+  const toggleProduct  = (id) => setSelectedIds(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleAllProds = () => {
+    if (selectedIds.size === products.length) setSelectedIds(new Set());
+    else setSelectedIds(new Set(products.map(p => p._id)));
+  };
+  const togglePlatform = (pid) => setSelPlatforms(s => { const n = new Set(s); n.has(pid) ? n.delete(pid) : n.add(pid); return n; });
+
+  // ── Bulk post runner ────────────────────────────────────────────────────────
+  const startBulkPost = async () => {
+    if (selectedIds.size === 0)   return toast.error('Select at least one product');
+    if (selPlatforms.size === 0)  return toast.error('Select at least one platform');
+
+    const productList  = products.filter(p => selectedIds.has(p._id));
+    const platformList = [...selPlatforms];
+    // Each product × each platform = one post
+    const jobs = [];
+    for (const product of productList) {
+      for (const platform of platformList) {
+        jobs.push({ productId: product._id, productName: product.name, platform });
+      }
+    }
+
+    const minIntervalMs = Math.ceil(60000 / postsPerMin); // ms between posts based on rate limit
+    const waitMs        = Math.max(delayBetweenMs, minIntervalMs);
+
+    abortRef.current = false;
+    setRunning(true);
+    setResults(null);
+    setProgress({ total: jobs.length, done: 0, success: 0, fail: 0, current: '' });
+
+    let success = 0, fail = 0;
+    const failDetails = [];
+
+    for (let i = 0; i < jobs.length; i++) {
+      if (abortRef.current) break;
+
+      const job = jobs[i];
+      setProgress(p => ({ ...p, done: i, current: `${job.productName} → ${job.platform}` }));
+
+      try {
+        // Use a 120s timeout for bulk-post — Instagram can take 60-90s due to
+        // container polling. A timeout does NOT mean the post failed; the backend
+        // may have already published successfully before the connection closed.
+        await API.post('/social-media/bulk-post', {
+          productId: job.productId,
+          platform:  job.platform,
+        }, { timeout: 120000 });
+        success++;
+        setPostedIds(s => new Set([...s, job.productId]));
+      } catch (err) {
+        const isTimeout = err.code === 'ECONNABORTED' || err.message?.includes('timeout');
+        if (isTimeout) {
+          // Timeout means the request took too long to respond, but the backend
+          // may have already posted successfully. Mark as "posted (unconfirmed)".
+          success++;
+          setPostedIds(s => new Set([...s, job.productId]));
+          failDetails.push({
+            name: job.productName,
+            platform: job.platform,
+            error: '⚠️ Timeout — post likely published but confirmation was not received',
+            warn: true,
+          });
+        } else {
+          fail++;
+          failDetails.push({ name: job.productName, platform: job.platform, error: err.response?.data?.message || err.message });
+        }
+      }
+
+      // Rate-limit delay (skip after last job)
+      if (i < jobs.length - 1 && !abortRef.current) {
+        await new Promise(r => setTimeout(r, waitMs));
+      }
+    }
+
+    setProgress(null);
+    setRunning(false);
+    setResults({ total: jobs.length, success, fail, failDetails, aborted: abortRef.current });
+  };
+
+  const stopBulkPost = () => { abortRef.current = true; };
+
+  const connectedIds = connectedPlatforms || [];
+
+  return (
+    <div className="space-y-6">
+
+      {/* ── Filters ── */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+        <h2 className="text-sm font-semibold text-gray-800 mb-4">Filter Products</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="form-label">Brand</label>
+            <select value={filterBrand} onChange={e => setFilterBrand(e.target.value)} className="form-input">
+              <option value="">All Brands</option>
+              {brands.map(b => <option key={b} value={b}>{b}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="form-label">Category</label>
+            <select value={filterCat} onChange={e => setFilterCat(e.target.value)} className="form-input">
+              <option value="">All Categories</option>
+              {categories.map(c => <option key={c._id} value={c._id}>{c.name}</option>)}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Product list ── */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <div className="flex items-center gap-3">
+            <input type="checkbox" className="w-4 h-4 rounded accent-primary cursor-pointer"
+              checked={products.length > 0 && selectedIds.size === products.length}
+              onChange={toggleAllProds} />
+            <span className="text-sm font-semibold text-gray-800">
+              Products {loadingProds ? '(loading…)' : `(${products.length})`}
+            </span>
+          </div>
+          {selectedIds.size > 0 && (
+            <span className="text-xs text-primary font-medium bg-primary/10 px-2 py-1 rounded-full">
+              {selectedIds.size} selected
+            </span>
+          )}
+        </div>
+
+        {loadingProds ? (
+          <div className="p-8 text-center text-gray-400 text-sm animate-pulse">Loading products…</div>
+        ) : products.length === 0 ? (
+          <div className="p-8 text-center text-gray-400 text-sm">No active products found for the selected filters.</div>
+        ) : (
+          <div className="divide-y divide-gray-50 max-h-96 overflow-y-auto">
+            {products.map(p => {
+              const isPosted  = postedIds.has(p._id);
+              const isChecked = selectedIds.has(p._id);
+              return (
+                <div
+                  key={p._id}
+                  onClick={() => toggleProduct(p._id)}
+                  className={`flex items-center gap-3 px-5 py-3 cursor-pointer hover:bg-gray-50 transition-colors ${isChecked ? 'bg-primary/5' : ''}`}
+                >
+                  <input type="checkbox" className="w-4 h-4 rounded accent-primary flex-shrink-0"
+                    checked={isChecked} onChange={() => {}} onClick={e => e.stopPropagation()} />
+                  {(p.thumbnail || p.images?.[0]) && (
+                    <img src={p.thumbnail || p.images[0]} alt={p.name}
+                      className="w-10 h-10 rounded-lg object-cover flex-shrink-0 border border-gray-100" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-800 truncate">{p.name}</p>
+                    <p className="text-xs text-gray-400">{p.brand || '—'} · LKR {(p.salePrice || p.price)?.toLocaleString()}</p>
+                  </div>
+                  {isPosted && (
+                    <span className="flex-shrink-0 text-xs font-medium text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full">
+                      ✓ Posted
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ── Platform + Rate-limit config ── */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+        <h2 className="text-sm font-semibold text-gray-800 mb-4">Post Settings</h2>
+
+        <div className="mb-5">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Select Platforms</p>
+          <div className="flex flex-wrap gap-2">
+            {PLATFORMS.map(p => {
+              const isConnected = connectedIds.includes(p.id);
+              const isSel = selPlatforms.has(p.id);
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => isConnected && togglePlatform(p.id)}
+                  title={!isConnected ? 'Platform not connected' : ''}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-all
+                    ${isSel && isConnected ? 'border-transparent text-white shadow-sm' : 'border-gray-200 text-gray-400 bg-gray-50'}
+                    ${!isConnected ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'}`}
+                  style={{ background: isSel && isConnected ? p.color : undefined }}
+                >
+                  <span className="opacity-90">{p.icon}</span>
+                  {p.label.split(' ')[0]}
+                  {isSel && isConnected && <span className="opacity-80">✓</span>}
+                  {!isConnected && <span className="opacity-60 text-gray-400">(not connected)</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-gray-100">
+          <div>
+            <label className="form-label">Posts per minute (rate limit)</label>
+            <input
+              type="number" min="1" max="60" value={postsPerMin}
+              onChange={e => setPostsPerMin(Math.max(1, Math.min(60, Number(e.target.value))))}
+              className="form-input"
+            />
+            <p className="text-xs text-gray-400 mt-1">Keeps posting under platform API limits. Max 60.</p>
+          </div>
+          <div>
+            <label className="form-label">Minimum delay between posts (ms)</label>
+            <input
+              type="number" min="500" max="60000" step="500" value={delayBetweenMs}
+              onChange={e => setDelayMs(Math.max(500, Number(e.target.value)))}
+              className="form-input"
+            />
+            <p className="text-xs text-gray-400 mt-1">Protects against system overload. Min 500ms.</p>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Progress bar ── */}
+      {running && progress && (
+        <div className="bg-white rounded-2xl shadow-sm border border-blue-100 p-5">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-sm font-semibold text-gray-800">Posting in progress…</p>
+            <button onClick={stopBulkPost} className="px-3 py-1 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors">
+              Stop
+            </button>
+          </div>
+          <div className="w-full bg-gray-100 rounded-full h-2 mb-2">
+            <div
+              className="bg-primary h-2 rounded-full transition-all duration-300"
+              style={{ width: `${progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0}%` }}
+            />
+          </div>
+          <div className="flex items-center justify-between text-xs text-gray-500">
+            <span>{progress.done} / {progress.total} jobs</span>
+            <span className="text-green-600">✓ {progress.success || 0} success</span>
+            {progress.fail > 0 && <span className="text-red-500">✗ {progress.fail} failed</span>}
+          </div>
+          {progress.current && (
+            <p className="text-xs text-gray-400 mt-2 truncate">Now posting: {progress.current}</p>
+          )}
+        </div>
+      )}
+
+      {/* ── Results summary ── */}
+      {results && !running && (
+        <div className={`bg-white rounded-2xl shadow-sm border p-5 ${results.fail === 0 ? 'border-green-100' : 'border-amber-100'}`}>
+          <div className="flex items-center gap-3 mb-4">
+            <span className="text-2xl">{results.fail === 0 ? '🎉' : results.success === 0 ? '❌' : '⚠️'}</span>
+            <div>
+              <p className="font-semibold text-gray-900">
+                {results.aborted ? 'Posting stopped early' : 'Bulk post complete'}
+              </p>
+              <p className="text-sm text-gray-500">
+                {results.success} posted successfully · {results.fail} failed · {results.total} total jobs
+              </p>
+            </div>
+          </div>
+
+          {/* Progress bar summary */}
+          <div className="w-full bg-gray-100 rounded-full h-2 mb-3">
+            <div className="h-2 rounded-full bg-green-500 transition-all"
+              style={{ width: `${results.total > 0 ? Math.round((results.success / results.total) * 100) : 0}%` }} />
+          </div>
+          <div className="flex gap-4 text-xs mb-4">
+            <span className="text-green-600 font-medium">✓ {results.success} posted</span>
+            {results.fail > 0 && <span className="text-red-500 font-medium">✗ {results.fail} failed</span>}
+          </div>
+
+          {results.failDetails?.length > 0 && (
+            <details className="mt-2">
+              <summary className="text-xs font-medium text-red-600 cursor-pointer">
+                Show details ({results.failDetails.length} item{results.failDetails.length !== 1 ? 's' : ''})
+              </summary>
+              <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
+                {results.failDetails.map((f, i) => (
+                  <div key={i} className={`text-xs rounded-lg px-3 py-2 ${f.warn ? 'bg-amber-50' : 'bg-red-50'}`}>
+                    <span className={`font-medium ${f.warn ? 'text-amber-700' : 'text-red-700'}`}>{f.name} → {f.platform}</span>
+                    <span className={`ml-2 ${f.warn ? 'text-amber-500' : 'text-red-400'}`}>{f.error}</span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+        </div>
+      )}
+
+      {/* ── Action button ── */}
+      {!running && (
+        <div className="flex items-center justify-between bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+          <div className="text-sm text-gray-500">
+            {selectedIds.size > 0 && selPlatforms.size > 0
+              ? `${selectedIds.size} product${selectedIds.size !== 1 ? 's' : ''} × ${selPlatforms.size} platform${selPlatforms.size !== 1 ? 's' : ''} = ${selectedIds.size * selPlatforms.size} posts`
+              : 'Select products and platforms above to start'}
+          </div>
+          <button
+            onClick={startBulkPost}
+            disabled={selectedIds.size === 0 || selPlatforms.size === 0}
+            className="btn-primary flex items-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            🚀 Post Selected
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function SocialMediaSettings() {
+  // ── Main tab: 'accounts' | 'post-management'
+  const [mainTab, setMainTab] = useState('accounts');
+
   const [loading, setLoading]           = useState(true);
   const [settings, setSettings]         = useState(null);
   const [activePlatform, setActive]     = useState('facebook');
-  const [formData, setFormData]         = useState({});   // per-platform credential form state
-  const [saving, setSaving]             = useState({});   // { facebook: true, … }
-  const [testing, setTesting]           = useState({});   // { telegram: true, … }
+  const [formData, setFormData]         = useState({});
+  const [saving, setSaving]             = useState({});
+  const [testing, setTesting]           = useState({});
 
   const [automationSaving, setAutoSav]  = useState(false);
   const [templateSaving, setTplSav]     = useState(false);
   const [templates, setTemplates]       = useState([]);
 
-  // ── Token health state (Facebook / Instagram only) ────────────────────────
-  const [tokenStatus, setTokenStatus]   = useState({});   // { facebook: { tokenExpiresAt, reconnectNeeded, … } }
-  const [refreshing, setRefreshing]     = useState({});   // { facebook: true }
+  const [tokenStatus, setTokenStatus]   = useState({});
+  const [refreshing, setRefreshing]     = useState({});
 
-  // ── Load settings ───────────────────────────────────────────────────────────
   const load = useCallback(async () => {
     try {
       setLoading(true);
       const { data } = await API.get('/social-media');
       setSettings(data);
-      // initialise template state
       const initialTpls = PLATFORM_IDS.map(pid => {
         const existing = (data.templates || []).find(t => t.platform === pid);
         return existing || { platform: pid, template: '', hashtags: [], enabled: true };
       });
       setTemplates(initialTpls);
-      // initialise form data stubs (never pre-fill secrets from backend)
       const forms = {};
       PLATFORM_IDS.forEach(pid => {
         forms[pid] = {
@@ -306,12 +668,9 @@ export default function SocialMediaSettings() {
           accountName:  data[pid]?.accountName  || '',
           accountHandle:data[pid]?.accountHandle|| '',
           appId:        data[pid]?.appId        || '',
-          // Leave secret/token fields blank — user must re-enter to update
           appSecret:    '',
           accessToken:  '',
           accessSecret: '',
-          // WhatsApp extraConfig fields — safe to pre-fill (not secrets)
-          // extraConfig is now returned by the backend after sanitizePlatform fix
           'extraConfig.broadcastList': data[pid]?.extraConfig?.broadcastList || '',
           'extraConfig.templateName':  data[pid]?.extraConfig?.templateName  || 'hello_world',
           'extraConfig.languageCode':  data[pid]?.extraConfig?.languageCode  || 'en_US',
@@ -327,7 +686,6 @@ export default function SocialMediaSettings() {
 
   useEffect(() => { load(); }, [load]);
 
-  // ── Load token status for Facebook / Instagram ──────────────────────────
   const loadTokenStatus = useCallback(async () => {
     const results = {};
     await Promise.allSettled(
@@ -343,7 +701,6 @@ export default function SocialMediaSettings() {
 
   useEffect(() => { loadTokenStatus(); }, [loadTokenStatus]);
 
-  // ── Manual token refresh ────────────────────────────────────────────────
   const handleRefreshToken = async (pid) => {
     setRefreshing(r => ({ ...r, [pid]: true }));
     try {
@@ -358,16 +715,13 @@ export default function SocialMediaSettings() {
     }
   };
 
-  // ── Connect / Save credentials ───────────────────────────────────────────────
   const handleConnect = async (pid) => {
     setSaving(s => ({ ...s, [pid]: true }));
     try {
-      // Only send fields that have values (don't overwrite secrets with empty strings)
-      // Also convert extraConfig.* dot-notation keys into a nested extraConfig object
       const payload = {};
       const extraConfig = {};
       Object.entries(formData[pid] || {}).forEach(([k, v]) => {
-        if (v === '') return; // skip empty — don't overwrite saved secrets
+        if (v === '') return;
         if (k.startsWith('extraConfig.')) {
           extraConfig[k.replace('extraConfig.', '')] = v;
         } else {
@@ -375,7 +729,6 @@ export default function SocialMediaSettings() {
         }
       });
 
-      // ── WhatsApp-specific validation before saving ──────────────────────
       if (pid === 'whatsapp') {
         const tplName = (extraConfig.templateName || '').trim();
         if (tplName && tplName !== 'hello_world' && !/^[a-z0-9_]+$/.test(tplName)) {
@@ -389,7 +742,6 @@ export default function SocialMediaSettings() {
           setSaving(s => ({ ...s, [pid]: false }));
           return;
         }
-        // Validate broadcast list numbers
         const bList = (extraConfig.broadcastList || '').trim();
         if (bList) {
           const nums = bList.split(',').map(n => n.trim()).filter(Boolean);
@@ -413,7 +765,6 @@ export default function SocialMediaSettings() {
     }
   };
 
-  // ── Disconnect ───────────────────────────────────────────────────────────────
   const handleDisconnect = async (pid) => {
     if (!window.confirm(`Disconnect ${pid}? This will wipe all stored credentials.`)) return;
     setSaving(s => ({ ...s, [pid]: true }));
@@ -428,7 +779,6 @@ export default function SocialMediaSettings() {
     }
   };
 
-  // ── Test connection ──────────────────────────────────────────────────────────
   const handleTest = async (pid) => {
     setTesting(t => ({ ...t, [pid]: true }));
     try {
@@ -443,7 +793,6 @@ export default function SocialMediaSettings() {
     }
   };
 
-  // ── Toggle enabled ───────────────────────────────────────────────────────────
   const handleToggle = async (pid, enabled) => {
     try {
       await API.patch(`/social-media/platform/${pid}/toggle`, { enabled });
@@ -453,7 +802,6 @@ export default function SocialMediaSettings() {
     }
   };
 
-  // ── Automation settings ──────────────────────────────────────────────────────
   const handleAutomation = async (field, value) => {
     const next = { ...settings, [field]: value };
     setSettings(next);
@@ -476,7 +824,6 @@ export default function SocialMediaSettings() {
     handleAutomation('enabledPlatforms', next);
   };
 
-  // ── Templates ────────────────────────────────────────────────────────────────
   const updateTemplate = (pid, field, value) => {
     setTemplates(ts => ts.map(t => t.platform === pid ? { ...t, [field]: value } : t));
   };
@@ -493,14 +840,10 @@ export default function SocialMediaSettings() {
     }
   };
 
-  // ── Form field helper ─────────────────────────────────────────────────────────
-  // Keys like 'extraConfig.broadcastList' are stored flat in formData and
-  // converted to nested objects in handleConnect before sending to the API.
   const setField = (pid, key, val) => {
     setFormData(f => ({ ...f, [pid]: { ...f[pid], [key]: val } }));
   };
 
-  // ─── Loading skeleton ────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="p-6 space-y-4 animate-pulse">
@@ -516,6 +859,9 @@ export default function SocialMediaSettings() {
   const activeForm  = formData[activePlatform]   || {};
   const activeTpl   = templates.find(t => t.platform === activePlatform) || { template: '', hashtags: [], enabled: true };
 
+  // Connected platforms for Post Management tab
+  const connectedPlatformIds = PLATFORM_IDS.filter(pid => settings?.[pid]?.connected && settings?.[pid]?.enabled);
+
   return (
     <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-6">
 
@@ -527,314 +873,329 @@ export default function SocialMediaSettings() {
           </svg>
         </div>
         <div>
-          <h1 className="text-xl font-bold text-gray-900">Social Media Automation</h1>
-          <p className="text-sm text-gray-500">Connect accounts and configure auto-posting</p>
+          <h1 className="text-xl font-bold text-gray-900">Social Media</h1>
+          <p className="text-sm text-gray-500">Connect accounts, configure automation, and bulk-post products</p>
         </div>
       </div>
 
-      {/* ── Global automation toggle ── */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-        <h2 className="text-sm font-semibold text-gray-800 mb-3">Global Automation</h2>
-        <Toggle
-          label="Enable Social Media Automation"
-          desc="When enabled, new products and promotions can be auto-posted to connected platforms"
-          value={!!settings?.automationEnabled}
-          onChange={() => handleAutomation('automationEnabled', !settings?.automationEnabled)}
-        />
-        {settings?.automationEnabled && (
-          <div className="mt-4">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Platforms enabled for automation</p>
-            <div className="flex flex-wrap gap-2">
+      {/* ── Main Tab Strip ── */}
+      <div className="flex border-b border-gray-200">
+        <button
+          onClick={() => setMainTab('accounts')}
+          className={`px-5 py-3 text-sm font-medium border-b-2 transition-all ${mainTab === 'accounts' ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+        >
+          Account Settings
+        </button>
+        <button
+          onClick={() => setMainTab('post-management')}
+          className={`px-5 py-3 text-sm font-medium border-b-2 transition-all flex items-center gap-2 ${mainTab === 'post-management' ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+        >
+          Post Management
+          {connectedPlatformIds.length > 0 && (
+            <span className="bg-primary/10 text-primary text-xs font-semibold px-1.5 py-0.5 rounded-full">{connectedPlatformIds.length}</span>
+          )}
+        </button>
+      </div>
+
+      {/* ── Post Management Tab ── */}
+      {mainTab === 'post-management' && (
+        <PostManagementTab connectedPlatforms={connectedPlatformIds} />
+      )}
+
+      {/* ── Account Settings Tab ── */}
+      {mainTab === 'accounts' && (
+        <>
+          {/* ── Global automation toggle ── */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+            <h2 className="text-sm font-semibold text-gray-800 mb-3">Global Automation</h2>
+            <Toggle
+              label="Enable Social Media Automation"
+              desc="When enabled, new products and promotions can be auto-posted to connected platforms"
+              value={!!settings?.automationEnabled}
+              onChange={() => handleAutomation('automationEnabled', !settings?.automationEnabled)}
+            />
+            {settings?.automationEnabled && (
+              <div className="mt-4">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Platforms enabled for automation</p>
+                <div className="flex flex-wrap gap-2">
+                  {PLATFORMS.map(p => {
+                    const on = (settings?.enabledPlatforms || []).includes(p.id);
+                    const connected = settings?.[p.id]?.connected;
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => connected && toggleEnabledPlatform(p.id)}
+                        title={!connected ? 'Connect this platform first' : ''}
+                        className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                          on && connected
+                            ? 'border-transparent text-white shadow-sm'
+                            : 'border-gray-200 text-gray-400 bg-gray-50'
+                        } ${!connected ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+                        style={{ background: on && connected ? p.color : undefined }}
+                      >
+                        <span className="opacity-90">{p.icon}</span>
+                        {p.label}
+                        {on && connected && <span className="opacity-80">✓</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+                {automationSaving && <p className="text-xs text-gray-400 mt-2">Saving…</p>}
+              </div>
+            )}
+          </div>
+
+          {/* ── Platform tabs + detail ── */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="flex overflow-x-auto border-b border-gray-100 scrollbar-none" style={{ scrollbarWidth: 'none' }}>
               {PLATFORMS.map(p => {
-                const on = (settings?.enabledPlatforms || []).includes(p.id);
-                const connected = settings?.[p.id]?.connected;
+                const pd = settings?.[p.id] || {};
+                const isActive = activePlatform === p.id;
                 return (
                   <button
                     key={p.id}
-                    onClick={() => connected && toggleEnabledPlatform(p.id)}
-                    title={!connected ? 'Connect this platform first' : ''}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
-                      on && connected
-                        ? 'border-transparent text-white shadow-sm'
-                        : 'border-gray-200 text-gray-400 bg-gray-50'
-                    } ${!connected ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
-                    style={{ background: on && connected ? p.color : undefined }}
+                    onClick={() => setActive(p.id)}
+                    className={`flex items-center gap-2 px-4 py-3.5 text-sm font-medium whitespace-nowrap border-b-2 transition-all flex-shrink-0 ${
+                      isActive ? 'border-primary text-primary bg-primary/5' : 'border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-50'
+                    }`}
                   >
-                    <span className="opacity-90">{p.icon}</span>
-                    {p.label}
-                    {on && connected && <span className="opacity-80">✓</span>}
-                  </button>
-                );
-              })}
-            </div>
-            {automationSaving && <p className="text-xs text-gray-400 mt-2">Saving…</p>}
-          </div>
-        )}
-      </div>
-
-      {/* ── Platform tabs + detail ── */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-
-        {/* Tab strip */}
-        <div className="flex overflow-x-auto border-b border-gray-100 scrollbar-none" style={{ scrollbarWidth: 'none' }}>
-          {PLATFORMS.map(p => {
-            const pd = settings?.[p.id] || {};
-            const isActive = activePlatform === p.id;
-            return (
-              <button
-                key={p.id}
-                onClick={() => setActive(p.id)}
-                className={`flex items-center gap-2 px-4 py-3.5 text-sm font-medium whitespace-nowrap border-b-2 transition-all flex-shrink-0 ${
-                  isActive ? 'border-primary text-primary bg-primary/5' : 'border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-50'
-                }`}
-              >
-                <span style={{ color: isActive ? p.color : undefined }}>{p.icon}</span>
-                <span className="hidden sm:inline">{p.label.split(' ')[0]}</span>
-                {/* status dot */}
-                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                  pd.connected && pd.lastTestStatus === 'ok'    ? 'bg-green-400' :
-                  pd.connected && pd.lastTestStatus === 'error' ? 'bg-red-400' :
-                  pd.connected                                  ? 'bg-yellow-400' :
-                                                                  'bg-gray-200'
-                }`} />
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Platform detail */}
-        <div className="p-5 sm:p-6">
-          <div className="flex items-start justify-between flex-wrap gap-3 mb-5">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white" style={{ background: activeMeta.color }}>
-                {activeMeta.icon}
-              </div>
-              <div>
-                <p className="font-semibold text-gray-900">{activeMeta.label}</p>
-                {activeData.connected ? (
-                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
-                    <span className="text-xs text-green-600 font-medium">Connected</span>
-                    {activeData.accountName && (
-                      <span className="text-xs text-gray-400">— {activeData.accountName}</span>
-                    )}
-                    {(activePlatform === 'facebook' || activePlatform === 'instagram') && tokenStatus[activePlatform] && (
-                      <TokenExpiryBadge status={tokenStatus[activePlatform]} />
-                    )}
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-gray-300 inline-block" />
-                    <span className="text-xs text-gray-400">Not connected</span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Action buttons */}
-            <div className="flex items-center gap-2 flex-wrap">
-              {activeData.connected && (
-                <>
-                  <StatusBadge status={activeData.lastTestStatus} />
-                  <Toggle
-                    label="Enabled"
-                    value={!!activeData.enabled}
-                    onChange={() => handleToggle(activePlatform, !activeData.enabled)}
-                  />
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Setup guide */}
-          {!activeData.connected && (
-            <div className="mb-5 p-4 bg-blue-50 rounded-xl border border-blue-100 text-sm text-blue-700">
-              <p className="font-semibold mb-1">📋 Setup Guide</p>
-              <p>{activeMeta.guide}</p>
-            </div>
-          )}
-
-          {/* Token health banner — Facebook / Instagram only */}
-          {(activePlatform === 'facebook' || activePlatform === 'instagram') && activeData.connected && (
-            <TokenHealthBanner
-              platform={activePlatform}
-              status={tokenStatus[activePlatform]}
-              onRefresh={handleRefreshToken}
-              refreshing={!!refreshing[activePlatform]}
-            />
-          )}
-
-          {/* Credential fields */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
-            {activeMeta.fields.map(field => (
-              <F
-                key={field.key}
-                label={field.label}
-                type={field.type || 'text'}
-                placeholder={
-                  field.type === 'password' && activeData[`has${field.key.charAt(0).toUpperCase() + field.key.slice(1)}`]
-                    ? '(unchanged — enter new value to update)'
-                    : field.placeholder
-                }
-                value={activeForm[field.key] || ''}
-                onChange={e => setField(activePlatform, field.key, e.target.value)}
-                hint={field.hint}
-              />
-            ))}
-          </div>
-
-          {/* Last test result */}
-          {activeData.lastTestMessage && (
-            <div className={`mb-4 p-3 rounded-xl text-sm ${activeData.lastTestStatus === 'ok' ? 'bg-green-50 text-green-700 border border-green-100' : 'bg-red-50 text-red-700 border border-red-100'}`}>
-              {activeData.lastTestStatus === 'ok' ? '✓ ' : '✗ '}{activeData.lastTestMessage}
-              {activeData.lastTested && (
-                <span className="ml-2 text-xs opacity-60">— tested {new Date(activeData.lastTested).toLocaleString()}</span>
-              )}
-            </div>
-          )}
-
-          {/* Action row */}
-          <div className="flex items-center gap-3 flex-wrap">
-            <button
-              onClick={() => handleConnect(activePlatform)}
-              disabled={saving[activePlatform]}
-              className="btn-primary flex items-center gap-2 text-sm"
-            >
-              {saving[activePlatform] ? <><Spinner /> Saving…</> : (activeData.connected ? '↑ Update Credentials' : '🔗 Connect Account')}
-            </button>
-
-            {activeData.connected && (
-              <>
-                <button
-                  onClick={() => handleTest(activePlatform)}
-                  disabled={testing[activePlatform]}
-                  className="px-4 py-2 text-sm font-medium bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl transition-colors flex items-center gap-2"
-                >
-                  {testing[activePlatform] ? <><Spinner /> Testing…</> : '⚡ Test Connection'}
-                </button>
-                <button
-                  onClick={() => handleDisconnect(activePlatform)}
-                  disabled={saving[activePlatform]}
-                  className="px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-xl transition-colors"
-                >
-                  Disconnect
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* ── Post Templates ── */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6">
-        <h2 className="text-sm font-semibold text-gray-800 mb-1">Post Templates</h2>
-        <p className="text-xs text-gray-400 mb-4">
-          Default templates used when auto-posting. Use <code className="bg-gray-100 px-1 rounded">{'{{productName}}'}</code>, <code className="bg-gray-100 px-1 rounded">{'{{price}}'}</code>, <code className="bg-gray-100 px-1 rounded">{'{{url}}'}</code> as variables.
-        </p>
-
-        {/* Platform sub-tabs */}
-        <div className="flex gap-1.5 flex-wrap mb-4">
-          {PLATFORMS.map(p => (
-            <button
-              key={p.id}
-              onClick={() => setActive(p.id)}
-              className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${activePlatform === p.id ? 'text-white shadow-sm' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
-              style={{ background: activePlatform === p.id ? p.color : undefined }}
-            >
-              {p.label.split(' ')[0]}
-            </button>
-          ))}
-        </div>
-
-        <div className="space-y-4">
-          <div>
-            <label className="form-label">Post Template for {activeMeta.label}</label>
-            <textarea
-              rows={4}
-              value={activeTpl.template}
-              onChange={e => updateTemplate(activePlatform, 'template', e.target.value)}
-              placeholder={`🛍️ Check out {{productName}}!\n\nNow only LKR {{price}} — limited stock!\n\nShop now 👉 {{url}}`}
-              className="form-input resize-none"
-            />
-          </div>
-          <div>
-            <label className="form-label">Default Hashtags (comma-separated)</label>
-            <input
-              type="text"
-              value={(activeTpl.hashtags || []).join(', ')}
-              onChange={e => updateTemplate(
-                activePlatform,
-                'hashtags',
-                e.target.value.split(',').map(h => h.trim()).filter(Boolean)
-              )}
-              placeholder="#shopzen, #sale, #newproduct, #srilanka"
-              className="form-input"
-            />
-            {activeTpl.hashtags?.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mt-2">
-                {activeTpl.hashtags.map((tag, i) => (
-                  <span key={i} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">#{tag.replace(/^#/, '')}</span>
-                ))}
-              </div>
-            )}
-          </div>
-          <Toggle
-            label="Enable template for this platform"
-            desc="Disable to skip auto-posting for this platform while keeping the template"
-            value={!!activeTpl.enabled}
-            onChange={() => updateTemplate(activePlatform, 'enabled', !activeTpl.enabled)}
-          />
-        </div>
-
-        {/* Template save bar */}
-        <div className="mt-6 pt-5 border-t border-gray-100 flex items-center justify-between">
-          <p className="text-xs text-gray-400">Templates apply to all future auto-posts</p>
-          <button onClick={saveTemplates} disabled={templateSaving} className="btn-primary flex items-center gap-2 text-sm">
-            {templateSaving ? <><Spinner /> Saving…</> : '✓ Save Templates'}
-          </button>
-        </div>
-      </div>
-
-      {/* ── Connection status overview ── */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-        <h2 className="text-sm font-semibold text-gray-800 mb-4">Connection Overview</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {PLATFORMS.map(p => {
-            const pd = settings?.[p.id] || {};
-            return (
-              <div
-                key={p.id}
-                onClick={() => setActive(p.id)}
-                className="flex items-center gap-3 p-3 rounded-xl border border-gray-100 hover:border-gray-200 hover:bg-gray-50 cursor-pointer transition-all"
-              >
-                <div className="w-9 h-9 rounded-lg flex items-center justify-center text-white flex-shrink-0" style={{ background: p.color }}>
-                  {p.icon}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-gray-800 truncate">{p.label}</p>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                    <span style={{ color: isActive ? p.color : undefined }}>{p.icon}</span>
+                    <span className="hidden sm:inline">{p.label.split(' ')[0]}</span>
+                    <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
                       pd.connected && pd.lastTestStatus === 'ok'    ? 'bg-green-400' :
                       pd.connected && pd.lastTestStatus === 'error' ? 'bg-red-400' :
                       pd.connected                                  ? 'bg-yellow-400' :
                                                                       'bg-gray-200'
                     }`} />
-                    <span className="text-xs text-gray-400 truncate">
-                      {pd.connected
-                        ? pd.accountName || (pd.lastTestStatus === 'ok' ? 'Verified' : 'Connected')
-                        : 'Not connected'}
-                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="p-5 sm:p-6">
+              <div className="flex items-start justify-between flex-wrap gap-3 mb-5">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white" style={{ background: activeMeta.color }}>
+                    {activeMeta.icon}
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-900">{activeMeta.label}</p>
+                    {activeData.connected ? (
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
+                        <span className="text-xs text-green-600 font-medium">Connected</span>
+                        {activeData.accountName && (
+                          <span className="text-xs text-gray-400">— {activeData.accountName}</span>
+                        )}
+                        {(activePlatform === 'facebook' || activePlatform === 'instagram') && tokenStatus[activePlatform] && (
+                          <TokenExpiryBadge status={tokenStatus[activePlatform]} />
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-gray-300 inline-block" />
+                        <span className="text-xs text-gray-400">Not connected</span>
+                      </div>
+                    )}
                   </div>
                 </div>
-                {pd.connected && pd.enabled && (
-                  <span className="text-xs text-green-600 bg-green-50 px-1.5 py-0.5 rounded-full flex-shrink-0">On</span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {activeData.connected && (
+                    <>
+                      <StatusBadge status={activeData.lastTestStatus} />
+                      <Toggle
+                        label="Enabled"
+                        value={!!activeData.enabled}
+                        onChange={() => handleToggle(activePlatform, !activeData.enabled)}
+                      />
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {!activeData.connected && (
+                <div className="mb-5 p-4 bg-blue-50 rounded-xl border border-blue-100 text-sm text-blue-700">
+                  <p className="font-semibold mb-1">📋 Setup Guide</p>
+                  <p>{activeMeta.guide}</p>
+                </div>
+              )}
+
+              {(activePlatform === 'facebook' || activePlatform === 'instagram') && activeData.connected && (
+                <TokenHealthBanner
+                  platform={activePlatform}
+                  status={tokenStatus[activePlatform]}
+                  onRefresh={handleRefreshToken}
+                  refreshing={!!refreshing[activePlatform]}
+                />
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+                {activeMeta.fields.map(field => (
+                  <F
+                    key={field.key}
+                    label={field.label}
+                    type={field.type || 'text'}
+                    placeholder={
+                      field.type === 'password' && activeData[`has${field.key.charAt(0).toUpperCase() + field.key.slice(1)}`]
+                        ? '(unchanged — enter new value to update)'
+                        : field.placeholder
+                    }
+                    value={activeForm[field.key] || ''}
+                    onChange={e => setField(activePlatform, field.key, e.target.value)}
+                    hint={field.hint}
+                  />
+                ))}
+              </div>
+
+              {activeData.lastTestMessage && (
+                <div className={`mb-4 p-3 rounded-xl text-sm ${activeData.lastTestStatus === 'ok' ? 'bg-green-50 text-green-700 border border-green-100' : 'bg-red-50 text-red-700 border border-red-100'}`}>
+                  {activeData.lastTestStatus === 'ok' ? '✓ ' : '✗ '}{activeData.lastTestMessage}
+                  {activeData.lastTested && (
+                    <span className="ml-2 text-xs opacity-60">— tested {new Date(activeData.lastTested).toLocaleString()}</span>
+                  )}
+                </div>
+              )}
+
+              <div className="flex items-center gap-3 flex-wrap">
+                <button
+                  onClick={() => handleConnect(activePlatform)}
+                  disabled={saving[activePlatform]}
+                  className="btn-primary flex items-center gap-2 text-sm"
+                >
+                  {saving[activePlatform] ? <><Spinner /> Saving…</> : (activeData.connected ? '↑ Update Credentials' : '🔗 Connect Account')}
+                </button>
+
+                {activeData.connected && (
+                  <>
+                    <button
+                      onClick={() => handleTest(activePlatform)}
+                      disabled={testing[activePlatform]}
+                      className="px-4 py-2 text-sm font-medium bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl transition-colors flex items-center gap-2"
+                    >
+                      {testing[activePlatform] ? <><Spinner /> Testing…</> : '⚡ Test Connection'}
+                    </button>
+                    <button
+                      onClick={() => handleDisconnect(activePlatform)}
+                      disabled={saving[activePlatform]}
+                      className="px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+                    >
+                      Disconnect
+                    </button>
+                  </>
                 )}
               </div>
-            );
-          })}
-        </div>
-      </div>
+            </div>
+          </div>
 
+          {/* ── Post Templates ── */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6">
+            <h2 className="text-sm font-semibold text-gray-800 mb-1">Post Templates</h2>
+            <p className="text-xs text-gray-400 mb-4">
+              Default templates used when auto-posting. Use <code className="bg-gray-100 px-1 rounded">{'{{productName}}'}</code>, <code className="bg-gray-100 px-1 rounded">{'{{price}}'}</code>, <code className="bg-gray-100 px-1 rounded">{'{{url}}'}</code> as variables.
+            </p>
+
+            <div className="flex gap-1.5 flex-wrap mb-4">
+              {PLATFORMS.map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => setActive(p.id)}
+                  className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${activePlatform === p.id ? 'text-white shadow-sm' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+                  style={{ background: activePlatform === p.id ? p.color : undefined }}
+                >
+                  {p.label.split(' ')[0]}
+                </button>
+              ))}
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="form-label">Post Template for {activeMeta.label}</label>
+                <textarea
+                  rows={4}
+                  value={activeTpl.template}
+                  onChange={e => updateTemplate(activePlatform, 'template', e.target.value)}
+                  placeholder={`🛍️ Check out {{productName}}!\n\nNow only LKR {{price}} — limited stock!\n\nShop now 👉 {{url}}`}
+                  className="form-input resize-none"
+                />
+              </div>
+              <div>
+                <label className="form-label">Default Hashtags (comma-separated)</label>
+                <input
+                  type="text"
+                  value={(activeTpl.hashtags || []).join(', ')}
+                  onChange={e => updateTemplate(
+                    activePlatform,
+                    'hashtags',
+                    e.target.value.split(',').map(h => h.trim()).filter(Boolean)
+                  )}
+                  placeholder="#shopzen, #sale, #newproduct, #srilanka"
+                  className="form-input"
+                />
+                {activeTpl.hashtags?.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {activeTpl.hashtags.map((tag, i) => (
+                      <span key={i} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">#{tag.replace(/^#/, '')}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <Toggle
+                label="Enable template for this platform"
+                desc="Disable to skip auto-posting for this platform while keeping the template"
+                value={!!activeTpl.enabled}
+                onChange={() => updateTemplate(activePlatform, 'enabled', !activeTpl.enabled)}
+              />
+            </div>
+
+            <div className="mt-6 pt-5 border-t border-gray-100 flex items-center justify-between">
+              <p className="text-xs text-gray-400">Templates apply to all future auto-posts</p>
+              <button onClick={saveTemplates} disabled={templateSaving} className="btn-primary flex items-center gap-2 text-sm">
+                {templateSaving ? <><Spinner /> Saving…</> : '✓ Save Templates'}
+              </button>
+            </div>
+          </div>
+
+          {/* ── Connection status overview ── */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+            <h2 className="text-sm font-semibold text-gray-800 mb-4">Connection Overview</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {PLATFORMS.map(p => {
+                const pd = settings?.[p.id] || {};
+                return (
+                  <div
+                    key={p.id}
+                    onClick={() => setActive(p.id)}
+                    className="flex items-center gap-3 p-3 rounded-xl border border-gray-100 hover:border-gray-200 hover:bg-gray-50 cursor-pointer transition-all"
+                  >
+                    <div className="w-9 h-9 rounded-lg flex items-center justify-center text-white flex-shrink-0" style={{ background: p.color }}>
+                      {p.icon}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-gray-800 truncate">{p.label}</p>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                          pd.connected && pd.lastTestStatus === 'ok'    ? 'bg-green-400' :
+                          pd.connected && pd.lastTestStatus === 'error' ? 'bg-red-400' :
+                          pd.connected                                  ? 'bg-yellow-400' :
+                                                                          'bg-gray-200'
+                        }`} />
+                        <span className="text-xs text-gray-400 truncate">
+                          {pd.connected
+                            ? pd.accountName || (pd.lastTestStatus === 'ok' ? 'Verified' : 'Connected')
+                            : 'Not connected'}
+                        </span>
+                      </div>
+                    </div>
+                    {pd.connected && pd.enabled && (
+                      <span className="text-xs text-green-600 bg-green-50 px-1.5 py-0.5 rounded-full flex-shrink-0">On</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

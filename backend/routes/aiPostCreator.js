@@ -926,4 +926,76 @@ router.post('/publish', async (req, res) => {
   }
 });
 
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SAVED PRESETS — localStorage-synced on the client, but also stored
+   server-side (in memory / optionally persisted) so presets survive
+   browser clears and work across devices for the same admin.
+   Uses a simple in-memory Map per admin user (keyed by req.user._id).
+   Production: swap the Map for a MongoDB collection or Settings subdoc.
+══════════════════════════════════════════════════════════════════════════ */
+const _presetsStore = new Map(); // userId → [{ id, name, data }]
+
+function getPresetsForUser(userId) {
+  return _presetsStore.get(String(userId)) || [];
+}
+function setPresetsForUser(userId, list) {
+  _presetsStore.set(String(userId), list);
+}
+
+/**
+ * GET /api/ai-post-creator/presets
+ * Returns all saved presets for the current admin.
+ */
+router.get('/presets', (req, res) => {
+  try {
+    const userId  = req.user?._id || req.user?.id || 'default';
+    const presets = getPresetsForUser(userId);
+    res.json({ presets });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+/**
+ * POST /api/ai-post-creator/presets
+ * Body: { name: string, data: object }
+ * Saves a new named preset. Returns the full updated list.
+ */
+router.post('/presets', (req, res) => {
+  try {
+    const userId  = req.user?._id || req.user?.id || 'default';
+    const { name, data } = req.body || {};
+    if (!name || typeof name !== 'string') {
+      return res.status(400).json({ message: 'Preset name is required' });
+    }
+    const newPreset = { id: Date.now(), name: String(name).trim().slice(0, 60), data: data || {} };
+    const existing  = getPresetsForUser(userId);
+    // Replace if same name exists
+    const filtered  = existing.filter(p => p.name !== newPreset.name);
+    const updated   = [newPreset, ...filtered].slice(0, 30); // max 30 presets
+    setPresetsForUser(userId, updated);
+    res.json({ preset: newPreset, presets: updated });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+/**
+ * DELETE /api/ai-post-creator/presets/:id
+ * Deletes a preset by its numeric id.
+ */
+router.delete('/presets/:id', (req, res) => {
+  try {
+    const userId  = req.user?._id || req.user?.id || 'default';
+    const id      = Number(req.params.id);
+    const existing = getPresetsForUser(userId);
+    const updated  = existing.filter(p => p.id !== id);
+    setPresetsForUser(userId, updated);
+    res.json({ deleted: true, presets: updated });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 module.exports = router;

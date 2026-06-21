@@ -1,6 +1,9 @@
 /**
  * routes/socialMedia.js
  * All routes are protected by adminAuth — credentials never leave the server.
+ *
+ * MODIFIED: Added POST /bulk-post for admin bulk product posting with rate-limit
+ *           support baked into the frontend; the route handles one post at a time.
  */
 
 const express    = require('express');
@@ -10,9 +13,9 @@ const ctrl       = require('../controllers/socialMediaController');
 const { refreshPlatformNow } = require('../services/tokenRefreshScheduler');
 const { getOrCreate, decryptPlatformFields } = require('../services/socialMediaService');
 const { inspectToken } = require('../services/facebookTokenRefresh');
+const { manualPublish } = require('../services/publisherService');
 
 // ─── PUBLIC: storefront footer social links (no secrets) ─────────────────────
-// Returns only connected+enabled platforms with safe display fields.
 router.get('/public', async (req, res) => {
   try {
     const SocialMedia = require('../models/SocialMedia');
@@ -32,7 +35,6 @@ router.get('/public', async (req, res) => {
       .map(p => {
         const { label, color, urlPrefix } = PLATFORM_META[p];
         const acct = doc[p];
-        // Build profile URL from handle, or accountId as fallback
         const handle = acct.accountHandle?.replace(/^@/, '') || acct.accountId || '';
         const url = p === 'whatsapp'
           ? `https://wa.me/${handle.replace(/[^0-9]/g, '')}`
@@ -47,7 +49,7 @@ router.get('/public', async (req, res) => {
           accountAvatar: acct.accountAvatar  || '',
         };
       })
-      .filter(p => p.url); // only include if we have a usable URL
+      .filter(p => p.url);
 
     res.json(result);
   } catch (err) {
@@ -55,7 +57,6 @@ router.get('/public', async (req, res) => {
     res.json([]);
   }
 });
-// ─────────────────────────────────────────────────────────────────────────────
 
 // ─── TEMP DEBUG — no auth, remove after fixing ───────────────────────────────
 router.get('/debug-whatsapp', async (req, res) => {
@@ -76,7 +77,7 @@ router.get('/fix-whatsapp', async (req, res) => {
 });
 // ─── END TEMP ─────────────────────────────────────────────────────────────────
 
-// ─── All routes require admin auth ───────────────────────────────────────────
+// ─── All routes below require admin auth ─────────────────────────────────────
 router.use(adminAuth);
 
 // Settings overview (sanitized — no secrets)
@@ -88,6 +89,60 @@ router.put('/automation', ctrl.updateAutomation);
 // Post templates
 router.put('/templates', ctrl.updateTemplates);
 
+// ─── Bulk post: one product to one platform ───────────────────────────────────
+// Called once per job by the frontend rate-limited loop.
+// The frontend controls the rate (postsPerMin + delay), so this is intentionally
+// a thin wrapper around the existing manualPublish() service.
+//
+// POST /api/social-media/bulk-post
+// Body: { productId, platform }
+// Returns: { success, logId, platformPostId?, error? }
+router.post('/bulk-post', async (req, res) => {
+  try {
+    const { productId, platform } = req.body;
+
+    if (!productId || !platform) {
+      return res.status(400).json({ success: false, error: 'productId and platform are required' });
+    }
+
+    const VALID_PLATFORMS = ['facebook', 'instagram', 'tiktok', 'whatsapp', 'telegram'];
+    if (!VALID_PLATFORMS.includes(platform)) {
+      return res.status(400).json({ success: false, error: `Unknown platform: ${platform}` });
+    }
+
+    // Load product name for logging
+    const Product = require('../models/Product');
+    const product = await Product.findById(productId).select('name').lean();
+    if (!product) {
+      return res.status(404).json({ success: false, error: 'Product not found' });
+    }
+
+    const log = await manualPublish({
+      platform,
+      entityType:  'product',
+      entityId:    productId,
+      entityName:  product.name,
+      customMsg:   '',
+      trigger:     'manual',
+      adminUserId: req.admin?._id || req.user?._id || 'unknown',
+    });
+
+    if (log?.status === 'success') {
+      return res.json({ success: true, logId: log._id, platformPostId: log.platformPostId });
+    } else {
+      return res.status(422).json({
+        success: false,
+        logId:  log?._id,
+        error:  log?.errorMessage || 'Publish failed',
+        code:   log?.errorCode,
+      });
+    }
+  } catch (err) {
+    console.error('[bulk-post] Error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Per-platform routes
 router.put   ('/platform/:platform',          ctrl.updatePlatform);
 router.post  ('/platform/:platform/connect',  ctrl.connectPlatform);
@@ -96,7 +151,6 @@ router.post  ('/platform/:platform/test',     ctrl.testConnection);
 router.patch ('/platform/:platform/toggle',   ctrl.togglePlatform);
 
 // Manual token refresh (Facebook / Instagram only)
-// POST /api/social-media/platform/:platform/refresh-token
 router.post('/platform/:platform/refresh-token', async (req, res) => {
   const { platform } = req.params;
   if (!['facebook', 'instagram'].includes(platform)) {
@@ -111,7 +165,6 @@ router.post('/platform/:platform/refresh-token', async (req, res) => {
 });
 
 // Token status — returns expiry info for the admin UI
-// GET /api/social-media/platform/:platform/token-status
 router.get('/platform/:platform/token-status', async (req, res) => {
   const { platform } = req.params;
   try {
@@ -123,10 +176,8 @@ router.get('/platform/:platform/token-status', async (req, res) => {
     const creds = decryptPlatformFields(raw);
     let inspection = { valid: null, expiresAt: raw.tokenExpiresAt, scopes: [], error: null };
 
-    // Optionally do a live inspection if App credentials exist
     if (['facebook', 'instagram'].includes(platform) && creds.appId && creds.appSecret && creds.accessToken) {
       inspection = await inspectToken(creds.accessToken, creds.appId, creds.appSecret);
-      // If live inspection gives us a better expiry, persist it
       if (inspection.expiresAt && String(inspection.expiresAt) !== String(raw.tokenExpiresAt)) {
         await doc.constructor.updateOne({}, {
           $set: { [`${platform}.tokenExpiresAt`]: inspection.expiresAt, updatedAt: new Date() },
