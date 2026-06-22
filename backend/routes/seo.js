@@ -32,6 +32,13 @@ function xe(str) {
     .replace(/"/g,  '&quot;');
 }
 
+// ── Logo constant ─────────────────────────────────────────────────────────────
+// Google Organization schema logo: square PNG, min 112x112, max 1000x1000.
+// This is the Cloudinary URL for your ShopZen logo, padded to 512x512.
+// IMPORTANT: After uploading a proper square logo to Cloudinary, update this URL
+// in your Admin → Settings → Logo, which will override this fallback automatically.
+const SHOPZEN_LOGO_URL = 'https://res.cloudinary.com/dn7tvazaw/image/upload/w_512,h_512,c_pad,b_white,f_png/v1779758903/shopzen/1779758893538-714817024.png';
+
 /** Build a <url> entry with zero or more <image:image> children */
 function urlEntry(loc, lastmod, changefreq = 'weekly', priority = '0.7', images = []) {
   const imgXml = images
@@ -375,9 +382,12 @@ router.get('/meta', async (req, res) => {
     const metaDesc  = s.seo_metaDesc  || 'Shop the best products online in Sri Lanka. Fast delivery, best prices guaranteed at ShopZen.';
     const ogTitle   = s.seo_ogTitle   || metaTitle;
     const ogDesc    = s.seo_ogDesc    || metaDesc;
-    const DEFAULT_OG = 'https://res.cloudinary.com/dn7tvazaw/image/upload/w_1200,h_630,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png';
+    const DEFAULT_OG  = 'https://res.cloudinary.com/dn7tvazaw/image/upload/w_1200,h_630,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png';
+    // LOGO_URL: square logo for Google Knowledge Panel & Organization schema.
+    // Google requires min 112x112, max 1000x1000, preferably square PNG.
+    // Update this URL after uploading your square logo to Cloudinary.
     const ogImage   = s.seo_ogImage   || DEFAULT_OG;
-    const logoUrl   = s.faviconUrl || s.logoUrl || ogImage;
+    const logoUrl   = s.faviconUrl || s.logoUrl || SHOPZEN_LOGO_URL;
 
     res.json({
       siteUrl, storeName, metaTitle, metaDesc, ogTitle, ogDesc, ogImage,
@@ -704,7 +714,7 @@ router.get('/product-meta/:slug', async (req, res) => {
       '@type':    'Organization',
       name:        storeName,
       url:         siteUrl,
-      logo: { '@type': 'ImageObject', url: logoUrl || 'https://res.cloudinary.com/dn7tvazaw/image/upload/w_1200,h_630,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png', width: 600, height: 60 },
+      logo: { '@type': 'ImageObject', url: logoUrl || SHOPZEN_LOGO_URL, width: 512, height: 512 },
     };
 
     // Breadcrumb using SEO-friendly category URL
@@ -782,7 +792,7 @@ router.get('/category-meta/:slug', async (req, res) => {
       '@type':    'Organization',
       name:        storeName,
       url:         siteUrl,
-      logo: { '@type': 'ImageObject', url: logoUrl || 'https://res.cloudinary.com/dn7tvazaw/image/upload/w_1200,h_630,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png', width: 600, height: 60 },
+      logo: { '@type': 'ImageObject', url: logoUrl || SHOPZEN_LOGO_URL, width: 512, height: 512 },
     };
 
     res.json({ metaTitle, metaDesc, canonical: catUrl, ogImage, keywords, breadcrumbSchema, orgSchema });
@@ -830,7 +840,7 @@ router.get('/brand-meta/:slug', async (req, res) => {
       '@type':    'Organization',
       name:        storeName,
       url:         siteUrl,
-      logo: { '@type': 'ImageObject', url: logoUrl || 'https://res.cloudinary.com/dn7tvazaw/image/upload/w_1200,h_630,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png', width: 600, height: 60 },
+      logo: { '@type': 'ImageObject', url: logoUrl || SHOPZEN_LOGO_URL, width: 512, height: 512 },
     };
 
     res.json({ metaTitle, metaDesc, canonical: brandUrl, ogImage, keywords, breadcrumbSchema, orgSchema });
@@ -1050,7 +1060,7 @@ async function getSeoMeta() {
     const ogImage   = s.seo_ogImage || 'https://res.cloudinary.com/dn7tvazaw/image/upload/w_1200,h_630,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png';
     // logoUrl / faviconUrl — set in admin Settings → General → Logo upload.
     // Matches the getLogoUrl() logic in settings.js.
-    const logoUrl   = s.faviconUrl || s.logoUrl || ogImage;
+    const logoUrl   = s.faviconUrl || s.logoUrl || SHOPZEN_LOGO_URL;
     return {
       siteUrl,
       storeName,
@@ -1147,7 +1157,7 @@ async function renderShopPage(req, html, siteUrl, storeName, defaultOgImage, log
             { '@type': 'ListItem', position: 3, name: cat.name, item: catUrl },
           ],
         };
-        const orgSchema = { '@context': 'https://schema.org', '@type': 'Organization', name: storeName, url: siteUrl, logo: { '@type': 'ImageObject', url: logoUrl, width: 600, height: 60 } };
+        const orgSchema = { '@context': 'https://schema.org', '@type': 'Organization', name: storeName, url: siteUrl, logo: { '@type': 'ImageObject', url: logoUrl, width: 512, height: 512 } };
 
         return injectMeta(html, { title, desc, canonical: catUrl, ogImage, ogType: 'website', keywords, robots: 'noindex,follow', schemas: [breadcrumb, orgSchema] });
       }
@@ -1209,7 +1219,7 @@ const seoRenderMiddleware = async (req, res) => {
   const orgSchema = {
     '@context': 'https://schema.org', '@type': 'Organization',
     name: storeName, url: siteUrl,
-    logo: { '@type': 'ImageObject', url: logoUrl, width: 600, height: 60 },
+    logo: { '@type': 'ImageObject', url: logoUrl, width: 512, height: 512 },
   };
 
   // ── /product/:slug ──────────────────────────────────────────────────────────
@@ -1442,7 +1452,7 @@ const seoRenderMiddleware = async (req, res) => {
           areaServed: { '@type': 'Country', name: 'Sri Lanka' },
           address: { '@type': 'PostalAddress', addressCountry: 'LK' },
           hasMap: `${siteUrl}/page/contact`,
-          logo: { '@type': 'ImageObject', url: meta.logoUrl || meta.ogImage, width: 600, height: 60 },
+          logo: { '@type': 'ImageObject', url: meta.logoUrl || SHOPZEN_LOGO_URL, width: 512, height: 512 },
         };
         // Fetch categories + best sellers for static, crawlable homepage content
         const [homeCategories, bestSellers] = await Promise.all([
