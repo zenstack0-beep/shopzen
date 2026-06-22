@@ -80,18 +80,53 @@
       "dest": "/$1"
     },
     {
-      "src": "/(product|category|brand|page|campaign)/(.*)",
-      "headers": {
-        "Cache-Control": "no-cache, no-store, must-revalidate"
-      },
-      "dest": "/index.html"
-    },
-    {
       "src": "/",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate"
       },
-      "dest": "/index.html"
+      "dest": "https://shopzen-production.up.railway.app/"
+    },
+    {
+      "src": "/product/(.*)",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate"
+      },
+      "dest": "https://shopzen-production.up.railway.app/product/$1"
+    },
+    {
+      "src": "/category/(.*)",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate"
+      },
+      "dest": "https://shopzen-production.up.railway.app/category/$1"
+    },
+    {
+      "src": "/brand/(.*)",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate"
+      },
+      "dest": "https://shopzen-production.up.railway.app/brand/$1"
+    },
+    {
+      "src": "/shop(.*)",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate"
+      },
+      "dest": "https://shopzen-production.up.railway.app/shop$1"
+    },
+    {
+      "src": "/page/(.*)",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate"
+      },
+      "dest": "https://shopzen-production.up.railway.app/page/$1"
+    },
+    {
+      "src": "/campaign/(.*)",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate"
+      },
+      "dest": "https://shopzen-production.up.railway.app/campaign/$1"
     },
     {
       "src": "/(.*)",

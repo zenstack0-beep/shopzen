@@ -375,7 +375,8 @@ router.get('/meta', async (req, res) => {
     const metaDesc  = s.seo_metaDesc  || 'Shop the best products online in Sri Lanka. Fast delivery, best prices guaranteed at ShopZen.';
     const ogTitle   = s.seo_ogTitle   || metaTitle;
     const ogDesc    = s.seo_ogDesc    || metaDesc;
-    const ogImage   = s.seo_ogImage   || `${siteUrl}/og-default.png`;
+    const DEFAULT_OG = 'https://res.cloudinary.com/dn7tvazaw/image/upload/w_1200,h_630,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png';
+    const ogImage   = s.seo_ogImage   || DEFAULT_OG;
     const logoUrl   = s.faviconUrl || s.logoUrl || ogImage;
 
     res.json({
@@ -598,7 +599,7 @@ router.get('/product-meta/:slug', async (req, res) => {
     const productUrl = `${siteUrl}/product/${product.slug}`;
     const _pm = await getSeoMeta();
     const storeName  = _pm?.storeName || 'ShopZen';
-    const logoUrl    = _pm?.logoUrl   || `${siteUrl}/og-default.png`;
+    const logoUrl    = _pm?.logoUrl   || 'https://res.cloudinary.com/dn7tvazaw/image/upload/w_1200,h_630,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png';
 
     const metaTitle = buildProductTitle(product, storeName);
 
@@ -615,7 +616,7 @@ router.get('/product-meta/:slug', async (req, res) => {
     // ALL images for rich results
     const allImages  = [product.thumbnail, ...(product.images || [])].filter(Boolean);
     const uniqueImages = [...new Set(allImages)];
-    const ogImage = uniqueImages[0] || `${siteUrl}/og-default.png`;
+    const ogImage = uniqueImages[0] || 'https://res.cloudinary.com/dn7tvazaw/image/upload/w_1200,h_630,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png';
     const canonical = productUrl;
 
     const keywords = [
@@ -703,7 +704,7 @@ router.get('/product-meta/:slug', async (req, res) => {
       '@type':    'Organization',
       name:        storeName,
       url:         siteUrl,
-      logo: { '@type': 'ImageObject', url: logoUrl || `${siteUrl}/og-default.png`, width: 600, height: 60 },
+      logo: { '@type': 'ImageObject', url: logoUrl || 'https://res.cloudinary.com/dn7tvazaw/image/upload/w_1200,h_630,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png', width: 600, height: 60 },
     };
 
     // Breadcrumb using SEO-friendly category URL
@@ -749,7 +750,7 @@ router.get('/category-meta/:slug', async (req, res) => {
     const siteUrl   = (process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
     const _cm = await getSeoMeta();
     const storeName = _cm?.storeName || 'ShopZen';
-    const logoUrl   = _cm?.logoUrl   || `${siteUrl}/og-default.png`;
+    const logoUrl   = _cm?.logoUrl   || 'https://res.cloudinary.com/dn7tvazaw/image/upload/w_1200,h_630,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png';
     const catUrl    = `${siteUrl}/category/${cat.slug}`;
 
     const metaTitle = `${cat.name} — Buy Online in Sri Lanka | ${storeName}`;
@@ -762,7 +763,7 @@ router.get('/category-meta/:slug', async (req, res) => {
       category: cat._id, isActive: true,
       thumbnail: { $exists: true, $ne: '' },
     }).lean();
-    const ogImage = featuredProduct?.thumbnail || `${siteUrl}/og-default.png`;
+    const ogImage = featuredProduct?.thumbnail || 'https://res.cloudinary.com/dn7tvazaw/image/upload/w_1200,h_630,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png';
 
     const keywords = `${cat.name}, buy ${cat.name} online sri lanka, ${cat.name} price sri lanka, online shopping sri lanka, ${storeName}`;
 
@@ -781,7 +782,7 @@ router.get('/category-meta/:slug', async (req, res) => {
       '@type':    'Organization',
       name:        storeName,
       url:         siteUrl,
-      logo: { '@type': 'ImageObject', url: logoUrl || `${siteUrl}/og-default.png`, width: 600, height: 60 },
+      logo: { '@type': 'ImageObject', url: logoUrl || 'https://res.cloudinary.com/dn7tvazaw/image/upload/w_1200,h_630,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png', width: 600, height: 60 },
     };
 
     res.json({ metaTitle, metaDesc, canonical: catUrl, ogImage, keywords, breadcrumbSchema, orgSchema });
@@ -799,7 +800,7 @@ router.get('/brand-meta/:slug', async (req, res) => {
     const siteUrl   = (process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
     const _bm = await getSeoMeta();
     const storeName = _bm?.storeName || 'ShopZen';
-    const logoUrl   = _bm?.logoUrl   || `${siteUrl}/og-default.png`;
+    const logoUrl   = _bm?.logoUrl   || 'https://res.cloudinary.com/dn7tvazaw/image/upload/w_1200,h_630,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png';
     const brandUrl  = `${siteUrl}/brand/${slug}`;
 
     const metaTitle = `${brandName} Products — Buy Online in Sri Lanka | ${storeName}`;
@@ -812,7 +813,7 @@ router.get('/brand-meta/:slug', async (req, res) => {
       isActive: true,
       thumbnail: { $exists: true, $ne: '' },
     }).lean();
-    const ogImage = featuredProduct?.thumbnail || `${siteUrl}/og-default.png`;
+    const ogImage = featuredProduct?.thumbnail || 'https://res.cloudinary.com/dn7tvazaw/image/upload/w_1200,h_630,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png';
 
     const breadcrumbSchema = {
       '@context': 'https://schema.org',
@@ -829,7 +830,7 @@ router.get('/brand-meta/:slug', async (req, res) => {
       '@type':    'Organization',
       name:        storeName,
       url:         siteUrl,
-      logo: { '@type': 'ImageObject', url: logoUrl || `${siteUrl}/og-default.png`, width: 600, height: 60 },
+      logo: { '@type': 'ImageObject', url: logoUrl || 'https://res.cloudinary.com/dn7tvazaw/image/upload/w_1200,h_630,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png', width: 600, height: 60 },
     };
 
     res.json({ metaTitle, metaDesc, canonical: brandUrl, ogImage, keywords, breadcrumbSchema, orgSchema });
@@ -1046,7 +1047,7 @@ async function getSeoMeta() {
     rows.forEach(r => { s[r.key] = r.value; });
     const siteUrl   = (s.seo_config?.siteUrl || process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
     const storeName = s.storeName || 'ShopZen';
-    const ogImage   = s.seo_ogImage || `${siteUrl}/og-default.png`;
+    const ogImage   = s.seo_ogImage || 'https://res.cloudinary.com/dn7tvazaw/image/upload/w_1200,h_630,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png';
     // logoUrl / faviconUrl — set in admin Settings → General → Logo upload.
     // Matches the getLogoUrl() logic in settings.js.
     const logoUrl   = s.faviconUrl || s.logoUrl || ogImage;
@@ -1066,7 +1067,7 @@ async function getSeoMeta() {
 }
 
 // ── Embedded build template ───────────────────────────────────────────────────
-const BUILT_HTML_TEMPLATE = "<!doctype html><html lang=\"en-LK\"><head><meta charset=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,maximum-scale=5,viewport-fit=cover\"/><link rel=\"icon\" href=\"/favicon.ico\"/><link rel=\"apple-touch-icon\" href=\"/apple-touch-icon.png\"/><link rel=\"manifest\" href=\"/manifest.json\"/><meta name=\"theme-color\" content=\"#15803d\" id=\"meta-theme-color\"/><title>ShopZen \u2014 Premium Online Store Sri Lanka</title><meta name=\"description\" content=\"Shop the best products online in Sri Lanka. Fast delivery, guaranteed best prices on electronics, fashion and more at ShopZen.\"/><meta name=\"robots\" content=\"index,follow,max-image-preview:large\"/><link rel=\"canonical\" href=\"https://shopzen.lk\"/><meta property=\"og:type\" content=\"website\"/><meta property=\"og:title\" content=\"ShopZen \u2014 Premium Online Store Sri Lanka\"/><meta property=\"og:description\" content=\"Shop the best products online in Sri Lanka.\"/><meta property=\"og:image\" content=\"https://shopzen.lk/og-default.png\"/><meta property=\"og:url\" content=\"https://shopzen.lk\"/><meta property=\"og:site_name\" content=\"ShopZen\"/><meta property=\"og:locale\" content=\"en_LK\"/><meta name=\"twitter:card\" content=\"summary_large_image\"/><meta name=\"twitter:title\" content=\"ShopZen \u2014 Premium Online Store Sri Lanka\"/><meta name=\"twitter:description\" content=\"Shop the best products online in Sri Lanka.\"/><meta name=\"twitter:image\" content=\"https://shopzen.lk/og-default.png\"/><script defer=\"defer\" src=\"/static/js/main.5d4ddad7.js\"></script><link href=\"/static/css/main.1a2ef7b8.css\" rel=\"stylesheet\"></head><body><noscript>You need to enable JavaScript to run this app.</noscript><div id=\"root\"></div></body></html>";
+const BUILT_HTML_TEMPLATE = "<!doctype html><html lang=\"en-LK\"><head><meta charset=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,maximum-scale=5,viewport-fit=cover\"/><link rel=\"icon\" href=\"/favicon.ico\"/><link rel=\"apple-touch-icon\" href=\"/apple-touch-icon.png\"/><link rel=\"manifest\" href=\"/manifest.json\"/><meta name=\"theme-color\" content=\"#15803d\" id=\"meta-theme-color\"/><title>ShopZen \u2014 Premium Online Store Sri Lanka</title><meta name=\"description\" content=\"Shop the best products online in Sri Lanka. Fast delivery, guaranteed best prices on electronics, fashion and more at ShopZen.\"/><meta name=\"robots\" content=\"index,follow,max-image-preview:large\"/><link rel=\"canonical\" href=\"https://shopzen.lk\"/><meta property=\"og:type\" content=\"website\"/><meta property=\"og:title\" content=\"ShopZen \u2014 Premium Online Store Sri Lanka\"/><meta property=\"og:description\" content=\"Shop the best products online in Sri Lanka.\"/><meta property=\"og:image\" content=\"https://res.cloudinary.com/dn7tvazaw/image/upload/w_1200,h_630,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png\"/><meta property=\"og:image:width\" content=\"1200\"/><meta property=\"og:image:height\" content=\"630\"/><meta property=\"og:url\" content=\"https://shopzen.lk\"/><meta property=\"og:site_name\" content=\"ShopZen\"/><meta property=\"og:locale\" content=\"en_LK\"/><meta name=\"twitter:card\" content=\"summary_large_image\"/><meta name=\"twitter:title\" content=\"ShopZen \u2014 Premium Online Store Sri Lanka\"/><meta name=\"twitter:description\" content=\"Shop the best products online in Sri Lanka.\"/><meta name=\"twitter:image\" content=\"https://res.cloudinary.com/dn7tvazaw/image/upload/w_1200,h_630,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png\"/><script defer=\"defer\" src=\"/static/js/main.5d4ddad7.js\"></script><link href=\"/static/css/main.1a2ef7b8.css\" rel=\"stylesheet\"></head><body><noscript>You need to enable JavaScript to run this app.</noscript><div id=\"root\"></div></body></html>";
 
 let _fetchedTemplate = null;
 let _fetchedAt = 0;
@@ -1200,7 +1201,7 @@ const seoRenderMiddleware = async (req, res) => {
   // Pull storeName and logoUrl from DB so they stay in sync with admin Settings.
   const _topMeta       = await getSeoMeta();
   const storeName      = _topMeta?.storeName || 'ShopZen';
-  const defaultOgImage = _topMeta?.ogImage   || `${siteUrl}/og-default.png`;
+  const defaultOgImage = _topMeta?.ogImage   || 'https://res.cloudinary.com/dn7tvazaw/image/upload/w_1200,h_630,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png';
   // logoUrl = actual store logo (brand image). Google shows this next to your site
   // name in search results. Keep it separate from the social OG card image.
   const logoUrl        = _topMeta?.logoUrl   || defaultOgImage;
