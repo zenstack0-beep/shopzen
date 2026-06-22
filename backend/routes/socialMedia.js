@@ -35,7 +35,13 @@ router.get('/public', async (req, res) => {
       .map(p => {
         const { label, color, urlPrefix } = PLATFORM_META[p];
         const acct = doc[p];
-        const handle = acct.accountHandle?.replace(/^@/, '') || acct.accountId || '';
+        // For Telegram: accountHandle is the BOT username (@BotFather name) — NOT the channel.
+        // The channel/group to link to is stored in accountId (e.g. @mypublicchannel or -100...).
+        // So for Telegram we use accountId first; for all other platforms use accountHandle first.
+        const rawHandle = p === 'telegram'
+          ? (acct.accountId?.replace(/^@/, '') || acct.accountHandle?.replace(/^@/, '') || '')
+          : (acct.accountHandle?.replace(/^@/, '') || acct.accountId || '');
+        const handle = rawHandle;
         const url = p === 'whatsapp'
           ? `https://wa.me/${handle.replace(/[^0-9]/g, '')}`
           : handle ? `${urlPrefix}${handle}` : null;
