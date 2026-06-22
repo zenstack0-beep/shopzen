@@ -43,45 +43,12 @@ router.get('/favicon.ico', async (req, res) => {
   try {
     const logoUrl = await getLogoUrl();
     if (!logoUrl) return res.status(404).send('No favicon configured');
-
-    // Fetch 16, 32, 48 px PNG versions from Cloudinary
-    const sizes = [16, 32, 48];
-    const pngBuffers = await Promise.all(
-      sizes.map(s => fetchBuffer(logoUrl.replace('/upload/', `/upload/w_${s},h_${s},c_fit,f_png/`)))
-    );
-
-    // Build ICO manually: ICONDIR + ICONDIRENTRY * n + PNG data
-    const num = sizes.length;
-    const header = Buffer.alloc(6);
-    header.writeUInt16LE(0, 0);   // reserved
-    header.writeUInt16LE(1, 2);   // type: ICO
-    header.writeUInt16LE(num, 4); // count
-
-    let offset = 6 + num * 16;
-    const entries = [];
-    for (let i = 0; i < num; i++) {
-      const s = sizes[i];
-      const entry = Buffer.alloc(16);
-      entry.writeUInt8(s === 256 ? 0 : s, 0);  // width
-      entry.writeUInt8(s === 256 ? 0 : s, 1);  // height
-      entry.writeUInt8(0, 2);                   // color count
-      entry.writeUInt8(0, 3);                   // reserved
-      entry.writeUInt16LE(1, 4);                // planes
-      entry.writeUInt16LE(32, 6);               // bit count
-      entry.writeUInt32LE(pngBuffers[i].length, 8);  // size
-      entry.writeUInt32LE(offset, 12);               // offset
-      entries.push(entry);
-      offset += pngBuffers[i].length;
-    }
-
-    const ico = Buffer.concat([header, ...entries, ...pngBuffers]);
-
-    res.setHeader('Content-Type', 'image/x-icon');
-    res.setHeader('Cache-Control', 'public, max-age=3600');
-    res.send(ico);
-  } catch (err) {
-    res.status(500).send(err.message);
-  }
+    // Redirect to a 48x48 PNG — browsers and Google accept PNG favicons.
+    // Avoids Railway→Cloudinary proxy which was returning 403 errors.
+    const pngUrl = logoUrl.replace('/upload/', '/upload/w_48,h_48,c_pad,b_white,f_png/');
+    res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+    return res.redirect(302, pngUrl);
+  } catch (err) { return res.status(500).send(err.message); }
 });
 
 // Helper to get logo URL from DB
@@ -90,13 +57,23 @@ async function getLogoUrl() {
   return row?.value || null;
 }
 
+// ── Helper: redirect directly to Cloudinary (avoids Railway proxying overhead)
+// When ?redirect=1 is passed, we send a 302 to the Cloudinary URL directly.
+// Vercel uses this so Google/browsers fetch the image straight from Cloudinary
+// instead of going through Railway, which was causing 403 errors.
+function redirectOrProxy(logoUrl, transformedUrl, res, contentType) {
+  // Always redirect — faster, more reliable, no Railway network dependency
+  res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+  return res.redirect(302, transformedUrl);
+}
+
 // /favicon.png → 192x192 (Google search result icon)
 router.get('/favicon.png', async (req, res) => {
   try {
     const logoUrl = await getLogoUrl();
     if (!logoUrl) return res.status(404).send('No favicon configured');
-    const url = logoUrl.replace('/upload/', '/upload/w_192,h_192,c_fit,f_png/');
-    proxyImage(url, res, 'image/png');
+    const url = logoUrl.replace('/upload/', '/upload/w_192,h_192,c_pad,b_white,f_png/');
+    redirectOrProxy(logoUrl, url, res, 'image/png');
   } catch (err) { res.status(500).send(err.message); }
 });
 
@@ -105,8 +82,8 @@ router.get('/favicon-96x96.png', async (req, res) => {
   try {
     const logoUrl = await getLogoUrl();
     if (!logoUrl) return res.status(404).send('No favicon configured');
-    const url = logoUrl.replace('/upload/', '/upload/w_96,h_96,c_fit,f_png/');
-    proxyImage(url, res, 'image/png');
+    const url = logoUrl.replace('/upload/', '/upload/w_96,h_96,c_pad,b_white,f_png/');
+    redirectOrProxy(logoUrl, url, res, 'image/png');
   } catch (err) { res.status(500).send(err.message); }
 });
 
@@ -115,8 +92,8 @@ router.get('/favicon-32x32.png', async (req, res) => {
   try {
     const logoUrl = await getLogoUrl();
     if (!logoUrl) return res.status(404).send('No favicon configured');
-    const url = logoUrl.replace('/upload/', '/upload/w_32,h_32,c_fit,f_png/');
-    proxyImage(url, res, 'image/png');
+    const url = logoUrl.replace('/upload/', '/upload/w_32,h_32,c_pad,b_white,f_png/');
+    redirectOrProxy(logoUrl, url, res, 'image/png');
   } catch (err) { res.status(500).send(err.message); }
 });
 
@@ -125,8 +102,8 @@ router.get('/apple-touch-icon.png', async (req, res) => {
   try {
     const logoUrl = await getLogoUrl();
     if (!logoUrl) return res.status(404).send('No favicon configured');
-    const url = logoUrl.replace('/upload/', '/upload/w_180,h_180,c_fit,f_png/');
-    proxyImage(url, res, 'image/png');
+    const url = logoUrl.replace('/upload/', '/upload/w_180,h_180,c_pad,b_white,f_png/');
+    redirectOrProxy(logoUrl, url, res, 'image/png');
   } catch (err) { res.status(500).send(err.message); }
 });
 
