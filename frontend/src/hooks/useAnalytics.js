@@ -138,11 +138,14 @@ export function bootstrapAnalytics(cfg) {
       setTimeout(() => clearInterval(pollInterval), 10000);
 
     } else if (window.fbq && !window.__fbPixelInitIds?.[cfg.metaPixelId]) {
-      // Pixel script already loaded (e.g. hardcoded in index.html with a different ID)
-      // Re-initialise with the DB pixel ID so both IDs receive events
+      // fbq stub already exists (bootstrapAnalytics called twice, e.g. from
+      // a settings reload) — re-init with the pixel ID only if not already done,
+      // then drain any queued events.  This branch also covers the edge-case
+      // where a browser extension pre-loaded fbevents.js.
       window.__fbPixelInitIds = window.__fbPixelInitIds || {};
       window.__fbPixelInitIds[cfg.metaPixelId] = true;
       window.fbq('init', cfg.metaPixelId);
+      window.fbq('track', 'PageView');
       drainFbQueue();
     }
   }

@@ -100,10 +100,27 @@ const helmetMiddleware = helmet({
         'https://openrouter.ai',
         'https://res.cloudinary.com',
       ],
-      // GTM preview mode runs in an iframe from googletagmanager.com
+      // GTM preview mode uses an iframe from googletagmanager.com.
+      // Stripe uses iframes for its card element; PayPal checkout also uses
+      // iframes. CRITICAL: 'none' must be the ONLY value in frame-src if used.
+      // Mixing 'none' with real sources makes browsers silently ignore 'none'.
+      // We list real allowed sources instead.
       frameSrc: [
-        "'none'",
         'https://www.googletagmanager.com',
+        'https://js.stripe.com',           // Stripe card / 3DS iframe
+        'https://hooks.stripe.com',         // Stripe redirect iframes
+        'https://www.paypal.com',           // PayPal checkout frame
+        'https://checkout.paypal.com',
+      ],
+      // form-action controls where <form> POST submissions may go.
+      // helmet defaults to self-only, which blocks Stripe/PayPal checkout
+      // redirects. List every external payment endpoint used.
+      formAction: [
+        "'self'",
+        'https://checkout.stripe.com',
+        'https://api.stripe.com',
+        'https://www.paypal.com',
+        'https://www.sandbox.paypal.com',
       ],
       objectSrc: ["'none'"],
       upgradeInsecureRequests: [],

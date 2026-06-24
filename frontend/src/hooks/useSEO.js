@@ -91,6 +91,29 @@ export function getSeoConfig() {
   return window.__SHOPZEN_SEO__ || {};
 }
 
+/**
+ * Returns a Meta Pixel-safe ISO 4217 currency code.
+ *
+ * Meta Pixel validates the `currency` parameter on Purchase / AddToCart
+ * events.  If the code is missing or not a 3-letter ISO 4217 string the
+ * event is silently dropped (you see the console warning:
+ *   "Parameter 'currency' is invalid for event 'Purchase'").
+ *
+ * Root cause: getSeoConfig() returns {} when settings have not yet loaded,
+ * so currencyCode is undefined and the fallback 'LKR' is correct — but
+ * if someone has stored a non-ISO value (e.g. 'Rs.' or empty string) in
+ * the DB it would fail the pixel's validation.  This helper normalises it.
+ */
+export function getPixelCurrency() {
+  const raw = getSeoConfig().currencyCode;
+  // Accept only exactly 3 uppercase ASCII letters (ISO 4217 format).
+  if (raw && /^[A-Z]{3}$/.test(raw.trim().toUpperCase())) {
+    return raw.trim().toUpperCase();
+  }
+  // Fall back to LKR (Sri Lankan Rupee — valid ISO 4217 code accepted by Meta).
+  return 'LKR';
+}
+
 // ─── GA4 / analytics helpers ──────────────────────────────────────────────────
 export function trackPageView(url, title) {
   const { ga4Id } = getSeoConfig();
@@ -106,7 +129,7 @@ export function trackEvent(eventName, params = {}) {
 
 export function trackPurchase(order, items) {
   const value = order.total;
-  const currency = getSeoConfig().currencyCode || 'LKR';
+  const currency = getPixelCurrency();
   // GA4
   if (window.gtag) {
     window.gtag('event', 'purchase', {
@@ -135,7 +158,7 @@ export function trackAddToCart(product, quantity = 1) {
   const price = product.salePrice || product.price;
   if (window.gtag) {
     window.gtag('event', 'add_to_cart', {
-      currency: getSeoConfig().currencyCode || 'LKR',
+      currency: getPixelCurrency(),
       value: price * quantity,
       items: [{ item_id: product._id, item_name: product.name, price, quantity }],
     });
@@ -145,7 +168,7 @@ export function trackAddToCart(product, quantity = 1) {
       content_name: product.name,
       content_type: 'product',
       value: price * quantity,
-      currency: getSeoConfig().currencyCode || 'LKR',
+      currency: getPixelCurrency(),
   });
 }
 
@@ -153,7 +176,7 @@ export function trackViewItem(product) {
   const price = product.salePrice || product.price;
   if (window.gtag) {
     window.gtag('event', 'view_item', {
-      currency: getSeoConfig().currencyCode || 'LKR',
+      currency: getPixelCurrency(),
       value: price,
       items: [{ item_id: product._id, item_name: product.name, price }],
     });
@@ -163,12 +186,12 @@ export function trackViewItem(product) {
       content_name: product.name,
       content_type: 'product',
       value: price,
-      currency: getSeoConfig().currencyCode || 'LKR',
+      currency: getPixelCurrency(),
   });
 }
 
 export function trackInitiateCheckout(items = [], value = 0) {
-  const currency = getSeoConfig().currencyCode || 'LKR';
+  const currency = getPixelCurrency();
   // GA4
   if (window.gtag) {
     window.gtag('event', 'begin_checkout', {
