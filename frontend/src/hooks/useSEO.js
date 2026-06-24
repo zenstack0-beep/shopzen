@@ -120,9 +120,15 @@ export function trackPurchase(order, items) {
       })),
     });
   }
-  // Meta Pixel
+  // Meta Pixel — include content_ids & num_items for catalog matching
   if (window.fbq) {
-    window.fbq('track', 'Purchase', { value, currency });
+    window.fbq('track', 'Purchase', {
+      value,
+      currency,
+      content_ids: items.map(i => i.product?._id || i.productId).filter(Boolean),
+      content_type: 'product',
+      num_items: items.reduce((sum, i) => sum + (i.quantity || 1), 0),
+    });
   }
 }
 
@@ -139,6 +145,7 @@ export function trackAddToCart(product, quantity = 1) {
     window.fbq('track', 'AddToCart', {
       content_ids: [product._id],
       content_name: product.name,
+      content_type: 'product',
       value: price * quantity,
       currency: getSeoConfig().currencyCode || 'LKR',
     });
@@ -158,6 +165,7 @@ export function trackViewItem(product) {
     window.fbq('track', 'ViewContent', {
       content_ids: [product._id],
       content_name: product.name,
+      content_type: 'product',
       value: price,
       currency: getSeoConfig().currencyCode || 'LKR',
     });

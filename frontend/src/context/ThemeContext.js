@@ -188,28 +188,30 @@ export const ThemeProvider = ({ children }) => {
       writeCache(data);
       // Mark that React has applied the real theme from the API
       window.__szApiFetched = true;
-      if (data.seo_config && typeof data.seo_config === 'object') {
-        window.__SHOPZEN_SEO__ = {
-          siteName: data.storeName || data.seo_config.siteName,
-          siteUrl: data.seo_config.siteUrl,
-          defaultDescription: data.seo_config.defaultDescription,
-          defaultOgImage: data.seo_config.defaultOgImage,
-          twitterHandle: data.seo_config.twitterHandle,
-          orgName: data.seo_config.orgName || data.storeName,
-          logoUrl: data.logoUrl || data.seo_config.logoUrl,
-          phone: data.phone || data.seo_config.phone,
-          facebookUrl: data.seo_config.facebookUrl,
-          instagramUrl: data.seo_config.instagramUrl,
-          twitterUrl: data.seo_config.twitterUrl,
-          linkedinUrl: data.seo_config.linkedinUrl,
-          youtubeUrl: data.seo_config.youtubeUrl,
-          ga4Id: data.seo_config.ga4Id,
-          gtmId: data.seo_config.gtmId,
-          metaPixelId: data.seo_config.metaPixelId,
-          currencyCode: data.currencyCode || data.seo_config.currencyCode || 'LKR',
-        };
-        window.dispatchEvent(new CustomEvent('shopzen:seo-ready'));
-      }
+      // Build __SHOPZEN_SEO__ from either a nested seo_config object (legacy)
+      // or the flat key/value pairs that the admin Settings page saves directly to DB.
+      const seo = (data.seo_config && typeof data.seo_config === 'object') ? data.seo_config : {};
+      window.__SHOPZEN_SEO__ = {
+        siteName:           data.storeName          || seo.siteName,
+        siteUrl:            seo.siteUrl,
+        defaultDescription: seo.defaultDescription,
+        defaultOgImage:     seo.defaultOgImage,
+        twitterHandle:      seo.twitterHandle,
+        orgName:            seo.orgName             || data.storeName,
+        logoUrl:            data.logoUrl            || seo.logoUrl,
+        phone:              data.phone              || seo.phone,
+        facebookUrl:        data.facebookUrl        || seo.facebookUrl,
+        instagramUrl:       data.instagramUrl       || seo.instagramUrl,
+        twitterUrl:         data.twitterUrl         || seo.twitterUrl,
+        linkedinUrl:        data.linkedinUrl        || seo.linkedinUrl,
+        youtubeUrl:         data.youtubeUrl         || seo.youtubeUrl,
+        ga4Id:              data.googleAnalytics    || seo.ga4Id,
+        gtmId:              data.gtmId              || seo.gtmId,
+        // facebookPixel is the flat DB key saved by admin Settings → Analytics tab
+        metaPixelId:        data.facebookPixel      || seo.metaPixelId,
+        currencyCode:       data.currencyCode       || seo.currencyCode || 'LKR',
+      };
+      window.dispatchEvent(new CustomEvent('shopzen:seo-ready'));
     } catch (err) {
       // Silently ignore ECONNREFUSED / network errors (backend not yet started)
       // The interval will retry automatically
