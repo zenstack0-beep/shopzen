@@ -120,17 +120,9 @@ export function trackPurchase(order, items) {
       })),
     });
   }
-  // Meta Pixel — full required parameters
+  // Meta Pixel
   if (window.fbq) {
-    const pixelPurchaseParams = {
-      content_ids: items.map(i => String(i.product?._id || i.productId)).filter(Boolean),
-      content_type: 'product',
-      value: Number(Number(value).toFixed(2)),
-      currency,
-      num_items: items.reduce((sum, i) => sum + (i.quantity || 1), 0),
-    };
-    window.fbq('track', 'Purchase', pixelPurchaseParams);
-    console.log('META EVENT FIRED: Purchase', pixelPurchaseParams);
+    window.fbq('track', 'Purchase', { value, currency });
   }
 }
 
@@ -144,16 +136,12 @@ export function trackAddToCart(product, quantity = 1) {
     });
   }
   if (window.fbq) {
-    const pixelAddParams = {
-      content_ids: [String(product._id)],
-      content_name: product.name || '',
-      content_type: 'product',
-      value: Number((price * quantity).toFixed(2)),
+    window.fbq('track', 'AddToCart', {
+      content_ids: [product._id],
+      content_name: product.name,
+      value: price * quantity,
       currency: getSeoConfig().currencyCode || 'LKR',
-      num_items: quantity,
-    };
-    window.fbq('track', 'AddToCart', pixelAddParams);
-    console.log('META EVENT FIRED: AddToCart', pixelAddParams);
+    });
   }
 }
 
@@ -167,15 +155,12 @@ export function trackViewItem(product) {
     });
   }
   if (window.fbq) {
-    const pixelViewParams = {
-      content_ids: [String(product._id)],
-      content_name: product.name || '',
-      content_type: 'product',
-      value: Number(Number(price).toFixed(2)),
+    window.fbq('track', 'ViewContent', {
+      content_ids: [product._id],
+      content_name: product.name,
+      value: price,
       currency: getSeoConfig().currencyCode || 'LKR',
-    };
-    window.fbq('track', 'ViewContent', pixelViewParams);
-    console.log('META EVENT FIRED: ViewContent', pixelViewParams);
+    });
   }
 }
 
@@ -196,15 +181,12 @@ export function trackInitiateCheckout(items = [], value = 0) {
   }
   // Meta Pixel — defensive: only fire if fbq is available
   if (window.fbq) {
-    const pixelCheckoutParams = {
-      content_ids: items.map(i => String(i._id || i.productId)).filter(Boolean),
-      content_type: 'product',
+    window.fbq('track', 'InitiateCheckout', {
+      content_ids: items.map(i => i._id || i.productId).filter(Boolean),
       num_items: items.reduce((sum, i) => sum + (i.quantity || 1), 0),
-      value: Number(Number(value).toFixed(2)),
+      value,
       currency,
-    };
-    window.fbq('track', 'InitiateCheckout', pixelCheckoutParams);
-    console.log('META EVENT FIRED: InitiateCheckout', pixelCheckoutParams);
+    });
   }
 }
 

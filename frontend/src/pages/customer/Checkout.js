@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import useSEO, { trackInitiateCheckout } from '../../hooks/useSEO';
+import useSEO from '../../hooks/useSEO';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../../context/CartContext';
 import { useAuth } from '../../context/AuthContext';
@@ -470,20 +470,6 @@ export default function Checkout() {
   useEffect(() => {
     if (items.length === 0 && !orderPlaced.current) navigate('/cart');
   }, [items, navigate]);
-
-  // ── Meta Pixel: InitiateCheckout — fires once when checkout loads with items ──
-  const initiateCheckoutFired = useRef(false);
-  useEffect(() => {
-    if (items.length > 0 && !initiateCheckoutFired.current) {
-      initiateCheckoutFired.current = true;
-      // Delay slightly so total is computed (coupon/delivery may not be applied yet)
-      setTimeout(() => {
-        const checkoutTotal = items.reduce((sum, i) => sum + ((i.salePrice || i.price || 0) * (i.quantity || 1)), 0);
-        trackInitiateCheckout(items, checkoutTotal);
-      }, 500);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items]);
 
   // Restore saved checkout state
   useEffect(() => {
