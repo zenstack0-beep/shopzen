@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import useSEO from '../../hooks/useSEO';
+import useSEO, { trackPurchase } from '../../hooks/useSEO';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../../context/CartContext';
 import { useAuth } from '../../context/AuthContext';
@@ -717,6 +717,7 @@ export default function Checkout() {
       }
 
       orderPlaced.current = true;
+      trackPurchase(data, data.items || items.map(i => ({ ...i, product: { _id: i.productId } })));
       clearCart();
       sessionStorage.removeItem('checkout_state');
 
@@ -743,6 +744,7 @@ export default function Checkout() {
       });
       if (user) API.put('/auth/profile', { defaultAddress: { country: billing.country, street: billing.street, city: billing.city } }).catch(() => {});
       orderPlaced.current = true;
+      trackPurchase(data, data.items || []);
       clearCart();
       sessionStorage.removeItem('checkout_state');
       toast.success('✅ Payment successful!');
@@ -764,6 +766,7 @@ export default function Checkout() {
       });
       if (user) API.put('/auth/profile', { defaultAddress: { country: billing.country, street: billing.street, city: billing.city } }).catch(() => {});
       orderPlaced.current = true;
+      trackPurchase(data, data.items || []);
       clearCart();
       sessionStorage.removeItem('checkout_state');
       toast.success('✅ PayPal payment successful!');
@@ -918,6 +921,7 @@ export default function Checkout() {
                 defaultAddress: { country: billing.country, street: billing.street, city: billing.city },
               }).catch(() => {});
               orderPlaced.current = true;
+              trackPurchase(orderResult, orderResult.items || []);
               clearCart();
               sessionStorage.removeItem('checkout_state');
               setPayHereData(null);

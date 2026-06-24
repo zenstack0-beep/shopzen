@@ -5,6 +5,7 @@
  */
 
 import { useEffect } from 'react';
+import { fbqSafe } from './useAnalytics';
 import { useLocation } from 'react-router-dom';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -100,7 +101,7 @@ export function trackPageView(url, title) {
 
 export function trackEvent(eventName, params = {}) {
   if (window.gtag) window.gtag('event', eventName, params);
-  if (window.fbq) window.fbq('track', eventName, params);
+  fbqSafe('track', eventName, params);
 }
 
 export function trackPurchase(order, items) {
@@ -121,15 +122,13 @@ export function trackPurchase(order, items) {
     });
   }
   // Meta Pixel — include content_ids & num_items for catalog matching
-  if (window.fbq) {
-    window.fbq('track', 'Purchase', {
+  fbqSafe('track', 'Purchase', {
       value,
       currency,
       content_ids: items.map(i => i.product?._id || i.productId).filter(Boolean),
       content_type: 'product',
       num_items: items.reduce((sum, i) => sum + (i.quantity || 1), 0),
-    });
-  }
+  });
 }
 
 export function trackAddToCart(product, quantity = 1) {
@@ -141,15 +140,13 @@ export function trackAddToCart(product, quantity = 1) {
       items: [{ item_id: product._id, item_name: product.name, price, quantity }],
     });
   }
-  if (window.fbq) {
-    window.fbq('track', 'AddToCart', {
+  fbqSafe('track', 'AddToCart', {
       content_ids: [product._id],
       content_name: product.name,
       content_type: 'product',
       value: price * quantity,
       currency: getSeoConfig().currencyCode || 'LKR',
-    });
-  }
+  });
 }
 
 export function trackViewItem(product) {
@@ -161,15 +158,13 @@ export function trackViewItem(product) {
       items: [{ item_id: product._id, item_name: product.name, price }],
     });
   }
-  if (window.fbq) {
-    window.fbq('track', 'ViewContent', {
+  fbqSafe('track', 'ViewContent', {
       content_ids: [product._id],
       content_name: product.name,
       content_type: 'product',
       value: price,
       currency: getSeoConfig().currencyCode || 'LKR',
-    });
-  }
+  });
 }
 
 export function trackInitiateCheckout(items = [], value = 0) {
@@ -188,14 +183,12 @@ export function trackInitiateCheckout(items = [], value = 0) {
     });
   }
   // Meta Pixel — defensive: only fire if fbq is available
-  if (window.fbq) {
-    window.fbq('track', 'InitiateCheckout', {
+  fbqSafe('track', 'InitiateCheckout', {
       content_ids: items.map(i => i._id || i.productId).filter(Boolean),
       num_items: items.reduce((sum, i) => sum + (i.quantity || 1), 0),
       value,
       currency,
-    });
-  }
+  });
 }
 
 // ─── main hook ────────────────────────────────────────────────────────────────
@@ -518,7 +511,7 @@ export default function useSEO({
 
     // Analytics firing
     trackPageView(location.pathname + location.search, finalTitle);
-    if (window.fbq) window.fbq('track', 'PageView');
+    fbqSafe('track', 'PageView');
     if (window.dataLayer) {
       window.dataLayer.push({ event: 'pageview', page: { url: finalUrl, title: finalTitle } });
     }
