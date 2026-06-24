@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useSearchParams, Link } from 'react-router-dom';
 import API from '../../utils/api';
 import { useTheme } from '../../context/ThemeContext';
@@ -190,6 +190,8 @@ export function OrderSuccess() {
   const [loading, setLoading] = useState(true);
   const sym = settings?.currencySymbol || 'Rs.';
   const gateway = searchParams.get('gateway');
+  // Prevent duplicate Purchase events on re-render / strict-mode double-effect
+  const purchaseTracked = useRef(false);
 
   useSEO({ title: 'Order Confirmed', noindex: true });
 
@@ -200,7 +202,8 @@ export function OrderSuccess() {
         const { data } = await API.get(`/orders/${id}`);
         setOrder(data);
         setLoading(false);
-        if (data && data.paymentStatus !== 'failed') {
+        if (data && data.paymentStatus !== 'failed' && !purchaseTracked.current) {
+          purchaseTracked.current = true;
           trackPurchase(data, data.items || []);
         }
         if (gateway && data.paymentStatus === 'pending' && attempts === 0) {

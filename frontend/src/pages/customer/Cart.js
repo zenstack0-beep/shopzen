@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import useSEO from '../../hooks/useSEO';
+import useSEO, { trackInitiateCheckout } from '../../hooks/useSEO';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../../context/CartContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -162,7 +162,7 @@ export default function Cart() {
                     </div>
                   </div>
                 </div>
-                <button onClick={() => navigate('/checkout')} className="btn-primary w-full text-base mt-2">
+                <button onClick={() => { trackInitiateCheckout(items, subtotal); navigate('/checkout'); }} className="btn-primary w-full text-base mt-2">
                   Proceed to Checkout →
                 </button>
                 <Link to="/shop" className="block text-center text-sm text-gray-400 hover:text-gray-600 transition-colors mt-2">

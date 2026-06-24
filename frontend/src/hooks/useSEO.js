@@ -164,6 +164,32 @@ export function trackViewItem(product) {
   }
 }
 
+export function trackInitiateCheckout(items = [], value = 0) {
+  const currency = getSeoConfig().currencyCode || 'LKR';
+  // GA4
+  if (window.gtag) {
+    window.gtag('event', 'begin_checkout', {
+      currency,
+      value,
+      items: items.map(i => ({
+        item_id: i._id || i.productId,
+        item_name: i.name,
+        price: i.salePrice || i.price,
+        quantity: i.quantity,
+      })),
+    });
+  }
+  // Meta Pixel — defensive: only fire if fbq is available
+  if (window.fbq) {
+    window.fbq('track', 'InitiateCheckout', {
+      content_ids: items.map(i => i._id || i.productId).filter(Boolean),
+      num_items: items.reduce((sum, i) => sum + (i.quantity || 1), 0),
+      value,
+      currency,
+    });
+  }
+}
+
 // ─── main hook ────────────────────────────────────────────────────────────────
 export default function useSEO({
   title,
