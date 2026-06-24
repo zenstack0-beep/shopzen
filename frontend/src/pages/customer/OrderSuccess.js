@@ -203,8 +203,16 @@ export function OrderSuccess() {
         setOrder(data);
         setLoading(false);
         if (data && data.paymentStatus !== 'failed' && !purchaseTracked.current) {
-          purchaseTracked.current = true;
-          trackPurchase(data, data.items || []);
+          const storageKey = `meta_purchase_${data._id}`;
+          const alreadyFired = sessionStorage.getItem(storageKey);
+          if (!alreadyFired) {
+            purchaseTracked.current = true;
+            sessionStorage.setItem(storageKey, '1');
+            trackPurchase(data, data.items || []);
+          } else {
+            console.log('META EVENT SKIPPED: Purchase already fired for order', data._id);
+            purchaseTracked.current = true;
+          }
         }
         if (gateway && data.paymentStatus === 'pending' && attempts === 0) {
           attempts++;
