@@ -128,89 +128,115 @@ export function trackEvent(eventName, params = {}) {
 }
 
 export function trackPurchase(order, items) {
-  const value = order.total;
+  // Defensive: order.total may be 0 (free order) which is valid, but
+  // undefined/null means the API response was incomplete — skip the event
+  // rather than sending value: undefined which Meta silently drops.
+  const value = typeof order.total === 'number' ? order.total
+              : typeof order.grandTotal === 'number' ? order.grandTotal
+              : null;
+  if (value === null) {
+    console.warn('[ShopZen] trackPurchase: order.total is missing, skipping pixel event', order);
+    return;
+  }
+
   const currency = getPixelCurrency();
+  const transactionId = String(order._id || order.orderNumber || '');
+  const contentIds = items.map(i => String(i.product?._id || i.productId || '')).filter(Boolean);
+
   // GA4
   if (window.gtag) {
     window.gtag('event', 'purchase', {
-      transaction_id: order._id || order.orderNumber,
+      transaction_id: transactionId,
       value,
       currency,
       items: items.map(i => ({
-        item_id: i.product?._id || i.productId,
-        item_name: i.name,
-        price: i.price,
-        quantity: i.quantity,
+        item_id: String(i.product?._id || i.productId || ''),
+        item_name: i.name || '',
+        price:    typeof i.price === 'number' ? i.price : 0,
+        quantity: typeof i.quantity === 'number' ? i.quantity : 1,
       })),
     });
   }
-  // Meta Pixel — include content_ids & num_items for catalog matching
+
+  // Meta Pixel — value must be a number, currency must be ISO 4217 (3 uppercase letters).
+  // content_ids must be strings; num_items must be a positive integer.
+  // Any of these wrong causes the event to be silently rejected.
   fbqSafe('track', 'Purchase', {
-      value,
-      currency,
-      content_ids: items.map(i => i.product?._id || i.productId).filter(Boolean),
-      content_type: 'product',
-      num_items: items.reduce((sum, i) => sum + (i.quantity || 1), 0),
+    value,
+    currency,
+    content_ids:  contentIds,
+    content_type: 'product',
+    num_items:    items.reduce((sum, i) => sum + (typeof i.quantity === 'number' ? i.quantity : 1), 0),
   });
 }
 
 export function trackAddToCart(product, quantity = 1) {
-  const price = product.salePrice || product.price;
+  // Ensure price is a number — Meta drops AddToCart if value is NaN/undefined
+  const price    = Number(product.salePrice || product.price) || 0;
+  const value    = price * (typeof quantity === 'number' ? quantity : 1);
+  const currency = getPixelCurrency();
+  const id       = String(product._id || '');
+
   if (window.gtag) {
     window.gtag('event', 'add_to_cart', {
-      currency: getPixelCurrency(),
-      value: price * quantity,
-      items: [{ item_id: product._id, item_name: product.name, price, quantity }],
+      currency,
+      value,
+      items: [{ item_id: id, item_name: product.name || '', price, quantity }],
     });
   }
   fbqSafe('track', 'AddToCart', {
-      content_ids: [product._id],
-      content_name: product.name,
-      content_type: 'product',
-      value: price * quantity,
-      currency: getPixelCurrency(),
+    content_ids:  [id],
+    content_name: product.name || '',
+    content_type: 'product',
+    value,
+    currency,
   });
 }
 
 export function trackViewItem(product) {
-  const price = product.salePrice || product.price;
+  const price    = Number(product.salePrice || product.price) || 0;
+  const currency = getPixelCurrency();
+  const id       = String(product._id || '');
+
   if (window.gtag) {
     window.gtag('event', 'view_item', {
-      currency: getPixelCurrency(),
+      currency,
       value: price,
-      items: [{ item_id: product._id, item_name: product.name, price }],
+      items: [{ item_id: id, item_name: product.name || '', price }],
     });
   }
   fbqSafe('track', 'ViewContent', {
-      content_ids: [product._id],
-      content_name: product.name,
-      content_type: 'product',
-      value: price,
-      currency: getPixelCurrency(),
+    content_ids:  [id],
+    content_name: product.name || '',
+    content_type: 'product',
+    value:        price,
+    currency,
   });
 }
 
 export function trackInitiateCheckout(items = [], value = 0) {
-  const currency = getPixelCurrency();
+  const currency  = getPixelCurrency();
+  const safeValue = typeof value === 'number' ? value : 0;
+  const contentIds = items.map(i => String(i._id || i.productId || '')).filter(Boolean);
+
   // GA4
   if (window.gtag) {
     window.gtag('event', 'begin_checkout', {
       currency,
-      value,
+      value: safeValue,
       items: items.map(i => ({
-        item_id: i._id || i.productId,
-        item_name: i.name,
-        price: i.salePrice || i.price,
-        quantity: i.quantity,
+        item_id:   String(i._id || i.productId || ''),
+        item_name: i.name || '',
+        price:     Number(i.salePrice || i.price) || 0,
+        quantity:  typeof i.quantity === 'number' ? i.quantity : 1,
       })),
     });
   }
-  // Meta Pixel — defensive: only fire if fbq is available
   fbqSafe('track', 'InitiateCheckout', {
-      content_ids: items.map(i => i._id || i.productId).filter(Boolean),
-      num_items: items.reduce((sum, i) => sum + (i.quantity || 1), 0),
-      value,
-      currency,
+    content_ids: contentIds,
+    num_items:   items.reduce((sum, i) => sum + (typeof i.quantity === 'number' ? i.quantity : 1), 0),
+    value:       safeValue,
+    currency,
   });
 }
 

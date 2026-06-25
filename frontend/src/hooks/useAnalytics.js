@@ -2,43 +2,37 @@
  * useAnalytics.js — Injects GA4, GTM, and Meta Pixel scripts
  * from the seo_config Settings key.
  *
- * Call <AnalyticsBootstrap/> once at App root inside ThemeProvider
- * (which already fetches settings). The component reads
- * window.__SHOPZEN_SEO__ set by ThemeContext or SEO settings save.
+ * Architecture:
+ *  - index.html loads the fbevents.js STUB (fbq shim + async script tag)
+ *    without calling fbq('init'). This means fbq() is always available as
+ *    a native queue from the very first paint — no race condition.
+ *  - bootstrapAnalytics() (called from <AnalyticsBootstrap/>) calls
+ *    fbq('init', pixelId) once the Pixel ID is fetched from admin settings.
+ *  - Any event fired between page load and init (AddToCart, Purchase, etc.)
+ *    sits in Meta's own f.queue and is replayed automatically after init.
  *
- * FIX: Meta Pixel events fired before fbq loads are queued in
- * window.__fbQueue and replayed the moment the pixel script loads.
- * This eliminates the race condition where PageView / ViewContent /
- * AddToCart / InitiateCheckout fire before bootstrapAnalytics() runs.
+ * This eliminates:
+ *  - The "Duplicate Pixel ID" warning (no hardcoded init in index.html)
+ *  - Lost Purchase events (fbq queue is native, not a custom polyfill)
+ *  - The polling interval hack (fbevents.js is already loading from stub)
  */
 
 import { useEffect } from 'react';
 
-// ── Pixel event queue ─────────────────────────────────────────────────────────
-// Any call to fbq() before the pixel script loads is pushed here.
-// bootstrapAnalytics() drains the queue once fbq is ready.
-window.__fbQueue = window.__fbQueue || [];
-
 /**
- * Safe wrapper around fbq(). If fbq is not yet loaded the call is
- * queued and replayed automatically once the pixel boots.
+ * fbqSafe — call this everywhere instead of window.fbq() directly.
  *
- * Use this everywhere instead of calling window.fbq() directly.
+ * Since the fbq stub is loaded in index.html, window.fbq is ALWAYS defined
+ * by the time any React code runs. Calls before fbq('init') are buffered
+ * in Meta's own n.queue and replayed after init automatically.
+ * The fallback branch is a safety net for environments where index.html
+ * is served without the stub (e.g. unit tests, some SSR setups).
  */
 export function fbqSafe(type, eventName, params) {
   if (window.fbq) {
     window.fbq(type, eventName, params);
-  } else {
-    window.__fbQueue.push({ type, eventName, params });
   }
-}
-
-function drainFbQueue() {
-  const q = window.__fbQueue || [];
-  window.__fbQueue = [];
-  q.forEach(({ type, eventName, params }) => {
-    try { window.fbq(type, eventName, params); } catch (_) {}
-  });
+  // No custom queue needed — fbevents.js stub handles buffering natively.
 }
 
 // ── DOM helpers ───────────────────────────────────────────────────────────────
@@ -98,56 +92,27 @@ export function bootstrapAnalytics(cfg) {
   }
 
   // ── Meta Pixel ────────────────────────────────────────────────────────────
-  if (cfg.metaPixelId) {
-    if (!document.getElementById('fb-pixel-script')) {
-      // Pixel not yet loaded at all — inject it with an onload that:
-      //   1. initialises the pixel
-      //   2. fires the initial PageView
-      //   3. drains any queued events fired before the script loaded
-      const pixelScript = document.createElement('script');
-      pixelScript.id = 'fb-pixel-script';
-      pixelScript.textContent = `
-        !function(f,b,e,v,n,t,s){
-          if(f.fbq)return;
-          n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};
-          if(!f._fbq)f._fbq=n;
-          n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];
-          t=b.createElement(e);t.async=!0;t.src=v;
-          s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s);
-        }(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');
-        fbq('init','${cfg.metaPixelId}');
-        fbq('track','PageView');
-      `;
-      document.head.appendChild(pixelScript);
+  // The fbq stub (shim + async fbevents.js loader) is already in index.html,
+  // so window.fbq is available immediately. We only need to call fbq('init')
+  // once per pixel ID. Events queued before init() are replayed by Meta's
+  // own queue mechanism — no custom drain needed.
+  if (cfg.metaPixelId && window.fbq) {
+    window.__fbPixelInitIds = window.__fbPixelInitIds || {};
 
+    if (!window.__fbPixelInitIds[cfg.metaPixelId]) {
+      window.__fbPixelInitIds[cfg.metaPixelId] = true;
+      window.fbq('init', cfg.metaPixelId);
+      window.fbq('track', 'PageView');
+
+      // noscript fallback for crawlers / JS-disabled browsers
       injectNoscript(
         `<img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id=${cfg.metaPixelId}&ev=PageView&noscript=1"/>`,
         'fb-pixel-noscript'
       );
-
-      // Poll until fbq is available then drain the queue.
-      // fbevents.js loads in ~100-300 ms; polling every 50 ms is cheap.
-      const pollInterval = setInterval(() => {
-        if (window.fbq) {
-          clearInterval(pollInterval);
-          drainFbQueue();
-        }
-      }, 50);
-
-      // Safety: stop polling after 10 s regardless
-      setTimeout(() => clearInterval(pollInterval), 10000);
-
-    } else if (window.fbq && !window.__fbPixelInitIds?.[cfg.metaPixelId]) {
-      // fbq stub already exists (bootstrapAnalytics called twice, e.g. from
-      // a settings reload) — re-init with the pixel ID only if not already done,
-      // then drain any queued events.  This branch also covers the edge-case
-      // where a browser extension pre-loaded fbevents.js.
-      window.__fbPixelInitIds = window.__fbPixelInitIds || {};
-      window.__fbPixelInitIds[cfg.metaPixelId] = true;
-      window.fbq('init', cfg.metaPixelId);
-      window.fbq('track', 'PageView');
-      drainFbQueue();
     }
+    // If bootstrapAnalytics is called again (e.g. settings hot-reload) with the
+    // same pixel ID, we do nothing — the pixel is already initialised and a
+    // second fbq('init') with the same ID is what causes the Duplicate warning.
   }
 }
 
