@@ -726,6 +726,9 @@ export default function Checkout() {
 
       orderPlaced.current = true;
       applyAdvancedMatching(billing);
+      // Store eventId so OrderSuccess.js can see Checkout.js already fired this
+      // Purchase event — prevents double-counting on the success page.
+      sessionStorage.setItem(`sz_purchase_eid_${data._id || data.orderId}`, _purchaseEventId);
       trackPurchase(
         data,
         data.items || items.map(i => ({ ...i, product: { _id: i.productId } })),
@@ -763,6 +766,7 @@ export default function Checkout() {
       if (user) API.put('/auth/profile', { defaultAddress: { country: billing.country, street: billing.street, city: billing.city } }).catch(() => {});
       orderPlaced.current = true;
       applyAdvancedMatching(billing);
+      sessionStorage.setItem(`sz_purchase_eid_${data._id || data.orderId}`, _stripeEventId);
       trackPurchase(data, data.items || [], { billing, eventId: _stripeEventId });
       clearCart();
       sessionStorage.removeItem('checkout_state');
@@ -791,6 +795,7 @@ export default function Checkout() {
       if (user) API.put('/auth/profile', { defaultAddress: { country: billing.country, street: billing.street, city: billing.city } }).catch(() => {});
       orderPlaced.current = true;
       applyAdvancedMatching(billing);
+      sessionStorage.setItem(`sz_purchase_eid_${data._id || data.orderId}`, _ppEventId);
       trackPurchase(data, data.items || [], { billing, eventId: _ppEventId });
       clearCart();
       sessionStorage.removeItem('checkout_state');
@@ -937,17 +942,24 @@ export default function Checkout() {
             try {
               // Now create the order — payment is already confirmed by PayHere
               const pendingData = payHereData._pendingOrderData;
+              const _phEventId = generateEventId('Purchase', phOrderId);
+              const { fbp: _phFbp, fbc: _phFbc } = getFbCookies();
               const { data: orderResult } = await API.post('/orders', {
                 ...pendingData,
                 paymentReference: phOrderId,
                 paymentStatus: 'paid',
+                metaEventId: _phEventId,
+                fbp: _phFbp,
+                fbc: _phFbc,
               });
               API.put('/auth/profile', {
                 defaultAddress: { country: billing.country, street: billing.street, city: billing.city },
               }).catch(() => {});
               orderPlaced.current = true;
               applyAdvancedMatching(billing);
-              trackPurchase(orderResult, orderResult.items || [], { billing });
+              // Store eventId so OrderSuccess.js knows Checkout already fired Purchase
+              sessionStorage.setItem(`sz_purchase_eid_${orderResult._id || orderResult.orderId}`, _phEventId);
+              trackPurchase(orderResult, orderResult.items || [], { billing, eventId: _phEventId });
               clearCart();
               sessionStorage.removeItem('checkout_state');
               setPayHereData(null);

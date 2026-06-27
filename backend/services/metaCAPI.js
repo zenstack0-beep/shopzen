@@ -159,6 +159,17 @@ async function sendCapiEvent(eventName, payload = {}) {
   if (payload.contentType) customData.content_type = payload.contentType;
   if (typeof payload.numItems === 'number') customData.num_items = payload.numItems;
   if (payload.orderId)     customData.order_id     = String(payload.orderId);
+  // Meta requires a `contents` array for Purchase (and strongly recommends it
+  // for AddToCart / InitiateCheckout). Without it, event quality score is
+  // downgraded and conversion campaign optimisation underperforms.
+  if (payload.contentIds && payload.contentIds.length) {
+    customData.contents = payload.contentIds.map(id => ({
+      id:       String(id),
+      quantity: payload.numItems
+        ? Math.max(1, Math.round(payload.numItems / payload.contentIds.length))
+        : 1,
+    }));
+  }
 
   // ── Build event object ────────────────────────────────────────────────────
   const event = {
@@ -175,7 +186,7 @@ async function sendCapiEvent(eventName, payload = {}) {
   if (cfg.testEventCode) body.test_event_code = cfg.testEventCode;
 
   // ── Send ──────────────────────────────────────────────────────────────────
-  const apiVersion = 'v21.0';
+  const apiVersion = 'v22.0'; // keep this at the latest stable version
   const url = `https://graph.facebook.com/${apiVersion}/${cfg.pixelId}/events?access_token=${cfg.accessToken}`;
 
   try {

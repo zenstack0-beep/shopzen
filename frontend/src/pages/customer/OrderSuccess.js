@@ -3,6 +3,7 @@ import { useParams, useSearchParams, Link } from 'react-router-dom';
 import API from '../../utils/api';
 import { useTheme } from '../../context/ThemeContext';
 import useSEO, { trackPurchase } from '../../hooks/useSEO';
+import { generateEventId, getFbCookies } from '../../utils/metaPixelHelpers';
 import toast from 'react-hot-toast';
 
 
@@ -204,13 +205,33 @@ export function OrderSuccess() {
         setLoading(false);
         if (data && data.paymentStatus !== 'failed' && !purchaseTracked.current) {
           purchaseTracked.current = true;
-          // Pass billing from order so Advanced Matching works on success page.
-          // OrderSuccess is reached after PayHere/Stripe redirect — the Checkout.js
-          // trackPurchase already fired with a dedup eventId, so this call uses
-          // a different eventId to avoid being dropped by Meta deduplication.
-          trackPurchase(data, data.items || [], {
-            billing: data.billing || {},
-          });
+          // Deduplication: Checkout.js fires trackPurchase immediately when the
+          // order is created (same browser session). It stores the eventId it used
+          // in sessionStorage so we can reuse it here for CAPI dedup instead of
+          // generating a new one — Meta will count only ONE Purchase conversion.
+          //
+          // For PayHere redirect flows, Checkout.js runs in the previous page so
+          // sessionStorage carries the eventId across the redirect. If it's absent
+          // (direct link, refresh, cross-device) we generate a fresh eventId and
+          // fire the event — it's better to count it than to drop it.
+          const ssKey = `sz_purchase_eid_${data._id || id}`;
+          const existingEventId = sessionStorage.getItem(ssKey);
+          if (!existingEventId) {
+            // Checkout.js did NOT already fire — fire now (PayHere redirect case
+            // where the previous page session is gone, or direct link to success).
+            const { fbp, fbc } = getFbCookies();
+            const newEventId = generateEventId('Purchase', data._id || id);
+            sessionStorage.setItem(ssKey, newEventId);
+            trackPurchase(data, data.items || [], {
+              billing: data.billing || {},
+              eventId: newEventId,
+              fbp,
+              fbc,
+            });
+          }
+          // If existingEventId is present, Checkout.js already fired trackPurchase
+          // with that eventId AND the server already received the CAPI event with
+          // the same key — do NOT fire again, Meta already has this conversion.
         }
         if (gateway && data.paymentStatus === 'pending' && attempts === 0) {
           attempts++;

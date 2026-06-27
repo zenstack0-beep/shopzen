@@ -95,7 +95,9 @@ const helmetMiddleware = helmet({
         'https://stats.g.doubleclick.net',
         'https://www.googletagmanager.com',
         'https://www.facebook.com',
+        'https://*.facebook.com',          // Meta Pixel XHR + CAPI
         'https://connect.facebook.net',
+        'https://graph.facebook.com',      // Meta Conversions API (CAPI) direct calls
         'https://api.anthropic.com',
         'https://openrouter.ai',
         'https://res.cloudinary.com',
