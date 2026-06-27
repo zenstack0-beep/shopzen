@@ -75,6 +75,9 @@ router.post('/capi', capiLimiter, async (req, res) => {
 
   if (!eventName) return; // nothing to send
 
+  // ── DEBUG: log browser-supplied eventId arriving at the relay endpoint ──
+  console.log(`[META CAPI] ${eventName} — browser event_id received:`, eventId || '(none — will be auto-generated)');
+
   // Get real client IP (supports Railway / Vercel proxy headers)
   const clientIp =
     req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||

@@ -133,6 +133,9 @@ function postJson(url, body) {
 async function sendCapiEvent(eventName, payload = {}) {
   const cfg = await getCapiCfg();
 
+  // ── DEBUG: log the event_id arriving in the payload ──────────────────────
+  console.log(`[META CAPI] ${eventName} — API payload event_id:`, payload.eventId || '(none — will auto-generate UUID)');
+
   if (!cfg.pixelId || !cfg.accessToken) {
     // Log clearly in ALL environments so you can see it in Railway logs
     console.warn(`[META CAPI] SKIPPED "${eventName}" — missing config. pixelId="${cfg.pixelId ? '✓' : '✗ MISSING'}" accessToken="${cfg.accessToken ? '✓' : '✗ MISSING'}". Set META_PIXEL_ID + META_CAPI_ACCESS_TOKEN in Railway env vars, OR enter them in Admin → SEO → Conversions API.`);
@@ -186,6 +189,9 @@ async function sendCapiEvent(eventName, payload = {}) {
     user_data:         userData,
     ...(Object.keys(customData).length ? { custom_data: customData } : {}),
   };
+
+  // ── DEBUG: log the final event_id being sent to Meta Graph API ───────────
+  console.log(`[META CAPI] ${eventName} — final CAPI event_id sent to Meta:`, event.event_id);
 
   const body = { data: [event] };
   if (cfg.testEventCode) body.test_event_code = cfg.testEventCode;

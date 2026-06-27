@@ -751,6 +751,8 @@ router.post('/', orderRateLimiter, async (req, res) => {
     // Fire-and-forget: never await — CAPI must never delay the order response.
     // We pass explicit contentIds and numItems computed from authoritative orderItems
     // so CAPI never tries to re-read unpopulated ObjectIds from order.items.
+    // ── DEBUG: log the browser Purchase event_id arriving with the order POST ──
+    console.log('[META CAPI] Purchase — browser event_id received (metaEventId):', req.body.metaEventId || '(none — CAPI will use fallback)');
     const _capiContentIds = orderItems.map(i => String(i.product || '')).filter(id => id && id.length > 5);
     const _capiNumItems   = orderItems.reduce((s, i) => s + (i.quantity || 1), 0);
     sendPurchaseEvent(order, {
