@@ -423,6 +423,10 @@ export default function Checkout() {
   const sym = settings?.currencySymbol || 'Rs.';
 
   const orderPlaced        = useRef(false);
+  // submitting is a synchronous ref-based lock that blocks double-submit
+  // before setLoading(true) has a chance to re-render the disabled button.
+  // It is reset in the catch block so the user can retry after an error.
+  const submitting         = useRef(false);
   const [loading,          setLoading]          = useState(false);
   const [couponCode,       setCouponCode]       = useState('');
   const [couponData,       setCouponData]       = useState(null);
@@ -602,8 +606,13 @@ export default function Checkout() {
   // ── Place order ───────────────────────────────────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!agreedTerms)                    { toast.error('Please agree to terms and conditions'); return; }
-    if (total > 0 && !paymentMethod)     { toast.error('Please select a payment method'); return; }
+    // Synchronous double-submit guard — ref check is instant, before React
+    // re-renders from setLoading(true). Prevents duplicate Purchase events
+    // from fast double-click or React StrictMode double-invocation.
+    if (submitting.current) return;
+    submitting.current = true;
+    if (!agreedTerms)                    { submitting.current = false; toast.error('Please agree to terms and conditions'); return; }
+    if (total > 0 && !paymentMethod)     { submitting.current = false; toast.error('Please select a payment method'); return; }
 
     if (!user) {
       try {
@@ -745,6 +754,7 @@ export default function Checkout() {
 
       navigate(`/my-orders?new=${data.orderId}`);
     } catch (err) {
+      submitting.current = false; // allow retry after error
       toast.error(err.response?.data?.message || 'Order failed. Please try again.');
     } finally { setLoading(false); }
   };

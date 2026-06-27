@@ -50,15 +50,18 @@ async function getCapiCfg() {
   try {
     const { Settings } = require('../models/index');
     const rows = await Settings.find({
-      key: { $in: ['seo_fbPixelId', 'meta_capi_token', 'meta_test_event_code'] },
+      // 'facebookPixel' = key used by Settings UI PUT /settings
+      // 'seo_fbPixelId' = key used by SEO route (legacy / alternate path)
+      key: { $in: ['facebookPixel', 'seo_fbPixelId', 'meta_capi_token', 'meta_test_event_code'] },
     }).lean();
     const s = {};
     rows.forEach(r => { s[r.key] = r.value; });
 
     _cfg = {
-      pixelId:       s.seo_fbPixelId        || process.env.META_PIXEL_ID         || '',
-      accessToken:   s.meta_capi_token      || process.env.META_CAPI_ACCESS_TOKEN || '',
-      testEventCode: s.meta_test_event_code || process.env.META_TEST_EVENT_CODE   || '',
+      // Prefer facebookPixel (saved by Settings UI), fall back to seo_fbPixelId, then env
+      pixelId:       s.facebookPixel         || s.seo_fbPixelId        || process.env.META_PIXEL_ID         || '',
+      accessToken:   s.meta_capi_token       || process.env.META_CAPI_ACCESS_TOKEN || '',
+      testEventCode: s.meta_test_event_code  || process.env.META_TEST_EVENT_CODE   || '',
       _fetchedAt:    Date.now(),
     };
   } catch {
@@ -131,10 +134,8 @@ async function sendCapiEvent(eventName, payload = {}) {
   const cfg = await getCapiCfg();
 
   if (!cfg.pixelId || !cfg.accessToken) {
-    // Silently skip if not configured — dev environments without CAPI set up
-    if (process.env.NODE_ENV !== 'production') {
-      console.log(`[META CAPI] Skipped (not configured): ${eventName}`);
-    }
+    // Log clearly in ALL environments so you can see it in Railway logs
+    console.warn(`[META CAPI] SKIPPED "${eventName}" — missing config. pixelId="${cfg.pixelId ? '✓' : '✗ MISSING'}" accessToken="${cfg.accessToken ? '✓' : '✗ MISSING'}". Set META_PIXEL_ID + META_CAPI_ACCESS_TOKEN in Railway env vars, OR enter them in Admin → SEO → Conversions API.`);
     return;
   }
 
