@@ -144,6 +144,7 @@ app.use('/api/delivery',      require('./routes/delivery'));
 app.use('/api/pages',         require('./routes/pages'));
 app.use('/api/subscribers',   require('./routes/subscribers'));
 app.use('/api/seo',           require('./routes/seo'));
+app.use('/api/meta',          require('./routes/meta'));   // Meta CAPI relay
 
 // ─── SEO aliases ──────────────────────────────────────────────────────────────
 app.get('/sitemap.xml', (req, res) => res.redirect(301, '/api/seo/sitemap.xml'));

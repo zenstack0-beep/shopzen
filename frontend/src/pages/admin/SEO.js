@@ -52,7 +52,15 @@ export default function AdminSEO() {
   const [generatingSitemap, setGeneratingSitemap] = useState(false);
 
   useEffect(() => {
-    API.get('/settings').then(r => setSettings(r.data || {})).catch(() => {});
+    API.get('/settings').then(r => {
+      const s = r.data || {};
+      // Merge CAPI-specific keys into settings state so form fields are pre-filled
+      setSettings({
+        ...s,
+        capiAccessToken:   s.meta_capi_token       || '',
+        capiTestEventCode: s.meta_test_event_code  || '',
+      });
+    }).catch(() => {});
     API.get('/products?limit=100').then(r => setProducts(r.data.products || [])).catch(() => {});
     API.get('/categories').then(r => setCategories(r.data || [])).catch(() => {});
     // Load saved robots.txt
@@ -82,11 +90,19 @@ export default function AdminSEO() {
         linkedinUrl:        merged.linkedinUrl      || '',
         youtubeUrl:         merged.youtubeUrl       || '',
         // Analytics IDs
-        ga4Id:              merged.googleAnalytics  || '',
-        gtmId:              merged.googleTagManager || '',
-        metaPixelId:        merged.facebookPixel    || '',
-        currencyCode:       merged.currencyCode     || 'LKR',
+        ga4Id:              merged.googleAnalytics   || '',
+        gtmId:              merged.googleTagManager  || '',
+        metaPixelId:        merged.facebookPixel     || '',
+        currencyCode:       merged.currencyCode      || 'LKR',
       };
+      // Save CAPI credentials as separate Settings keys (not in seo_config,
+      // since they are server-read — never sent to the browser window object)
+      if (merged.capiAccessToken !== undefined) {
+        await API.put('/settings', { meta_capi_token: merged.capiAccessToken }).catch(() => {});
+      }
+      if (merged.capiTestEventCode !== undefined) {
+        await API.put('/settings', { meta_test_event_code: merged.capiTestEventCode }).catch(() => {});
+      }
       const payload = { ...merged, seo_config };
       await API.put('/settings', payload);
       // Immediately inject into window so analytics fires without page reload
@@ -634,6 +650,34 @@ ${urls.map(u => `  <url>
               </div>
             </div>
             <Field label="Facebook Pixel ID" value={settings.facebookPixel} onChange={e => setSettings(p => ({ ...p, facebookPixel: e.target.value }))} placeholder="123456789012345" hint="Found in Meta Business Suite → Events Manager → Pixel → Settings"/>
+
+            {/* Conversions API */}
+            <div className="mt-4 p-4 bg-blue-50 rounded-xl border border-blue-100">
+              <h4 className="font-semibold text-blue-900 mb-1 flex items-center gap-2">
+                🔗 Conversions API (Server-Side Events)
+              </h4>
+              <p className="text-xs text-blue-700 mb-3">
+                Sends Purchase events from your server to Meta — catches purchases blocked by ad blockers or iOS privacy settings.
+                Get your token from: <strong>Meta Events Manager → Data Sources → your Pixel → Settings → Conversions API → Generate access token</strong>.
+              </p>
+              <div className="space-y-3">
+                <Field
+                  label="CAPI Access Token"
+                  value={settings.capiAccessToken || ''}
+                  onChange={e => setSettings(p => ({ ...p, capiAccessToken: e.target.value }))}
+                  placeholder="EAAxxxxx... (system user access token)"
+                  hint="Generate in Meta Events Manager → your Pixel → Settings → Conversions API"
+                  type="password"
+                />
+                <Field
+                  label="Test Event Code (dev only)"
+                  value={settings.capiTestEventCode || ''}
+                  onChange={e => setSettings(p => ({ ...p, capiTestEventCode: e.target.value }))}
+                  placeholder="TEST36398 — leave empty in production"
+                  hint="Only set this during testing. Remove it before going live or all events appear as test events."
+                />
+              </div>
+            </div>
           </div>
 
           {/* Custom Code Injection */}

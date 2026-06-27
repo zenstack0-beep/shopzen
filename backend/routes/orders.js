@@ -7,6 +7,7 @@ const Product = require('../models/Product');
 const { DiscountEngine } = require('../services/discountEngine');
 const { Coupon, GiftCard, Notification, Settings, DeliveryService } = require('../models/index');
 const { auth, adminAuth } = require('../middleware/auth');
+const { sendPurchaseEvent } = require('../services/metaCAPI');
 const {
   sendMail,
   getAdminEmail,
@@ -510,6 +511,9 @@ router.post('/', orderRateLimiter, async (req, res) => {
       items, billing, shipping, shipToDifferentAddress,
       paymentMethod, couponCode, giftCard, notes, deliveryService,
       paymentReference,   // provided by frontend after gateway payment succeeds
+      metaEventId,        // browser pixel eventId for CAPI deduplication
+      fbp,                // _fbp cookie for Meta audience tracking
+      fbc,                // _fbc cookie for Meta click attribution
     } = req.body;
 
     // ── Strict input validation ─────────────────────────────────────────────────
@@ -692,6 +696,10 @@ router.post('/', orderRateLimiter, async (req, res) => {
       total:         totals.total,
       notes,
       deliveryService:     deliveryService || 'standard',
+      // Meta Pixel dedup fields — stored for potential refund/cancel CAPI events
+      metaEventId: metaEventId || undefined,
+      metaFbp:     fbp || undefined,
+      metaFbc:     fbc || undefined,
       deliveryServiceName,
       statusHistory: [{
         status: (['payhere','stripe','paypal'].includes(paymentMethod) && paymentReference)
@@ -735,6 +743,20 @@ router.post('/', orderRateLimiter, async (req, res) => {
       link:    `/admin/orders/${order._id}`,
       data:    { orderId: order._id, total: totals.total, paymentMethod },
     });
+
+    // ── Meta CAPI: server-side Purchase event ──────────────────────────────────
+    // This mirrors the browser pixel Purchase event fired in the frontend.
+    // The eventId from the request body links the two events for deduplication —
+    // Meta counts only ONE conversion even though both browser and server fire.
+    // Fire-and-forget: never await — CAPI must never delay the order response.
+    sendPurchaseEvent(order, {
+      clientIp:  req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || '',
+      userAgent: req.headers['user-agent'] || '',
+      fbp:       req.body.fbp || req.cookies?._fbp || '',
+      fbc:       req.body.fbc || req.cookies?._fbc || '',
+      eventId:   req.body.metaEventId || undefined,  // sent by frontend for deduplication
+      siteUrl:   `${process.env.FRONTEND_URL || 'https://shopzen.lk'}/order-success/${order._id}`,
+    }).catch(err => console.error('[CAPI order]', err.message));
 
     // ── Email customer: order confirmation ─────────────────────────────────────
     if (billing?.email) {

@@ -354,7 +354,11 @@ export default function ProductDetail() {
     }
     setVarError(''); setAdding(true);
     addItem({ ...product, selectedVariants: selVars, price: curPrice }, qty);
-    trackAddToCart({ ...product, price: curPrice }, qty);
+    trackAddToCart(
+      { ...product, price: curPrice },
+      qty,
+      { billing: user ? { email: user.email, phone: user.phone, firstName: user.firstName, lastName: user.lastName } : {} }
+    );
 
     // GSAP button celebration
     const btn = btnRef.current;

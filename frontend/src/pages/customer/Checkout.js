@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import useSEO, { trackPurchase } from '../../hooks/useSEO';
+import useSEO, { trackPurchase, applyAdvancedMatching } from '../../hooks/useSEO';
+import { generateEventId, getFbCookies } from '../../utils/metaPixelHelpers';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../../context/CartContext';
 import { useAuth } from '../../context/AuthContext';
@@ -708,7 +709,14 @@ export default function Checkout() {
       }
 
       // ── COD / bank_transfer / free — create order now ────────────────────────
-      const { data } = await API.post('/orders', orderData);
+      const _purchaseEventId = generateEventId('Purchase', Date.now());
+      const { fbp: _fbp, fbc: _fbc } = getFbCookies();
+      const { data } = await API.post('/orders', {
+        ...orderData,
+        metaEventId: _purchaseEventId,
+        fbp: _fbp,
+        fbc: _fbc,
+      });
 
       if (user) {
         API.put('/auth/profile', {
@@ -717,7 +725,12 @@ export default function Checkout() {
       }
 
       orderPlaced.current = true;
-      trackPurchase(data, data.items || items.map(i => ({ ...i, product: { _id: i.productId } })));
+      applyAdvancedMatching(billing);
+      trackPurchase(
+        data,
+        data.items || items.map(i => ({ ...i, product: { _id: i.productId } })),
+        { billing, eventId: _purchaseEventId }
+      );
       clearCart();
       sessionStorage.removeItem('checkout_state');
 
@@ -738,13 +751,19 @@ export default function Checkout() {
     const pendingData = stripeModal.pendingOrderData;
     setStripeModal(null);
     try {
+      const _stripeEventId = generateEventId('Purchase', paymentIntentId);
+      const { fbp: _fbp, fbc: _fbc } = getFbCookies();
       const { data } = await API.post('/orders', {
         ...pendingData,
         paymentReference: paymentIntentId,
+        metaEventId: _stripeEventId,
+        fbp: _fbp,
+        fbc: _fbc,
       });
       if (user) API.put('/auth/profile', { defaultAddress: { country: billing.country, street: billing.street, city: billing.city } }).catch(() => {});
       orderPlaced.current = true;
-      trackPurchase(data, data.items || []);
+      applyAdvancedMatching(billing);
+      trackPurchase(data, data.items || [], { billing, eventId: _stripeEventId });
       clearCart();
       sessionStorage.removeItem('checkout_state');
       toast.success('✅ Payment successful!');
@@ -760,13 +779,19 @@ export default function Checkout() {
     const pendingData = paypalModal.pendingOrderData;
     setPaypalModal(null);
     try {
+      const _ppEventId = generateEventId('Purchase', captureId);
+      const { fbp: _fbp, fbc: _fbc } = getFbCookies();
       const { data } = await API.post('/orders', {
         ...pendingData,
         paymentReference: captureId,
+        metaEventId: _ppEventId,
+        fbp: _fbp,
+        fbc: _fbc,
       });
       if (user) API.put('/auth/profile', { defaultAddress: { country: billing.country, street: billing.street, city: billing.city } }).catch(() => {});
       orderPlaced.current = true;
-      trackPurchase(data, data.items || []);
+      applyAdvancedMatching(billing);
+      trackPurchase(data, data.items || [], { billing, eventId: _ppEventId });
       clearCart();
       sessionStorage.removeItem('checkout_state');
       toast.success('✅ PayPal payment successful!');
@@ -921,7 +946,8 @@ export default function Checkout() {
                 defaultAddress: { country: billing.country, street: billing.street, city: billing.city },
               }).catch(() => {});
               orderPlaced.current = true;
-              trackPurchase(orderResult, orderResult.items || []);
+              applyAdvancedMatching(billing);
+              trackPurchase(orderResult, orderResult.items || [], { billing });
               clearCart();
               sessionStorage.removeItem('checkout_state');
               setPayHereData(null);

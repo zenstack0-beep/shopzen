@@ -204,7 +204,13 @@ export function OrderSuccess() {
         setLoading(false);
         if (data && data.paymentStatus !== 'failed' && !purchaseTracked.current) {
           purchaseTracked.current = true;
-          trackPurchase(data, data.items || []);
+          // Pass billing from order so Advanced Matching works on success page.
+          // OrderSuccess is reached after PayHere/Stripe redirect — the Checkout.js
+          // trackPurchase already fired with a dedup eventId, so this call uses
+          // a different eventId to avoid being dropped by Meta deduplication.
+          trackPurchase(data, data.items || [], {
+            billing: data.billing || {},
+          });
         }
         if (gateway && data.paymentStatus === 'pending' && attempts === 0) {
           attempts++;

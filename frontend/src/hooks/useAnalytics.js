@@ -1,38 +1,43 @@
 /**
- * useAnalytics.js — Injects GA4, GTM, and Meta Pixel scripts
- * from the seo_config Settings key.
+ * useAnalytics.js — GA4, GTM, and Meta Pixel bootstrap for ShopZen
  *
  * Architecture:
- *  - index.html loads the fbevents.js STUB (fbq shim + async script tag)
- *    without calling fbq('init'). This means fbq() is always available as
- *    a native queue from the very first paint — no race condition.
- *  - bootstrapAnalytics() (called from <AnalyticsBootstrap/>) calls
- *    fbq('init', pixelId) once the Pixel ID is fetched from admin settings.
- *  - Any event fired between page load and init (AddToCart, Purchase, etc.)
- *    sits in Meta's own f.queue and is replayed automatically after init.
+ *  - index.html loads the fbq() STUB (shim + async fbevents.js) without init.
+ *    window.fbq is available from the very first millisecond of page load.
+ *  - bootstrapAnalytics() calls fbq('init', pixelId, advancedMatchData) once
+ *    the Pixel ID is fetched from admin Settings → SEO panel.
+ *  - Advanced Matching: if a logged-in user is available at bootstrap time,
+ *    hashed PII is sent with init so Meta can match events immediately.
+ *  - applyAdvancedMatching() in useSEO.js can re-init later when checkout
+ *    billing data becomes available (for guest users).
  *
  * This eliminates:
- *  - The "Duplicate Pixel ID" warning (no hardcoded init in index.html)
- *  - Lost Purchase events (fbq queue is native, not a custom polyfill)
- *  - The polling interval hack (fbevents.js is already loading from stub)
+ *  - "Duplicate Pixel ID" warning (single init path, guarded by __fbPixelInitIds)
+ *  - Lost Purchase events (native fbq queue buffers pre-init events)
+ *  - Unmatched events (Advanced Matching data sent with every init)
  */
 
 import { useEffect } from 'react';
+import { getAdvancedMatchingData } from '../utils/metaPixelHelpers';
 
 /**
- * fbqSafe — call this everywhere instead of window.fbq() directly.
+ * fbqSafe — always use this instead of window.fbq() directly.
  *
- * Since the fbq stub is loaded in index.html, window.fbq is ALWAYS defined
- * by the time any React code runs. Calls before fbq('init') are buffered
- * in Meta's own n.queue and replayed after init automatically.
- * The fallback branch is a safety net for environments where index.html
- * is served without the stub (e.g. unit tests, some SSR setups).
+ * The fbq stub in index.html guarantees window.fbq exists from first paint.
+ * Events fired before fbq('init') queue in Meta's own n.queue and replay
+ * automatically after init — no custom queue needed.
+ *
+ * The fourth argument (options like { eventID }) is passed through for
+ * event deduplication with the Conversions API.
  */
-export function fbqSafe(type, eventName, params) {
+export function fbqSafe(type, eventName, params, options) {
   if (window.fbq) {
-    window.fbq(type, eventName, params);
+    if (options) {
+      window.fbq(type, eventName, params, options);
+    } else {
+      window.fbq(type, eventName, params);
+    }
   }
-  // No custom queue needed — fbevents.js stub handles buffering natively.
 }
 
 // ── DOM helpers ───────────────────────────────────────────────────────────────
@@ -62,7 +67,13 @@ function injectNoscript(html, id) {
   document.body.insertBefore(ns, document.body.firstChild);
 }
 
-export function bootstrapAnalytics(cfg) {
+// ── Bootstrap ─────────────────────────────────────────────────────────────────
+/**
+ * @param {object} cfg        — window.__SHOPZEN_SEO__ config object
+ * @param {object} [userData] — logged-in user { email, phone, firstName, lastName }
+ *                              used for Advanced Matching on init
+ */
+export function bootstrapAnalytics(cfg, userData) {
   if (!cfg) return;
 
   // ── Google Tag Manager ────────────────────────────────────────────────────
@@ -92,37 +103,59 @@ export function bootstrapAnalytics(cfg) {
   }
 
   // ── Meta Pixel ────────────────────────────────────────────────────────────
-  // The fbq stub (shim + async fbevents.js loader) is already in index.html,
-  // so window.fbq is available immediately. We only need to call fbq('init')
-  // once per pixel ID. Events queued before init() are replayed by Meta's
-  // own queue mechanism — no custom drain needed.
+  // fbq stub is already loaded in index.html — window.fbq is always available.
+  // We only call fbq('init') once per pixel ID (guarded by __fbPixelInitIds).
+  // Advanced Matching: if a logged-in user is passed, their hashed PII is
+  // included in the init call so Meta can match events from the first PageView.
   if (cfg.metaPixelId && window.fbq) {
     window.__fbPixelInitIds = window.__fbPixelInitIds || {};
 
     if (!window.__fbPixelInitIds[cfg.metaPixelId]) {
       window.__fbPixelInitIds[cfg.metaPixelId] = true;
-      window.fbq('init', cfg.metaPixelId);
+
+      // Build Advanced Matching data from logged-in user if available
+      const matchData = userData ? getAdvancedMatchingData(userData) : undefined;
+
+      if (matchData && Object.keys(matchData).length) {
+        // Init with hashed PII — improves match rate from ~40% to ~80%+
+        window.fbq('init', cfg.metaPixelId, matchData);
+        console.log('[Meta Pixel] Initialised with Advanced Matching:', Object.keys(matchData));
+      } else {
+        window.fbq('init', cfg.metaPixelId);
+      }
+
       window.fbq('track', 'PageView');
 
-      // noscript fallback for crawlers / JS-disabled browsers
       injectNoscript(
         `<img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id=${cfg.metaPixelId}&ev=PageView&noscript=1"/>`,
         'fb-pixel-noscript'
       );
     }
-    // If bootstrapAnalytics is called again (e.g. settings hot-reload) with the
-    // same pixel ID, we do nothing — the pixel is already initialised and a
-    // second fbq('init') with the same ID is what causes the Duplicate warning.
+    // If called again (settings hot-reload, same pixelId) — do nothing.
+    // A second fbq('init') with the same ID causes the Duplicate warning.
   }
 }
 
-/** React component — mount once at App root */
+// ── React component ───────────────────────────────────────────────────────────
+/** Mount once at App root — reads user from localStorage for Advanced Matching */
 export default function AnalyticsBootstrap() {
   useEffect(() => {
+    // Try to get logged-in user for Advanced Matching at init time
+    let userData = null;
+    try {
+      const raw = localStorage.getItem('user');
+      if (raw) userData = JSON.parse(raw);
+    } catch { }
+
     const cfg = window.__SHOPZEN_SEO__;
-    if (cfg) bootstrapAnalytics(cfg);
+    if (cfg) bootstrapAnalytics(cfg, userData);
+
     // Also listen for delayed injection (settings loaded after mount)
-    const handler = () => bootstrapAnalytics(window.__SHOPZEN_SEO__);
+    const handler = () => {
+      let u = null;
+      try { u = JSON.parse(localStorage.getItem('user')); } catch { }
+      bootstrapAnalytics(window.__SHOPZEN_SEO__, u);
+    };
     window.addEventListener('shopzen:seo-ready', handler);
     return () => window.removeEventListener('shopzen:seo-ready', handler);
   }, []);

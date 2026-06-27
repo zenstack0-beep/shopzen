@@ -1,14 +1,26 @@
 /**
- * useSEO.js — Dynamic SEO hook for ShopZen
- * Manages: <title>, meta description, OG, Twitter Cards, JSON-LD,
- *           canonical URLs, GA4 / GTM / Meta Pixel page-view events.
+ * useSEO.js — Dynamic SEO + Meta Pixel Advanced Matching for ShopZen
+ *
+ * Changes in this version:
+ *  - Every pixel event now carries Advanced Matching data (em, ph, fn, ln, ct)
+ *    collected from the logged-in user or the checkout billing form.
+ *  - Every pixel event now carries an eventId for server-side CAPI deduplication.
+ *  - trackPurchase / trackAddToCart / trackInitiateCheckout / trackViewItem
+ *    all accept an optional { billing, eventId } options object.
+ *  - getAdvancedMatchingData() and generateEventId() are imported from
+ *    metaPixelHelpers so the browser pixel and CAPI always use the same values.
  */
 
 import { useEffect } from 'react';
 import { fbqSafe } from './useAnalytics';
 import { useLocation } from 'react-router-dom';
+import {
+  generateEventId,
+  getAdvancedMatchingData,
+  sendCapiRequest,
+} from '../utils/metaPixelHelpers';
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
+// ─── DOM meta helpers ─────────────────────────────────────────────────────────
 function setMeta(name, content, attr = 'name') {
   if (!content) return;
   let el = document.querySelector(`meta[${attr}="${name}"]`);
@@ -31,44 +43,23 @@ function setLink(rel, href) {
   el.setAttribute('href', href);
 }
 
-/**
- * Checks whether the initial SSR HTML already contains a <script type="application/ld+json">
- * block for the given schema @type AND that block does NOT have one of our
- * client-side IDs (meaning it is a static SSR-rendered block, not one we wrote).
- * If an SSR block exists, we must NOT inject a duplicate — we only manage our
- * own id-tagged scripts.
- */
 function ssrSchemaExists(schemaType) {
   const scripts = document.querySelectorAll('script[type="application/ld+json"]');
   for (const s of scripts) {
-    // Skip scripts we own (they have an id we set)
     if (s.id && s.id.startsWith('ld-')) continue;
     try {
       const data = JSON.parse(s.textContent);
-      // Handle top-level @type match
       if (data['@type'] === schemaType) return true;
-      // Handle @graph array (e.g. WebSite embeds Organization inside publisher)
       if (Array.isArray(data['@graph'])) {
         if (data['@graph'].some(node => node['@type'] === schemaType)) return true;
       }
-    } catch {
-      // malformed JSON-LD — skip
-    }
+    } catch { }
   }
   return false;
 }
 
-/**
- * Sets or updates a JSON-LD <script> block identified by `id`.
- * If the same @type is already present in an SSR (non-id-tagged) script, the
- * call is silently skipped to prevent duplicate structured data.
- * For dynamic schemas (Product, BreadcrumbList) that are never in SSR HTML,
- * `bypassSsrCheck` can be set true to skip the SSR guard entirely.
- */
 function setJsonLd(id, data, { bypassSsrCheck = false } = {}) {
   if (!bypassSsrCheck && data['@type'] && ssrSchemaExists(data['@type'])) {
-    // SSR already has this schema type — do not create a duplicate.
-    // Also clean up any previously injected client-side copy (e.g. on re-mount).
     removeJsonLd(id);
     return;
   }
@@ -87,34 +78,52 @@ function removeJsonLd(id) {
   if (el) el.remove();
 }
 
+// ─── Config helpers ───────────────────────────────────────────────────────────
 export function getSeoConfig() {
   return window.__SHOPZEN_SEO__ || {};
 }
 
 /**
  * Returns a Meta Pixel-safe ISO 4217 currency code.
- *
- * Meta Pixel validates the `currency` parameter on Purchase / AddToCart
- * events.  If the code is missing or not a 3-letter ISO 4217 string the
- * event is silently dropped (you see the console warning:
- *   "Parameter 'currency' is invalid for event 'Purchase'").
- *
- * Root cause: getSeoConfig() returns {} when settings have not yet loaded,
- * so currencyCode is undefined and the fallback 'LKR' is correct — but
- * if someone has stored a non-ISO value (e.g. 'Rs.' or empty string) in
- * the DB it would fail the pixel's validation.  This helper normalises it.
+ * Meta validates 'currency' on Purchase/AddToCart — invalid codes silently
+ * drop the event. This normalises whatever is stored in admin settings.
  */
 export function getPixelCurrency() {
   const raw = getSeoConfig().currencyCode;
-  // Accept only exactly 3 uppercase ASCII letters (ISO 4217 format).
   if (raw && /^[A-Z]{3}$/.test(raw.trim().toUpperCase())) {
     return raw.trim().toUpperCase();
   }
-  // Fall back to LKR (Sri Lankan Rupee — valid ISO 4217 code accepted by Meta).
   return 'LKR';
 }
 
-// ─── GA4 / analytics helpers ──────────────────────────────────────────────────
+// ─── Advanced Matching for pixel fbq('init') ──────────────────────────────────
+/**
+ * Re-initialise the pixel with Advanced Matching data for a known user.
+ * Call this once after login or when billing data becomes available.
+ * Safe to call multiple times — guarded by window.__fbAdvancedMatchApplied.
+ *
+ * @param {object} billing — { email, phone, firstName, lastName, city, country }
+ */
+export function applyAdvancedMatching(billing = {}) {
+  const cfg = getSeoConfig();
+  if (!cfg.metaPixelId && !window.__fbPixelInitIds) return;
+  const pixelId = cfg.metaPixelId || Object.keys(window.__fbPixelInitIds || {})[0];
+  if (!pixelId || !window.fbq) return;
+
+  // Only re-init if we haven't already applied matching in this session
+  const matchKey = `__fbAM_${pixelId}`;
+  if (window[matchKey]) return;
+  window[matchKey] = true;
+
+  const matchData = getAdvancedMatchingData(billing);
+  if (matchData && Object.keys(matchData).length) {
+    // Re-initialise with matching data — Meta merges with existing init
+    window.fbq('init', pixelId, matchData);
+    console.log('[Meta Pixel] Advanced Matching applied:', Object.keys(matchData));
+  }
+}
+
+// ─── GA4 helpers ──────────────────────────────────────────────────────────────
 export function trackPageView(url, title) {
   const { ga4Id } = getSeoConfig();
   if (ga4Id && window.gtag) {
@@ -127,55 +136,86 @@ export function trackEvent(eventName, params = {}) {
   fbqSafe('track', eventName, params);
 }
 
-export function trackPurchase(order, items) {
-  // Defensive: order.total may be 0 (free order) which is valid, but
-  // undefined/null means the API response was incomplete — skip the event
-  // rather than sending value: undefined which Meta silently drops.
+// ─── Purchase ─────────────────────────────────────────────────────────────────
+/**
+ * @param {object} order   — API response from POST /orders
+ * @param {Array}  items   — line items with { product, name, price, quantity }
+ * @param {object} [opts]  — { billing, eventId }
+ *   billing: raw PII from the checkout form (for Advanced Matching)
+ *   eventId: pre-generated dedup key (if not supplied, one is generated)
+ */
+export function trackPurchase(order, items, opts = {}) {
   const value = typeof order.total === 'number' ? order.total
-              : typeof order.grandTotal === 'number' ? order.grandTotal
-              : null;
+    : typeof order.grandTotal === 'number' ? order.grandTotal
+    : null;
+
   if (value === null) {
-    console.warn('[ShopZen] trackPurchase: order.total is missing, skipping pixel event', order);
+    console.warn('[ShopZen] trackPurchase: order.total missing, skipping', order);
     return;
   }
 
-  const currency = getPixelCurrency();
+  const currency      = getPixelCurrency();
   const transactionId = String(order._id || order.orderNumber || '');
-  const contentIds = items.map(i => String(i.product?._id || i.productId || '')).filter(Boolean);
+  const contentIds    = items.map(i => String(i.product?._id || i.productId || '')).filter(Boolean);
+  const numItems      = items.reduce((s, i) => s + (typeof i.quantity === 'number' ? i.quantity : 1), 0);
+  const eventId       = opts.eventId || generateEventId('Purchase', order._id || order.orderNumber);
+  const billing       = opts.billing || {};
 
-  // GA4
+  // ── Apply Advanced Matching if we have billing data ──────────────────────
+  if (billing.email || billing.phone) {
+    applyAdvancedMatching(billing);
+  }
+
+  // ── GA4 ──────────────────────────────────────────────────────────────────
   if (window.gtag) {
     window.gtag('event', 'purchase', {
       transaction_id: transactionId,
       value,
       currency,
       items: items.map(i => ({
-        item_id: String(i.product?._id || i.productId || ''),
+        item_id:   String(i.product?._id || i.productId || ''),
         item_name: i.name || '',
-        price:    typeof i.price === 'number' ? i.price : 0,
-        quantity: typeof i.quantity === 'number' ? i.quantity : 1,
+        price:     typeof i.price === 'number' ? i.price : 0,
+        quantity:  typeof i.quantity === 'number' ? i.quantity : 1,
       })),
     });
   }
 
-  // Meta Pixel — value must be a number, currency must be ISO 4217 (3 uppercase letters).
-  // content_ids must be strings; num_items must be a positive integer.
-  // Any of these wrong causes the event to be silently rejected.
+  // ── Meta Pixel (browser) ─────────────────────────────────────────────────
+  // eventId links this browser event to the CAPI server event for dedup.
   fbqSafe('track', 'Purchase', {
     value,
     currency,
     content_ids:  contentIds,
     content_type: 'product',
-    num_items:    items.reduce((sum, i) => sum + (typeof i.quantity === 'number' ? i.quantity : 1), 0),
-  });
+    num_items:    numItems,
+  }, { eventID: eventId });
+
+  // ── CAPI (server-side mirror) ─────────────────────────────────────────────
+  // Fire and forget — never await, never block checkout navigation.
+  sendCapiRequest('Purchase', {
+    value,
+    currency,
+    contentIds,
+    contentType: 'product',
+    numItems,
+    orderId: transactionId,
+  }, eventId, billing);
 }
 
-export function trackAddToCart(product, quantity = 1) {
-  // Ensure price is a number — Meta drops AddToCart if value is NaN/undefined
+// ─── Add To Cart ──────────────────────────────────────────────────────────────
+/**
+ * @param {object} product — { _id, name, price, salePrice, ... }
+ * @param {number} quantity
+ * @param {object} [opts]  — { billing, eventId }
+ */
+export function trackAddToCart(product, quantity = 1, opts = {}) {
   const price    = Number(product.salePrice || product.price) || 0;
   const value    = price * (typeof quantity === 'number' ? quantity : 1);
   const currency = getPixelCurrency();
   const id       = String(product._id || '');
+  const eventId  = opts.eventId || generateEventId('AddToCart', product._id);
+  const billing  = opts.billing || {};
 
   if (window.gtag) {
     window.gtag('event', 'add_to_cart', {
@@ -184,19 +224,34 @@ export function trackAddToCart(product, quantity = 1) {
       items: [{ item_id: id, item_name: product.name || '', price, quantity }],
     });
   }
+
   fbqSafe('track', 'AddToCart', {
     content_ids:  [id],
     content_name: product.name || '',
     content_type: 'product',
     value,
     currency,
-  });
+  }, { eventID: eventId });
+
+  sendCapiRequest('AddToCart', {
+    value,
+    currency,
+    contentIds:  [id],
+    contentType: 'product',
+    numItems:    quantity,
+  }, eventId, billing);
 }
 
-export function trackViewItem(product) {
+// ─── View Content ─────────────────────────────────────────────────────────────
+/**
+ * @param {object} product — product object
+ * @param {object} [opts]  — { billing, eventId }
+ */
+export function trackViewItem(product, opts = {}) {
   const price    = Number(product.salePrice || product.price) || 0;
   const currency = getPixelCurrency();
   const id       = String(product._id || '');
+  const eventId  = opts.eventId || generateEventId('ViewContent', product._id);
 
   if (window.gtag) {
     window.gtag('event', 'view_item', {
@@ -205,21 +260,42 @@ export function trackViewItem(product) {
       items: [{ item_id: id, item_name: product.name || '', price }],
     });
   }
+
   fbqSafe('track', 'ViewContent', {
     content_ids:  [id],
     content_name: product.name || '',
     content_type: 'product',
     value:        price,
     currency,
-  });
+  }, { eventID: eventId });
+
+  sendCapiRequest('ViewContent', {
+    value:       price,
+    currency,
+    contentIds:  [id],
+    contentType: 'product',
+    numItems:    1,
+  }, eventId, {});
 }
 
-export function trackInitiateCheckout(items = [], value = 0) {
-  const currency  = getPixelCurrency();
-  const safeValue = typeof value === 'number' ? value : 0;
+// ─── Initiate Checkout ────────────────────────────────────────────────────────
+/**
+ * @param {Array}  items   — cart items
+ * @param {number} value   — cart total
+ * @param {object} [opts]  — { billing, eventId }
+ */
+export function trackInitiateCheckout(items = [], value = 0, opts = {}) {
+  const currency   = getPixelCurrency();
+  const safeValue  = typeof value === 'number' ? value : 0;
   const contentIds = items.map(i => String(i._id || i.productId || '')).filter(Boolean);
+  const numItems   = items.reduce((s, i) => s + (typeof i.quantity === 'number' ? i.quantity : 1), 0);
+  const eventId    = opts.eventId || generateEventId('InitiateCheckout', safeValue);
+  const billing    = opts.billing || {};
 
-  // GA4
+  if (billing.email || billing.phone) {
+    applyAdvancedMatching(billing);
+  }
+
   if (window.gtag) {
     window.gtag('event', 'begin_checkout', {
       currency,
@@ -232,15 +308,24 @@ export function trackInitiateCheckout(items = [], value = 0) {
       })),
     });
   }
+
   fbqSafe('track', 'InitiateCheckout', {
     content_ids: contentIds,
-    num_items:   items.reduce((sum, i) => sum + (typeof i.quantity === 'number' ? i.quantity : 1), 0),
+    num_items:   numItems,
     value:       safeValue,
     currency,
-  });
+  }, { eventID: eventId });
+
+  sendCapiRequest('InitiateCheckout', {
+    value:       safeValue,
+    currency,
+    contentIds,
+    contentType: 'product',
+    numItems,
+  }, eventId, billing);
 }
 
-// ─── main hook ────────────────────────────────────────────────────────────────
+// ─── Main SEO hook ────────────────────────────────────────────────────────────
 export default function useSEO({
   title,
   description,
@@ -263,9 +348,6 @@ export default function useSEO({
   const defaultImage  = cfg.defaultOgImage || `${siteUrl}/og-default.png`;
   const defaultDesc   = cfg.defaultDescription || 'Premium online store — quality products, delivered fast.';
 
-  // ── Build title ──────────────────────────────────────────────────────────────
-  // Product pages: "Product Name Price in Sri Lanka | ShopZen" — captures high-volume
-  // "X price in sri lanka" buying-intent queries directly in the <title> tag.
   let finalTitle;
   if (title && type === 'product') {
     const withPriceSuffix = `${title} Price in Sri Lanka | ShopZen`;
@@ -279,8 +361,6 @@ export default function useSEO({
     finalTitle = title ? `${title} | ${siteName}` : siteName;
   }
 
-  // ── Build description ─────────────────────────────────────────────────────────
-  // For products: rich buying-intent description with price and location signals
   let finalDesc;
   if (description) {
     finalDesc = description;
@@ -290,31 +370,22 @@ export default function useSEO({
     const priceStr  = price ? `Rs.${price.toLocaleString()}` : '';
     const wasStr    = origPrice && origPrice !== price ? ` (was Rs.${origPrice.toLocaleString()})` : '';
     const brand     = product.brand ? `${product.brand} ` : '';
-    const cat       = product.category?.name ? ` ${product.category.name}` : '';
     const plain     = String(product.shortDescription || product.description || '')
                         .replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
     const snippet   = plain.slice(0, 80) || `${brand}${product.name}`;
     finalDesc = priceStr
       ? `${snippet}. ${priceStr}${wasStr}. Fast delivery across Sri Lanka. Shop at ShopZen.`.slice(0, 165)
-      : `${snippet}. Shop ${brand}${product.name}${cat} online in Sri Lanka. Fast delivery, best prices at ShopZen.`.slice(0, 165);
+      : `${snippet}. Shop ${brand}${product.name} online in Sri Lanka. Fast delivery, best prices at ShopZen.`.slice(0, 165);
   } else {
     finalDesc = defaultDesc;
   }
 
-  // Apply Cloudinary social-card transforms for consistent 1200×630 OG images.
-  // c_fill (not c_fit) crops to fully cover the 1200×630 box — no letterboxing
-  // on Facebook/LinkedIn/WhatsApp previews. f_jpg + q_auto keeps the social
-  // card lightweight vs. f_png.
   function buildOgImage(rawUrl) {
     if (!rawUrl || !rawUrl.includes('res.cloudinary.com')) return rawUrl;
     return rawUrl.replace(/\/upload\/(v\d+\/)?/, '/upload/w_1200,h_630,c_fill,g_auto,f_jpg,q_auto/$1');
   }
-  const finalImage  = buildOgImage(image || defaultImage);
+  const finalImage = buildOgImage(image || defaultImage);
 
-  // Build canonical from explicit `url`, or from the current path with
-  // tracking params (utm_*, fbclid, gclid, etc.) stripped. Meaningful params
-  // like pagination/search/sort are preserved if the caller passes a full
-  // `url` themselves.
   function buildCanonical(explicitUrl) {
     if (explicitUrl) return explicitUrl;
     const path = location.pathname;
@@ -331,11 +402,6 @@ export default function useSEO({
     document.title = finalTitle;
 
     setMeta('description', finalDesc);
-    // Private pages (cart/checkout/account) → noindex,nofollow.
-    // Faceted/search-result combinations → noindex,follow (keep crawling
-    // through to canonical category/product pages without indexing every
-    // filter/sort/search permutation as its own page).
-    // Everything else → index,follow.
     const robotsValue = noindex
       ? 'noindex,nofollow'
       : noindexFollow
@@ -343,25 +409,17 @@ export default function useSEO({
         : 'index,follow,max-image-preview:large';
     setMeta('robots', robotsValue);
 
-    // Keywords meta — rich buying-intent signals for Google/Bing
     let kwString = keywords;
     if (!kwString && product) {
       const nameLc  = product.name.toLowerCase();
-      const slugLc  = (product.slug || product.name).toLowerCase().replace(/[^a-z0-9]+/g, '');
       const brand   = product.brand || '';
       const catName = product.category?.name || '';
       const base    = [product.name, brand, product.sku, catName, ...(product.tags || [])].filter(Boolean);
       const intent  = [
         `${nameLc} price in sri lanka`,
         `buy ${brand} ${product.name}`.trim() + ' online sri lanka',
-        `${brand.toLowerCase()} ${slugLc}`.trim(),
         `${nameLc} price`,
         `colombo delivery ${nameLc}`,
-        `${nameLc} review`,
-        `buy ${brand.toLowerCase()} ${product.name.toLowerCase()} in sri lanka`.trim(),
-        `best ${catName.toLowerCase()} for sri lankan`.trim(),
-        `${nameLc} features and price`,
-        `sri lankan rupee price ${nameLc}`,
         brand ? `${brand.toLowerCase()} products sri lanka` : null,
         'sri lanka',
       ].filter(Boolean);
@@ -370,19 +428,17 @@ export default function useSEO({
     if (kwString) setMeta('keywords', kwString);
     setLink('canonical', finalUrl);
 
-    // Open Graph
-    setMeta('og:type',        type,       'property');
-    setMeta('og:title',       finalTitle, 'property');
-    setMeta('og:description', finalDesc,  'property');
-    setMeta('og:image',       finalImage, 'property');
-    setMeta('og:image:width',  '1200',    'property');
-    setMeta('og:image:height', '630',     'property');
-    setMeta('og:image:alt',   finalTitle, 'property');
-    setMeta('og:url',         finalUrl,   'property');
-    setMeta('og:site_name',   siteName,   'property');
-    setMeta('og:locale', 'en_LK', 'property');
+    setMeta('og:type',         type,       'property');
+    setMeta('og:title',        finalTitle, 'property');
+    setMeta('og:description',  finalDesc,  'property');
+    setMeta('og:image',        finalImage, 'property');
+    setMeta('og:image:width',  '1200',     'property');
+    setMeta('og:image:height', '630',      'property');
+    setMeta('og:image:alt',    finalTitle, 'property');
+    setMeta('og:url',          finalUrl,   'property');
+    setMeta('og:site_name',    siteName,   'property');
+    setMeta('og:locale',       'en_LK',    'property');
 
-    // Twitter Cards
     setMeta('twitter:card',        finalImage ? 'summary_large_image' : 'summary');
     setMeta('twitter:title',       finalTitle);
     setMeta('twitter:description', finalDesc);
@@ -390,8 +446,6 @@ export default function useSEO({
     setMeta('twitter:image:alt',   finalTitle);
     if (twitterHandle) setMeta('twitter:site', twitterHandle);
 
-    // JSON-LD: WebSite
-    // Guarded: skipped if index.html already contains a static WebSite block.
     setJsonLd('ld-website', {
       '@context': 'https://schema.org',
       '@type': 'WebSite',
@@ -404,10 +458,6 @@ export default function useSEO({
       },
     });
 
-    // JSON-LD: Organization — always emit so Google can show the logo next to
-    // the site name in search results. `cfg.logoUrl` must be set in admin
-    // Settings (stored in DB as storeLogoUrl, exposed via window.__SHOPZEN_SEO__).
-    // Guarded: skipped if index.html already contains a static Organization block.
     {
       const sameAs = [
         cfg.facebookUrl, cfg.instagramUrl, cfg.twitterUrl,
@@ -419,9 +469,6 @@ export default function useSEO({
         '@type': 'Organization',
         name: cfg.orgName || siteName,
         url: siteUrl,
-        // logoUrl MUST be a direct image URL (Cloudinary or /logo.png).
-        // Google uses this for the website logo badge in search results.
-        // Width ≥160px, aspect ratio ≤1:1 to 9.6:1, recommended 600×60px.
         logo: cfg.logoUrl
           ? { '@type': 'ImageObject', url: cfg.logoUrl, width: 600, height: 60 }
           : { '@type': 'ImageObject', url: `${siteUrl}/og-default.png` },
@@ -434,13 +481,9 @@ export default function useSEO({
       });
     }
 
-    // JSON-LD: Product (full Google Rich Results schema)
-    // Product schema is always dynamic (never in SSR HTML), so bypassSsrCheck is true.
     if (product) {
       const price = product.salePrice || product.price;
       const availability = product.stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock';
-
-      // Build image array — Google requires at least one image
       const imageArr = (product.images?.length ? product.images : [product.thumbnail]).filter(Boolean);
 
       const productSchema = {
@@ -468,20 +511,13 @@ export default function useSEO({
           seller: { '@type': 'Organization', name: siteName },
           shippingDetails: {
             '@type': 'OfferShippingDetails',
-            shippingRate: {
-              '@type': 'MonetaryAmount',
-              value: '0',
-              currency: cfg.currencyCode || 'LKR',
-            },
+            shippingRate: { '@type': 'MonetaryAmount', value: '0', currency: cfg.currencyCode || 'LKR' },
             deliveryTime: {
               '@type': 'ShippingDeliveryTime',
               handlingTime: { '@type': 'QuantitativeValue', minValue: 0, maxValue: 1, unitCode: 'DAY' },
-              transitTime: { '@type': 'QuantitativeValue', minValue: 1, maxValue: 5, unitCode: 'DAY' },
+              transitTime:  { '@type': 'QuantitativeValue', minValue: 1, maxValue: 5, unitCode: 'DAY' },
             },
-            shippingDestination: {
-              '@type': 'DefinedRegion',
-              addressCountry: cfg.countryCode || 'LK',
-            },
+            shippingDestination: { '@type': 'DefinedRegion', addressCountry: cfg.countryCode || 'LK' },
           },
           hasMerchantReturnPolicy: {
             '@type': 'MerchantReturnPolicy',
@@ -494,7 +530,6 @@ export default function useSEO({
         },
       };
 
-      // AggregateRating — required for review stars in Google results
       if (product.ratings?.count >= 1) {
         productSchema.aggregateRating = {
           '@type': 'AggregateRating',
@@ -505,7 +540,6 @@ export default function useSEO({
         };
       }
 
-      // Individual Review items — Google uses these to verify star snippets
       if (reviews?.length > 0) {
         productSchema.review = reviews.slice(0, 10).map(r => {
           const schema = {
@@ -538,8 +572,6 @@ export default function useSEO({
       removeJsonLd('ld-product');
     }
 
-    // JSON-LD: BreadcrumbList
-    // BreadcrumbList is always dynamic (never in SSR HTML), so bypassSsrCheck is true.
     if (breadcrumbs?.length) {
       setJsonLd('ld-breadcrumb', {
         '@context': 'https://schema.org',
@@ -558,7 +590,6 @@ export default function useSEO({
       removeJsonLd('ld-breadcrumb');
     }
 
-    // Analytics firing
     trackPageView(location.pathname + location.search, finalTitle);
     fbqSafe('track', 'PageView');
     if (window.dataLayer) {
