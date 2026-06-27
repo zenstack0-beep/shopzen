@@ -78,6 +78,15 @@ const orderSchema = new mongoose.Schema({
   lastActionAt:  { type: Date, default: Date.now },
   stuckSince:    { type: Date },
 
+  // ── Meta Pixel / CAPI deduplication ─────────────────────────────────────
+  // metaEventId: the same event_id used in both the browser fbq Purchase call
+  // and the backend CAPI sendPurchaseEvent call. Stored so OrderSuccess.js can
+  // reuse it when the page is refreshed or visited cross-device, ensuring the
+  // browser pixel always fires with an ID that matches what CAPI already sent.
+  metaEventId: { type: String },
+  metaFbp:     { type: String }, // _fbp cookie for Meta audience tracking
+  metaFbc:     { type: String }, // _fbc cookie for Meta click attribution
+
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
 });
