@@ -26,6 +26,7 @@ export default function Cart() {
   const { items, removeItem, updateQuantity, subtotal, clearCart, effectivePrice } = useCart();
   useSEO({ title: 'Cart', noindex: true });
   const { settings } = useTheme();
+  const { user } = useAuth();
   const navigate = useNavigate();
 
   const sym          = settings?.currencySymbol || 'Rs.';
@@ -162,7 +163,7 @@ export default function Cart() {
                     </div>
                   </div>
                 </div>
-                <button onClick={() => { trackInitiateCheckout(items, subtotal); navigate('/checkout'); }} className="btn-primary w-full text-base mt-2">
+                <button onClick={() => { trackInitiateCheckout(items, subtotal, { billing: user ? { email: user.email, phone: user.phone, firstName: user.firstName, lastName: user.lastName } : {} }); navigate('/checkout'); }} className="btn-primary w-full text-base mt-2">
                   Proceed to Checkout →
                 </button>
                 <Link to="/shop" className="block text-center text-sm text-gray-400 hover:text-gray-600 transition-colors mt-2">
