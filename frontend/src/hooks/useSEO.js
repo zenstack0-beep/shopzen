@@ -156,7 +156,14 @@ export function trackPurchase(order, items, opts = {}) {
 
   const currency      = getPixelCurrency();
   const transactionId = String(order._id || order.orderNumber || '');
-  const contentIds    = items.map(i => String(i.product?._id || i.productId || '')).filter(Boolean);
+  // Handle all item shapes: populated order items, raw ObjectId, cart items, explicit productId
+  // Resolve product ID from all possible item shapes the order/cart may use.
+  // Cart items:  i._id = product _id (spread from product object)
+  // Order items: i.product._id (populated) or i.product (ObjectId string)
+  // Fallback items created in Checkout.js: i.product._id
+  const contentIds    = items.map(i =>
+    String(i.product?._id || i.product || i.productId || i._id || '')
+  ).filter(id => id && id !== 'undefined' && id !== 'null' && id.length > 5);
   const numItems      = items.reduce((s, i) => s + (typeof i.quantity === 'number' ? i.quantity : 1), 0);
   const eventId       = opts.eventId || generateEventId('Purchase', order._id || order.orderNumber);
   const billing       = opts.billing || {};
@@ -287,7 +294,7 @@ export function trackViewItem(product, opts = {}) {
 export function trackInitiateCheckout(items = [], value = 0, opts = {}) {
   const currency   = getPixelCurrency();
   const safeValue  = typeof value === 'number' ? value : 0;
-  const contentIds = items.map(i => String(i._id || i.productId || '')).filter(Boolean);
+  const contentIds = items.map(i => String(i._id || i.productId || i.product?._id || i.product || '')).filter(id => id && id !== 'undefined' && id !== 'null');
   const numItems   = items.reduce((s, i) => s + (typeof i.quantity === 'number' ? i.quantity : 1), 0);
   const eventId    = opts.eventId || generateEventId('InitiateCheckout', safeValue);
   const billing    = opts.billing || {};

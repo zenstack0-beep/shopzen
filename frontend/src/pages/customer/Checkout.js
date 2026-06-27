@@ -726,14 +726,14 @@ export default function Checkout() {
 
       orderPlaced.current = true;
       applyAdvancedMatching(billing);
-      // Store eventId so OrderSuccess.js can see Checkout.js already fired this
-      // Purchase event — prevents double-counting on the success page.
-      sessionStorage.setItem(`sz_purchase_eid_${data._id || data.orderId}`, _purchaseEventId);
-      trackPurchase(
-        data,
-        data.items || items.map(i => ({ ...i, product: { _id: i.productId } })),
-        { billing, eventId: _purchaseEventId }
-      );
+      // Normalise order object: POST /orders returns { orderId, orderNumber, total, paymentMethod }
+      // trackPurchase needs ._id and .total — map orderId → _id for consistency.
+      const _orderForTracking = { ...data, _id: data._id || data.orderId };
+      // Store eventId so OrderSuccess.js knows Checkout already fired this Purchase.
+      sessionStorage.setItem(`sz_purchase_eid_${_orderForTracking._id}`, _purchaseEventId);
+      // Items fallback: cart items have _id = product _id and productId = product _id
+      const _itemsForTracking = data.items || items.map(i => ({ product: { _id: i._id || i.productId }, name: i.name, price: i.price, quantity: i.quantity }));
+      trackPurchase(_orderForTracking, _itemsForTracking, { billing, eventId: _purchaseEventId });
       clearCart();
       sessionStorage.removeItem('checkout_state');
 
@@ -766,8 +766,15 @@ export default function Checkout() {
       if (user) API.put('/auth/profile', { defaultAddress: { country: billing.country, street: billing.street, city: billing.city } }).catch(() => {});
       orderPlaced.current = true;
       applyAdvancedMatching(billing);
-      sessionStorage.setItem(`sz_purchase_eid_${data._id || data.orderId}`, _stripeEventId);
-      trackPurchase(data, data.items || [], { billing, eventId: _stripeEventId });
+      const _stripeOrderTracking = { ...data, _id: data._id || data.orderId };
+      sessionStorage.setItem(`sz_purchase_eid_${_stripeOrderTracking._id}`, _stripeEventId);
+      // POST /orders returns { orderId, orderNumber, total } — no items array.
+      // Fall back to cart items shaped as order items so contentIds are never empty.
+      const _stripeItems = data.items || (pendingData.items || []).map(i => ({
+        product: { _id: i.productId || i._id },
+        name: i.name, price: i.price, quantity: i.quantity,
+      }));
+      trackPurchase(_stripeOrderTracking, _stripeItems, { billing, eventId: _stripeEventId });
       clearCart();
       sessionStorage.removeItem('checkout_state');
       toast.success('✅ Payment successful!');
@@ -795,8 +802,13 @@ export default function Checkout() {
       if (user) API.put('/auth/profile', { defaultAddress: { country: billing.country, street: billing.street, city: billing.city } }).catch(() => {});
       orderPlaced.current = true;
       applyAdvancedMatching(billing);
-      sessionStorage.setItem(`sz_purchase_eid_${data._id || data.orderId}`, _ppEventId);
-      trackPurchase(data, data.items || [], { billing, eventId: _ppEventId });
+      const _ppOrderTracking = { ...data, _id: data._id || data.orderId };
+      sessionStorage.setItem(`sz_purchase_eid_${_ppOrderTracking._id}`, _ppEventId);
+      const _ppItems = data.items || (pendingData.items || []).map(i => ({
+        product: { _id: i.productId || i._id },
+        name: i.name, price: i.price, quantity: i.quantity,
+      }));
+      trackPurchase(_ppOrderTracking, _ppItems, { billing, eventId: _ppEventId });
       clearCart();
       sessionStorage.removeItem('checkout_state');
       toast.success('✅ PayPal payment successful!');
@@ -958,8 +970,13 @@ export default function Checkout() {
               orderPlaced.current = true;
               applyAdvancedMatching(billing);
               // Store eventId so OrderSuccess.js knows Checkout already fired Purchase
-              sessionStorage.setItem(`sz_purchase_eid_${orderResult._id || orderResult.orderId}`, _phEventId);
-              trackPurchase(orderResult, orderResult.items || [], { billing, eventId: _phEventId });
+              const _phOrderTracking = { ...orderResult, _id: orderResult._id || orderResult.orderId };
+              sessionStorage.setItem(`sz_purchase_eid_${_phOrderTracking._id}`, _phEventId);
+              const _phItems = orderResult.items || (pendingData.items || []).map(i => ({
+                product: { _id: i.productId || i._id },
+                name: i.name, price: i.price, quantity: i.quantity,
+              }));
+              trackPurchase(_phOrderTracking, _phItems, { billing, eventId: _phEventId });
               clearCart();
               sessionStorage.removeItem('checkout_state');
               setPayHereData(null);

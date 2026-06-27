@@ -155,21 +155,23 @@ async function sendCapiEvent(eventName, payload = {}) {
   const customData = {};
   if (typeof payload.value    === 'number') customData.value     = payload.value;
   if (payload.currency)    customData.currency     = String(payload.currency).toUpperCase();
-  if (payload.contentIds)  customData.content_ids  = payload.contentIds.map(String);
-  if (payload.contentType) customData.content_type = payload.contentType;
-  if (typeof payload.numItems === 'number') customData.num_items = payload.numItems;
-  if (payload.orderId)     customData.order_id     = String(payload.orderId);
-  // Meta requires a `contents` array for Purchase (and strongly recommends it
-  // for AddToCart / InitiateCheckout). Without it, event quality score is
-  // downgraded and conversion campaign optimisation underperforms.
-  if (payload.contentIds && payload.contentIds.length) {
-    customData.contents = payload.contentIds.map(id => ({
-      id:       String(id),
+  // Only include content arrays when they contain real product IDs.
+  // An empty content_ids array causes Meta to reject the event silently.
+  const validContentIds = Array.isArray(payload.contentIds)
+    ? payload.contentIds.map(String).filter(id => id && id.length > 5)
+    : [];
+  if (validContentIds.length) {
+    customData.content_ids = validContentIds;
+    customData.contents    = validContentIds.map(id => ({
+      id,
       quantity: payload.numItems
-        ? Math.max(1, Math.round(payload.numItems / payload.contentIds.length))
+        ? Math.max(1, Math.round(payload.numItems / validContentIds.length))
         : 1,
     }));
   }
+  if (payload.contentType) customData.content_type = payload.contentType;
+  if (typeof payload.numItems === 'number') customData.num_items = payload.numItems;
+  if (payload.orderId)     customData.order_id     = String(payload.orderId);
 
   // ── Build event object ────────────────────────────────────────────────────
   const event = {
@@ -177,7 +179,9 @@ async function sendCapiEvent(eventName, payload = {}) {
     event_time:        Math.floor(Date.now() / 1000),
     event_id:          payload.eventId || require('crypto').randomUUID(),
     action_source:     'website',
-    event_source_url:  payload.eventSourceUrl || `https://${process.env.FRONTEND_URL || 'shopzen.lk'}`,
+    event_source_url:  (payload.eventSourceUrl && !payload.eventSourceUrl.includes('localhost'))
+                       ? payload.eventSourceUrl
+                       : `https://${process.env.PRODUCTION_DOMAIN || 'shopzen.lk'}`,
     user_data:         userData,
     ...(Object.keys(customData).length ? { custom_data: customData } : {}),
   };
@@ -211,29 +215,45 @@ async function sendCapiEvent(eventName, payload = {}) {
  * @param {object} options — { clientIp, userAgent, fbp, fbc, eventId, siteUrl }
  */
 async function sendPurchaseEvent(order, options = {}) {
-  const billing = order.billing || {};
-  const items   = order.items   || [];
+  const billing  = order.billing || {};
+  const items    = order.items   || [];
   const currency = 'LKR'; // ShopZen sells in LKR
 
+  // contentIds: prefer caller-supplied (already computed from in-scope orderItems)
+  // over re-reading from order.items which may have unpopulated ObjectIds.
+  const contentIds = options.contentIds && options.contentIds.length
+    ? options.contentIds
+    : items.map(i => String(i.product?._id || i.product || '')).filter(Boolean);
+
+  const numItems = options.numItems != null
+    ? options.numItems
+    : items.reduce((s, i) => s + (i.quantity || 1), 0);
+
+  // Always use the production domain for event_source_url — never localhost.
+  const domain = process.env.PRODUCTION_DOMAIN || 'shopzen.lk';
+  const eventSourceUrl = options.siteUrl && !options.siteUrl.includes('localhost')
+    ? options.siteUrl
+    : `https://${domain}/order-success/${order._id}`;
+
   await sendCapiEvent('Purchase', {
-    eventId:         options.eventId || `purchase-${order._id}`,
-    eventSourceUrl:  options.siteUrl  || `${process.env.FRONTEND_URL || 'https://shopzen.lk'}/order-success/${order._id}`,
-    email:           billing.email,
-    phone:           billing.phone,
-    firstName:       billing.firstName,
-    lastName:        billing.lastName,
-    city:            billing.city,
-    country:         billing.country || 'LK',
-    clientIp:        options.clientIp,
-    userAgent:       options.userAgent,
-    fbp:             options.fbp,
-    fbc:             options.fbc,
-    value:           typeof order.total === 'number' ? order.total : 0,
+    eventId:        options.eventId || `purchase-${order._id}`,
+    eventSourceUrl,
+    email:          billing.email,
+    phone:          billing.phone,
+    firstName:      billing.firstName,
+    lastName:       billing.lastName,
+    city:           billing.city,
+    country:        billing.country || 'LK',
+    clientIp:       options.clientIp,
+    userAgent:      options.userAgent,
+    fbp:            options.fbp,
+    fbc:            options.fbc,
+    value:          typeof order.total === 'number' ? order.total : 0,
     currency,
-    contentIds:      items.map(i => String(i.product?._id || i.product || '')).filter(Boolean),
-    contentType:     'product',
-    numItems:        items.reduce((s, i) => s + (i.quantity || 1), 0),
-    orderId:         String(order._id),
+    contentIds,
+    contentType:    'product',
+    numItems,
+    orderId:        String(order._id),
   });
 }
 
