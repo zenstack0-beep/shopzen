@@ -217,10 +217,14 @@ export function OrderSuccess() {
           const ssKey = `sz_purchase_eid_${data._id || id}`;
           const existingEventId = sessionStorage.getItem(ssKey);
           if (!existingEventId) {
-            // Checkout.js did NOT already fire — fire now (PayHere redirect case
-            // where the previous page session is gone, or direct link to success).
+            // Checkout.js did NOT already fire in this browser session.
+            // This happens on PayHere redirect, page refresh, or direct link.
+            // Use the eventId the backend stored on the order (metaEventId) so
+            // the browser pixel deduplicates with the CAPI event already sent
+            // by routes/orders.js when the order was created.
+            // If the order has no metaEventId (very old order), generate fresh.
             const { fbp, fbc } = getFbCookies();
-            const newEventId = generateEventId('Purchase', data._id || id);
+            const newEventId = data.metaEventId || generateEventId('Purchase', data._id || id);
             sessionStorage.setItem(ssKey, newEventId);
             trackPurchase(data, data.items || [], {
               billing: data.billing || {},
@@ -230,8 +234,8 @@ export function OrderSuccess() {
             });
           }
           // If existingEventId is present, Checkout.js already fired trackPurchase
-          // with that eventId AND the server already received the CAPI event with
-          // the same key — do NOT fire again, Meta already has this conversion.
+          // (browser pixel) with that eventId and the backend CAPI already used
+          // the same key — Meta deduplicates them. Do NOT fire again.
         }
         if (gateway && data.paymentStatus === 'pending' && attempts === 0) {
           attempts++;

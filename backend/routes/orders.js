@@ -749,13 +749,19 @@ router.post('/', orderRateLimiter, async (req, res) => {
     // The eventId from the request body links the two events for deduplication —
     // Meta counts only ONE conversion even though both browser and server fire.
     // Fire-and-forget: never await — CAPI must never delay the order response.
+    // We pass explicit contentIds and numItems computed from authoritative orderItems
+    // so CAPI never tries to re-read unpopulated ObjectIds from order.items.
+    const _capiContentIds = orderItems.map(i => String(i.product || '')).filter(id => id && id.length > 5);
+    const _capiNumItems   = orderItems.reduce((s, i) => s + (i.quantity || 1), 0);
     sendPurchaseEvent(order, {
-      clientIp:  req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || '',
-      userAgent: req.headers['user-agent'] || '',
-      fbp:       req.body.fbp || req.cookies?._fbp || '',
-      fbc:       req.body.fbc || req.cookies?._fbc || '',
-      eventId:   req.body.metaEventId || undefined,  // sent by frontend for deduplication
-      siteUrl:   `${process.env.FRONTEND_URL || 'https://shopzen.lk'}/order-success/${order._id}`,
+      clientIp:   req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || '',
+      userAgent:  req.headers['user-agent'] || '',
+      fbp:        req.body.fbp || req.cookies?._fbp || '',
+      fbc:        req.body.fbc || req.cookies?._fbc || '',
+      eventId:    req.body.metaEventId || undefined,  // sent by frontend for deduplication
+      siteUrl:    `${process.env.FRONTEND_URL || 'https://shopzen.lk'}/order-success/${order._id}`,
+      contentIds: _capiContentIds,
+      numItems:   _capiNumItems,
     }).catch(err => console.error('[CAPI order]', err.message));
 
     // ── Email customer: order confirmation ─────────────────────────────────────

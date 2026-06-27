@@ -189,7 +189,13 @@ export function trackPurchase(order, items, opts = {}) {
   }
 
   // ── Meta Pixel (browser) ─────────────────────────────────────────────────
-  // eventId links this browser event to the CAPI server event for dedup.
+  // eventId links this browser event to the backend CAPI event for dedup.
+  // IMPORTANT: Do NOT call sendCapiRequest here for Purchase — the backend
+  // routes/orders.js already calls sendPurchaseEvent() with the same eventId
+  // (sent as metaEventId in the order POST body). Calling CAPI from both
+  // frontend AND backend produces TWO server-side events, which shows as
+  // two "Processed" rows in Meta Events Manager instead of one deduplicated pair.
+  // Correct dedup chain: browser pixel (eventID: X) ↔ backend CAPI (event_id: X) = 1 conversion.
   fbqSafe('track', 'Purchase', {
     value,
     currency,
@@ -197,17 +203,6 @@ export function trackPurchase(order, items, opts = {}) {
     content_type: 'product',
     num_items:    numItems,
   }, { eventID: eventId });
-
-  // ── CAPI (server-side mirror) ─────────────────────────────────────────────
-  // Fire and forget — never await, never block checkout navigation.
-  sendCapiRequest('Purchase', {
-    value,
-    currency,
-    contentIds,
-    contentType: 'product',
-    numItems,
-    orderId: transactionId,
-  }, eventId, billing);
 }
 
 // ─── Add To Cart ──────────────────────────────────────────────────────────────
