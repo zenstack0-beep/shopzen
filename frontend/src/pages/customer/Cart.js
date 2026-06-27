@@ -3,6 +3,7 @@ import useSEO, { trackInitiateCheckout } from '../../hooks/useSEO';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../../context/CartContext';
 import { useTheme } from '../../context/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
 import { resolveDeliveryFee } from '../../utils/discountEngine';
 
 const FreeDeliveryBar = ({ subtotal, threshold, sym }) => {
