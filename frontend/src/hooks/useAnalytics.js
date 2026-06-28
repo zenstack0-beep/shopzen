@@ -15,10 +15,17 @@
  *  - "Duplicate Pixel ID" warning (single init path, guarded by __fbPixelInitIds)
  *  - Lost Purchase events (native fbq queue buffers pre-init events)
  *  - Unmatched events (Advanced Matching data sent with every init)
+ *
+ * fbc / Click ID fix (Meta Parameter Builder requirement):
+ *  captureFbclid() is called at the very start of bootstrapAnalytics, before
+ *  fbevents.js has loaded and before React Router removes query params. This
+ *  ensures the _fbc cookie is written immediately when a visitor arrives via
+ *  a Facebook ad (URL contains ?fbclid=...), giving CAPI the Click ID it needs
+ *  to report 30%+ additional conversions and raise the Event Match Quality score.
  */
 
 import { useEffect } from 'react';
-import { getAdvancedMatchingData } from '../utils/metaPixelHelpers';
+import { getAdvancedMatchingData, captureFbclid } from '../utils/metaPixelHelpers';
 
 /**
  * fbqSafe — always use this instead of window.fbq() directly.
@@ -75,6 +82,14 @@ function injectNoscript(html, id) {
  */
 export function bootstrapAnalytics(cfg, userData) {
   if (!cfg) return;
+
+  // ── fbc / Click ID capture — MUST run before fbq('init') ─────────────────
+  // Reads fbclid from the URL and writes _fbc cookie in Meta's documented
+  // format (fb.1.{timestamp}.{fbclid}). This is the fix for Meta's
+  // "Improve your match quality by sending more parameters" warning.
+  // Calling it here (synchronously, before fbevents.js loads) guarantees
+  // the fbclid is captured even on async pixel init.
+  captureFbclid();
 
   // ── Google Tag Manager ────────────────────────────────────────────────────
   if (cfg.gtmId && !document.getElementById('gtm-script')) {
