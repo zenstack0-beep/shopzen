@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import API from '../../utils/api';
 import toast from 'react-hot-toast';
+import PrintBill from '../../components/PrintBill';
+import PrintWaybill from '../../components/PrintWaybill';
 
 const STATUSES = ['pending','confirmed','processing','shipped','out_for_delivery','delivered','cancelled','refunded'];
 const STATUS_LABELS = { pending:'Pending', confirmed:'Confirmed', processing:'Processing', shipped:'Shipped', out_for_delivery:'Out for Delivery', delivered:'Delivered', cancelled:'Cancelled', refunded:'Refunded' };
@@ -107,6 +109,11 @@ export default function AdminOrderDetail() {
           <p className="text-sm text-gray-400">{new Date(order.createdAt).toLocaleString()}</p>
         </div>
         <span className={`badge ${STATUS_COLORS[order.orderStatus]} capitalize text-sm px-3 py-1`}>{STATUS_LABELS[order.orderStatus]}</span>
+        {/* ── Print Actions ── */}
+        <div className="flex items-center gap-2">
+          <PrintBill order={order} />
+          <PrintWaybill order={order} />
+        </div>
       </div>
 
       <div className="grid lg:grid-cols-3 gap-6">

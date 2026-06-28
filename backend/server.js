@@ -155,6 +155,7 @@ app.get('/robots.txt',  (req, res) => res.redirect(301, '/api/seo/robots.txt'));
 //           admin action (POST/PUT/PATCH/DELETE).  This is additive — all
 //           responses are identical to before.
 app.use('/api/admin', auditLog, require('./routes/admin'));
+app.use('/api/admin/reset', require('./routes/reset'));
 
 // ─── Other routes ─────────────────────────────────────────────────────────────
 app.use('/api/whatsapp',      require('./routes/whatsapp'));
