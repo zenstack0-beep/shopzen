@@ -8,6 +8,7 @@ const { DiscountEngine } = require('../services/discountEngine');
 const { Coupon, GiftCard, Notification, Settings, DeliveryService } = require('../models/index');
 const { auth, adminAuth } = require('../middleware/auth');
 const { sendPurchaseEvent } = require('../services/metaCAPI');
+const { sendOrderWhatsAppNotification } = require('../services/whatsappOrderNotify');
 const {
   sendMail,
   getAdminEmail,
@@ -743,6 +744,10 @@ router.post('/', orderRateLimiter, async (req, res) => {
       link:    `/admin/orders/${order._id}`,
       data:    { orderId: order._id, total: totals.total, paymentMethod },
     });
+
+    // ── WhatsApp admin alert: new order ─────────────────────────────────────────
+    // Fire-and-forget — never delays or fails the order response.
+    sendOrderWhatsAppNotification(order).catch(err => console.error('[WHATSAPP ORDER ALERT]', err.message));
 
     // ── Meta CAPI: server-side Purchase event ──────────────────────────────────
     // This mirrors the browser pixel Purchase event fired in the frontend.
