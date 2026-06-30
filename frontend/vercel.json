@@ -1,161 +1,125 @@
 {
-  "routes": [
+  "rewrites": [
     {
-      "src": "/sitemap.xml",
-      "dest": "https://shopzen-production.up.railway.app/api/seo/sitemap.xml"
+      "source": "/sitemap.xml",
+      "destination": "https://shopzen-production.up.railway.app/api/seo/sitemap.xml"
     },
     {
-      "src": "/api/seo/products-sitemap.xml",
-      "dest": "https://shopzen-production.up.railway.app/api/seo/products-sitemap.xml"
+      "source": "/api/seo/products-sitemap.xml",
+      "destination": "https://shopzen-production.up.railway.app/api/seo/products-sitemap.xml"
     },
     {
-      "src": "/api/seo/categories-sitemap.xml",
-      "dest": "https://shopzen-production.up.railway.app/api/seo/categories-sitemap.xml"
+      "source": "/api/seo/categories-sitemap.xml",
+      "destination": "https://shopzen-production.up.railway.app/api/seo/categories-sitemap.xml"
     },
     {
-      "src": "/api/seo/brands-sitemap.xml",
-      "dest": "https://shopzen-production.up.railway.app/api/seo/brands-sitemap.xml"
+      "source": "/api/seo/brands-sitemap.xml",
+      "destination": "https://shopzen-production.up.railway.app/api/seo/brands-sitemap.xml"
     },
     {
-      "src": "/api/seo/pages-sitemap.xml",
-      "dest": "https://shopzen-production.up.railway.app/api/seo/pages-sitemap.xml"
+      "source": "/api/seo/pages-sitemap.xml",
+      "destination": "https://shopzen-production.up.railway.app/api/seo/pages-sitemap.xml"
     },
     {
-      "src": "/robots.txt",
-      "dest": "https://shopzen-production.up.railway.app/api/seo/robots.txt"
+      "source": "/robots.txt",
+      "destination": "https://shopzen-production.up.railway.app/api/seo/robots.txt"
     },
     {
-      "src": "/favicon.ico",
-      "headers": {
-        "Cache-Control": "public, max-age=3600",
-        "Content-Type": "image/x-icon"
-      },
-      "dest": "https://shopzen-production.up.railway.app/api/settings/favicon.ico"
+      "source": "/favicon.ico",
+      "destination": "https://shopzen-production.up.railway.app/api/settings/favicon.ico"
     },
     {
-      "src": "/favicon.png",
-      "headers": {
-        "Cache-Control": "public, max-age=3600",
-        "Content-Type": "image/png"
-      },
-      "dest": "https://shopzen-production.up.railway.app/api/settings/favicon.png"
+      "source": "/favicon.png",
+      "destination": "https://shopzen-production.up.railway.app/api/settings/favicon.png"
     },
     {
-      "src": "/favicon-32x32.png",
-      "headers": {
-        "Cache-Control": "public, max-age=3600",
-        "Content-Type": "image/png"
-      },
-      "dest": "https://shopzen-production.up.railway.app/api/settings/favicon-32x32.png"
+      "source": "/favicon-32x32.png",
+      "destination": "https://shopzen-production.up.railway.app/api/settings/favicon-32x32.png"
     },
     {
-      "src": "/favicon-96x96.png",
-      "headers": {
-        "Cache-Control": "public, max-age=3600",
-        "Content-Type": "image/png"
-      },
-      "dest": "https://shopzen-production.up.railway.app/api/settings/favicon-96x96.png"
+      "source": "/favicon-96x96.png",
+      "destination": "https://shopzen-production.up.railway.app/api/settings/favicon-96x96.png"
     },
     {
-      "src": "/apple-touch-icon.png",
-      "headers": {
-        "Cache-Control": "public, max-age=3600",
-        "Content-Type": "image/png"
-      },
-      "dest": "https://shopzen-production.up.railway.app/api/settings/apple-touch-icon.png"
+      "source": "/apple-touch-icon.png",
+      "destination": "https://shopzen-production.up.railway.app/api/settings/apple-touch-icon.png"
     },
     {
-      "src": "/api/(.*)",
-      "dest": "https://shopzen-production.up.railway.app/api/$1"
+      "source": "/api/(.*)",
+      "destination": "https://shopzen-production.up.railway.app/api/$1"
     },
     {
-      "src": "/static/(.*)",
-      "headers": {
-        "Cache-Control": "public, max-age=31536000, immutable"
-      },
-      "dest": "/static/$1"
-    },
-    {
-      "src": "/(.*\\.(json|html|txt|xml))",
-      "dest": "/$1"
-    },
-    {
-      "src": "/",
-      "headers": {
-        "Cache-Control": "no-cache, no-store, must-revalidate"
-      },
-      "dest": "https://shopzen-production.up.railway.app/"
-    },
-    {
-      "src": "/product/(.*)",
-      "headers": {
-        "Cache-Control": "no-cache, no-store, must-revalidate"
-      },
-      "dest": "https://shopzen-production.up.railway.app/product/$1"
-    },
-    {
-      "src": "/category/(.*)",
-      "headers": {
-        "Cache-Control": "no-cache, no-store, must-revalidate"
-      },
-      "dest": "https://shopzen-production.up.railway.app/category/$1"
-    },
-    {
-      "src": "/brand/(.*)",
-      "headers": {
-        "Cache-Control": "no-cache, no-store, must-revalidate"
-      },
-      "dest": "https://shopzen-production.up.railway.app/brand/$1"
-    },
-    {
-      "src": "/shop(.*)",
-      "headers": {
-        "Cache-Control": "no-cache, no-store, must-revalidate"
-      },
-      "dest": "https://shopzen-production.up.railway.app/shop$1"
-    },
-    {
-      "src": "/page/(.*)",
-      "headers": {
-        "Cache-Control": "no-cache, no-store, must-revalidate"
-      },
-      "dest": "https://shopzen-production.up.railway.app/page/$1"
-    },
-    {
-      "src": "/campaign/(.*)",
-      "headers": {
-        "Cache-Control": "no-cache, no-store, must-revalidate"
-      },
-      "dest": "https://shopzen-production.up.railway.app/campaign/$1"
-    },
-    {
-      "src": "/(.*)",
-      "headers": {
-        "Cache-Control": "no-cache, no-store, must-revalidate"
-      },
-      "dest": "/index.html"
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ],
   "headers": [
     {
       "source": "/(.*)",
       "headers": [
-        {
-          "key": "X-Content-Type-Options",
-          "value": "nosniff"
-        },
-        {
-          "key": "X-XSS-Protection",
-          "value": "1; mode=block"
-        },
-        {
-          "key": "Referrer-Policy",
-          "value": "strict-origin-when-cross-origin"
-        },
-        {
-          "key": "Strict-Transport-Security",
-          "value": "max-age=63072000"
-        }
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-XSS-Protection", "value": "1; mode=block" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "Strict-Transport-Security", "value": "max-age=63072000" }
+      ]
+    },
+    {
+      "source": "/static/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/(.*)\\.(js|css|woff|woff2|ttf|eot)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/(.*)\\.(png|jpg|jpeg|gif|webp|svg|ico)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=86400" }
+      ]
+    },
+    {
+      "source": "/favicon.ico",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=3600" },
+        { "key": "Content-Type", "value": "image/x-icon" }
+      ]
+    },
+    {
+      "source": "/favicon.png",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=3600" },
+        { "key": "Content-Type", "value": "image/png" }
+      ]
+    },
+    {
+      "source": "/favicon-32x32.png",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=3600" },
+        { "key": "Content-Type", "value": "image/png" }
+      ]
+    },
+    {
+      "source": "/favicon-96x96.png",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=3600" },
+        { "key": "Content-Type", "value": "image/png" }
+      ]
+    },
+    {
+      "source": "/apple-touch-icon.png",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=3600" },
+        { "key": "Content-Type", "value": "image/png" }
+      ]
+    },
+    {
+      "source": "/index.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=0, s-maxage=60, must-revalidate" }
       ]
     }
   ]

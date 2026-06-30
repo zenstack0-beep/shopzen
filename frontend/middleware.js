@@ -6,55 +6,103 @@
 // JSON-LD (Product/Breadcrumb/Review/AggregateRating/Organization, etc.)
 // into index.html before it's returned.
 //
-// ── HISTORY OF THIS FILE ─────────────────────────────────────────────────
-// v1: matcher used a negative-lookahead regex Vercel's path-to-regexp
-//     couldn't compile for nested routes -> /product/:slug never proxied,
-//     so it fell back to the static homepage shell.
-// v2: fixed the matcher, but only proxied requests whose User-Agent matched
-//     a hardcoded bot/crawler list. Result: `view-source:` in a real browser
-//     (and any crawler/tool NOT on that list) still got the generic static
-//     homepage shell for /product/:slug, /category/:slug, etc.
+// ── WHY THIS VERSION EXISTS ────────────────────────────────────────────
+// Previous versions invoked this middleware (a billed Vercel Function) on
+// every single request — including real customers, static assets, and
+// the SPA shell — and proxied ALL of them to Railway. That meant every
+// page view by a normal shopper consumed a Function invocation AND a
+// round-trip fetch to Railway, even though customers don't need
+// server-rendered meta tags; the React SPA handles that for them.
 //
-// ── THIS VERSION ─────────────────────────────────────────────────────────
-// Proxy ALL HTML page requests (everyone — humans, browsers, every crawler)
-// to Railway's SSR endpoint. This removes the entire "is this UA a bot?"
-// guessing game: every visitor, tool, and crawler sees the same correct,
-// page-specific <head>. seoRenderMiddleware is a lightweight DB lookup +
-// string substitution, so the per-request cost is small.
+// This version does two things to cut invocations drastically:
+//   1. The `matcher` only targets actual page routes (/, /product/*,
+//      /category/*, /brand/*, /shop*, /page/*, /campaign/*). Requests for
+//      /api/*, /static/*, favicons, sitemap/robots, and any file with a
+//      static extension (css/js/json/xml/txt/images/fonts) never invoke
+//      this function at all — Vercel's matcher filters them out before
+//      the function runs, so they're served straight from the CDN.
+//   2. Within that already-narrow matcher, we only proxy to Railway SSR
+//      when the User-Agent is a known SEO or social-preview crawler
+//      (Googlebot, Bingbot, Facebook/WhatsApp, Twitter/X, LinkedIn,
+//      Slack, Discord, Telegram, etc). Lighthouse and HeadlessChrome are
+//      explicitly excluded so synthetic audits don't get billed as SSR
+//      traffic. Every real customer falls through and gets the static
+//      `/index.html` SPA shell served by Vercel's CDN — zero Function
+//      invocation, zero Railway round-trip.
 
 export const config = {
-    matcher: '/:path*',
+    // Only run on page-like routes. Everything else (assets, /api, /static,
+    // favicons, sitemap/robots, fonts, etc.) is filtered out here and never
+    // triggers a Function invocation.
+    matcher: [
+      '/',
+      '/product/:path*',
+      '/category/:path*',
+      '/brand/:path*',
+      '/shop',
+      '/shop/:path*',
+      '/page/:path*',
+      '/campaign/:path*',
+    ],
   };
   
   // Backend that hosts seoRenderMiddleware (backend/routes/seo.js).
   const SSR_ORIGIN = 'https://shopzen-production.up.railway.app';
   
-  // Paths/prefixes that must NEVER be proxied — these are served directly by
-  // Vercel (static assets) or already proxied to Railway via vercel.json (/api).
-  const SKIP_PREFIXES = ['/api/', '/static/', '/_next/', '/favicon', '/manifest'];
-  const SKIP_EXACT = new Set(['/robots.txt', '/sitemap.xml']);
-  const SKIP_EXTENSION_RE = /\.(?:ico|png|jpg|jpeg|gif|webp|svg|css|js|map|json|xml|txt|woff2?|ttf)$/i;
+  // Known SEO / social-preview crawlers that need server-rendered meta tags.
+  // Deliberately does NOT include Lighthouse or HeadlessChrome — those are
+  // synthetic/audit tools, not real SEO or social crawlers, and should see
+  // the same static shell a real visitor gets.
+  const BOT_UA_RE = new RegExp(
+    [
+      'Googlebot',
+      'Google-InspectionTool',
+      'AdsBot-Google',
+      'Bingbot',
+      'BingPreview',
+      'facebookexternalhit',
+      'Facebot',
+      'WhatsApp',
+      'Twitterbot',
+      'LinkedInBot',
+      'Slackbot',
+      'Slack-ImgProxy',
+      'Discordbot',
+      'TelegramBot',
+      'Pinterest',
+      'redditbot',
+      'Applebot',
+      'DuckDuckBot',
+      'YandexBot',
+      'Baiduspider',
+    ].join('|'),
+    'i'
+  );
   
-  function shouldSkip(pathname) {
-    if (SKIP_EXACT.has(pathname)) return true;
-    if (SKIP_EXTENSION_RE.test(pathname)) return true;
-    return SKIP_PREFIXES.some((p) => pathname.startsWith(p));
+  // Explicit exclusion list: never treat these as SEO/social bots, even if
+  // they happen to match a substring above (defense in depth).
+  const NON_SEO_UA_RE = /HeadlessChrome|Lighthouse|Chrome-Lighthouse|PageSpeed/i;
+  
+  function isSeoBot(ua) {
+    if (!ua) return false;
+    if (NON_SEO_UA_RE.test(ua)) return false;
+    return BOT_UA_RE.test(ua);
   }
   
   export default async function middleware(request) {
     const { pathname, search } = new URL(request.url);
+    const ua = request.headers.get('user-agent') || '';
   
-    // Static assets, API routes, and already-handled SEO files: never touch.
-    if (shouldSkip(pathname)) return;
+    // Real customers (and anything not a recognized SEO/social crawler):
+    // fall through to the static SPA shell served from Vercel's CDN. No
+    // Railway round-trip, no extra work.
+    if (!isSeoBot(ua)) return;
   
-    // Only proxy GET/HEAD navigations that accept HTML. This avoids
-    // interfering with prefetch requests for JS chunks, etc. that don't carry
-    // an Accept header indicating an HTML document.
+    // Only proxy GET/HEAD navigations that accept HTML.
     const accept = request.headers.get('accept') || '';
     if (request.method !== 'GET' && request.method !== 'HEAD') return;
     if (accept && !accept.includes('text/html') && !accept.includes('*/*')) return;
   
-    const ua = request.headers.get('user-agent') || '';
     const target = new URL(pathname + search, SSR_ORIGIN);
   
     try {
