@@ -437,81 +437,122 @@ async function uploadImageFromUrl(imageUrl, sourcePageUrl) {
     // No Cloudinary — return the original URL so the admin can still see it
     return imageUrl;
   }
+
+  // IMPORTANT: Referer must be the page the image was found on (or at
+  // minimum that site's homepage), NOT the image URL itself. Many sites'
+  // hotlink protection checks that Referer is same-origin with their own
+  // domain; sending the image URL as its own Referer satisfies nothing
+  // and gets the request 403'd exactly like a bare/no-Referer request.
+  let referer;
   try {
-    // IMPORTANT: Referer must be the page the image was found on (or at
-    // minimum that site's homepage), NOT the image URL itself. Many sites'
-    // hotlink protection checks that Referer is same-origin with their own
-    // domain; sending the image URL as its own Referer satisfies nothing
-    // and gets the request 403'd exactly like a bare/no-Referer request.
-    let referer;
-    try {
-      referer = sourcePageUrl
-        ? new URL(sourcePageUrl).origin + '/'
-        : new URL(imageUrl).origin + '/';
-    } catch {
-      referer = imageUrl;
-    }
-
-    const response = await axios.get(imageUrl, {
-      responseType: 'arraybuffer',
-      timeout: 15000,
-      headers: {
-        'User-Agent': UA_POOL[0],
-        'Referer':    referer,
-        'Accept':     'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
-      },
-      httpsAgent: new https.Agent({ rejectUnauthorized: false }),
-      decompress: true,
-    });
-
-    console.log(`[Scraper] Download OK: ${imageUrl} → status ${response.status}, content-type ${response.headers['content-type']}, ${response.data?.length || 0} bytes`);
-
-    const buffer = Buffer.from(response.data);
-
-    // Don't trust the HTTP content-type header alone — some CDNs (observed
-    // on Azure CDN) serve real images as application/octet-stream because
-    // the blob metadata was never set correctly at the source. Sniff the
-    // actual bytes first; only reject if BOTH the bytes and the URL
-    // extension fail to indicate a real image format.
-    const sniffedType = detectImageType(buffer);
-    const headerType  = response.headers['content-type'];
-    const extType      = guessImageTypeFromUrl(imageUrl);
-    const contentType  = sniffedType || (headerType && headerType.startsWith('image/') ? headerType : null) || extType;
-
-    if (!contentType) {
-      console.warn(`[Scraper] Rejected — could not confirm this is an image (header: ${headerType}, byte-sniff: ${sniffedType}, url ext guess: ${extType}):`, imageUrl);
-      return null;
-    }
-
-    if (headerType !== contentType) {
-      console.log(`[Scraper] Note: server sent content-type "${headerType}" but file is really ${contentType} (detected via ${sniffedType ? 'byte signature' : 'URL extension'}) — proceeding anyway:`, imageUrl);
-    }
-
-    const b64     = buffer.toString('base64');
-    const dataUri = `data:${contentType};base64,${b64}`;
-
-    const result = await cloudinary.uploader.upload(dataUri, {
-      folder:        'shopzen/scraped',
-      resource_type: 'image',
-    });
-
-    console.log(`[Scraper] Cloudinary upload OK: ${imageUrl} → ${result.secure_url}`);
-    return result.secure_url;
-  } catch (err) {
-    // FULL diagnostic detail — this is what tells us WHY it failed
-    // (network error vs HTTP status vs Cloudinary rejecting the upload).
-    const detail = {
-      url: imageUrl,
-      referer,
-      errorCode: err.code,                          // e.g. ECONNREFUSED, ETIMEDOUT
-      httpStatus: err.response?.status,              // e.g. 403, 404 from axios
-      httpStatusText: err.response?.statusText,
-      responseHeaders: err.response?.headers,
-      message: err.message,
-    };
-    console.error('[Scraper] Image upload FAILED — full detail:', JSON.stringify(detail, null, 2));
-    return null;
+    referer = sourcePageUrl
+      ? new URL(sourcePageUrl).origin + '/'
+      : new URL(imageUrl).origin + '/';
+  } catch {
+    referer = imageUrl;
   }
+
+  const retryableStatuses = new Set([403, 429, 503, 520, 521, 522, 523, 524]);
+  let lastErrDetail = null;
+
+  // FIX: retry the image download across the UA pool (same strategy as
+  // fetchHtml). Previously this used only UA_POOL[0] and gave up on the
+  // first failure, silently falling back to the original source-site URL —
+  // which is why scraped products ended up storing the competitor's image
+  // URL instead of a Cloudinary URL. Many sites that 403 the default UA on
+  // the *image* host will serve it fine for another UA (Googlebot is often
+  // whitelisted), so retrying here makes the Cloudinary re-host actually work.
+  for (let attempt = 0; attempt < UA_POOL.length; attempt++) {
+    const ua = UA_POOL[attempt];
+    try {
+      const response = await axios.get(imageUrl, {
+        responseType: 'arraybuffer',
+        timeout: 15000,
+        headers: {
+          'User-Agent':      ua,
+          'Referer':         referer,
+          'Accept':          'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Sec-Fetch-Dest':  'image',
+          'Sec-Fetch-Mode':  'no-cors',
+          'Sec-Fetch-Site':  'cross-site',
+        },
+        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+        maxRedirects: 5,
+        maxContentLength: 15 * 1024 * 1024, // 15MB cap
+        decompress: true,
+      });
+
+      console.log(`[Scraper] Download OK: ${imageUrl} → status ${response.status}, content-type ${response.headers['content-type']}, ${response.data?.length || 0} bytes (attempt ${attempt + 1})`);
+
+      const buffer = Buffer.from(response.data);
+
+      // Don't trust the HTTP content-type header alone — some CDNs (observed
+      // on Azure CDN) serve real images as application/octet-stream because
+      // the blob metadata was never set correctly at the source. Sniff the
+      // actual bytes first; only reject if BOTH the bytes and the URL
+      // extension fail to indicate a real image format.
+      const sniffedType = detectImageType(buffer);
+      const headerType  = response.headers['content-type'];
+      const extType      = guessImageTypeFromUrl(imageUrl);
+      const contentType  = sniffedType || (headerType && headerType.startsWith('image/') ? headerType : null) || extType;
+
+      if (!contentType) {
+        console.warn(`[Scraper] Rejected — could not confirm this is an image (header: ${headerType}, byte-sniff: ${sniffedType}, url ext guess: ${extType}):`, imageUrl);
+        return null;
+      }
+
+      if (headerType !== contentType) {
+        console.log(`[Scraper] Note: server sent content-type "${headerType}" but file is really ${contentType} (detected via ${sniffedType ? 'byte signature' : 'URL extension'}) — proceeding anyway:`, imageUrl);
+      }
+
+      const b64     = buffer.toString('base64');
+      const dataUri = `data:${contentType};base64,${b64}`;
+
+      const result = await cloudinary.uploader.upload(dataUri, {
+        folder:        'shopzen/scraped',
+        resource_type: 'image',
+      });
+
+      console.log(`[Scraper] Cloudinary upload OK: ${imageUrl} → ${result.secure_url}`);
+      return result.secure_url;
+
+    } catch (err) {
+      const status = err.response?.status;
+      lastErrDetail = {
+        url: imageUrl,
+        referer,
+        errorCode: err.code,             // e.g. ECONNREFUSED, ETIMEDOUT
+        httpStatus: status,              // e.g. 403, 404 from axios
+        httpStatusText: err.response?.statusText,
+        message: err.message,
+        uaAttempt: attempt + 1,
+      };
+
+      const isRetryable = retryableStatuses.has(status)
+        || err.code === 'ECONNRESET'
+        || err.code === 'ETIMEDOUT';
+
+      console.warn(
+        `[Scraper] Image download attempt ${attempt + 1}/${UA_POOL.length} failed` +
+        (status ? ` (HTTP ${status})` : ` (${err.code || err.message})`) +
+        ` — ${imageUrl}`
+      );
+
+      if (attempt === UA_POOL.length - 1 || !isRetryable) {
+        console.error('[Scraper] Image upload FAILED — full detail:', JSON.stringify(lastErrDetail, null, 2));
+        return null;
+      }
+
+      // Small back-off before trying the next UA
+      const delayMs = Math.min(500 * Math.pow(1.6, attempt), 4000);
+      await sleep(delayMs + Math.random() * 300);
+    }
+  }
+
+  console.error('[Scraper] Image upload FAILED — full detail:', JSON.stringify(lastErrDetail, null, 2));
+  return null;
 }
 
 // ─── Main scrape logic ────────────────────────────────────────────────────────
@@ -633,18 +674,17 @@ router.post('/product', adminAuth, async (req, res) => {
         const uploadResults = await Promise.all(
           scraped.imageUrls.slice(0, 20).map(u => uploadImageFromUrl(u, rawUrl))
         );
-        // Keep successfully uploaded (Cloudinary) URLs. Any that still failed
-        // fall back to the original scraped URL — but log it clearly, since a
-        // raw external URL stored as thumbnail will break features like
-        // server-side background removal later (hotlink-protected sites 403
-        // that fetch too).
-        finalImages = uploadResults.map((r, i) => {
-          if (!r) {
-            console.warn('[Scraper] Could not re-host image on Cloudinary, falling back to original URL (may be hotlink-protected):', scraped.imageUrls[i]);
-            return scraped.imageUrls[i];
-          }
-          return r;
-        }).filter(Boolean);
+        // FIX: only keep successfully re-hosted Cloudinary URLs. We no longer
+        // fall back to the original source-site URL on failure — a raw
+        // external URL stored as the product image breaks hotlink protection
+        // assumptions, background removal, and means the DB ends up storing
+        // the competitor's site URL instead of our own Cloudinary URL (the
+        // original bug). Failed images are simply dropped.
+        const failedCount = uploadResults.filter(r => !r).length;
+        if (failedCount > 0) {
+          console.warn(`[Scraper] ${failedCount}/${scraped.imageUrls.length} image(s) could not be re-hosted on Cloudinary and were dropped (not saved as source-site URLs).`);
+        }
+        finalImages = uploadResults.filter(Boolean);
       }
       // If Cloudinary is not configured, finalImages stays as scraped.imageUrls
     }
@@ -823,16 +863,24 @@ router.post('/bulk', adminAuth, async (req, res) => {
         const uploaded = await Promise.all(
           scraped.imageUrls.slice(0, 10).map(u => uploadImageFromUrl(u, url))
         );
-        finalImages = uploaded.map((r, idx) => {
-          if (!r) {
-            console.warn('[Scraper] Could not re-host image on Cloudinary, falling back to original URL (may be hotlink-protected):', scraped.imageUrls[idx]);
-            return scraped.imageUrls[idx];
-          }
-          return r;
-        }).filter(Boolean);
+        // FIX: only keep successfully re-hosted Cloudinary URLs — do not fall
+        // back to the original source-site URL on failure. This was the root
+        // cause of bulk-scraped products being saved with the competitor's
+        // site URL as the image instead of a Cloudinary URL.
+        const failedCount = uploaded.filter(r => !r).length;
+        if (failedCount > 0) {
+          console.warn(`[Scraper] ${failedCount}/${scraped.imageUrls.length} image(s) could not be re-hosted on Cloudinary and were dropped (not saved as source-site URLs):`, url);
+        }
+        finalImages = uploaded.filter(Boolean);
       } catch (_) {
-        // Image upload failure is non-fatal — continue with original URLs
+        // Image upload failure is non-fatal — continue with no images rather
+        // than storing the unreliable source-site URLs.
+        finalImages = [];
       }
+    } else if (uploadImages && !USE_CLOUDINARY) {
+      // Cloudinary isn't configured at all — nothing to re-host with, so
+      // don't silently store source-site URLs either.
+      finalImages = [];
     }
 
     // 3. Save to DB as draft (isActive: false)
