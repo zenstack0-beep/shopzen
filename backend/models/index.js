@@ -299,6 +299,7 @@ const deliveryServiceSchema = new mongoose.Schema({
   name: { type: String, required: true },
   code: { type: String, required: true, unique: true },
   isEnabled: { type: Boolean, default: false },
+  codAllowed: { type: Boolean, default: true },
   sortOrder: { type: Number, default: 0 },
   logo: String,
   description: String,

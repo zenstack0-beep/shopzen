@@ -15,7 +15,61 @@ import {
 } from '../../utils/discountEngine';
 
 const COUNTRIES   = ['Sri Lanka','Australia','Bangladesh','Canada','China','France','Germany','India','Indonesia','Italy','Japan','Malaysia','Maldives','Nepal','Netherlands','Pakistan','Philippines','Saudi Arabia','Singapore','South Korea','Spain','Thailand','UAE','United Kingdom','United States','Vietnam','Other'];
-const SL_CITIES   = ['Colombo 1','Colombo 2','Colombo 3','Colombo 4','Colombo 5','Colombo 6','Colombo 7','Colombo 8','Colombo 9','Colombo 10','Akarawitia','Angoda','Athurugiriya','Attidiya','Avissawella','Battaramulla','Boralesgamuwa','Dehiwala','Homagama','Kaduwela','Kesbewa','Kottawa','Kotte','Maharagama','Malabe','Moratuwa','Mount Lavinia','Nugegoda','Pannipitiya','Piliyandala','Rajagiriya','Ratmalana','Sri Jayawardenepura Kotte','Wattala','Wellampitiya','Gampaha','Kalutara','Kandy','Matale','Nuwara Eliya','Galle','Matara','Hambantota','Jaffna','Trincomalee','Batticaloa','Kurunegala','Anuradhapura','Polonnaruwa','Badulla','Ratnapura','Kegalle','Other'];
+// Comprehensive list of towns/cities in Sri Lanka, covering all 25 districts.
+const SL_CITIES = [
+  // Colombo District
+  'Colombo 1 (Fort)','Colombo 2 (Slave Island)','Colombo 3 (Kollupitiya)','Colombo 4 (Bambalapitiya)','Colombo 5 (Havelock Town)','Colombo 6 (Wellawatte)','Colombo 7 (Cinnamon Gardens)','Colombo 8 (Borella)','Colombo 9 (Dematagoda)','Colombo 10 (Maradana)','Colombo 11 (Pettah)','Colombo 12 (Hulftsdorp)','Colombo 13 (Kotahena)','Colombo 14 (Grandpass)','Colombo 15 (Mutwal)',
+  'Angoda','Athurugiriya','Attidiya','Avissawella','Battaramulla','Boralesgamuwa','Dehiwala','Ethul Kotte','Hanwella','Homagama','Kaduwela','Kesbewa','Kohuwala','Kollonnawa','Kotikawatta','Kottawa','Maharagama','Malabe','Mirihana','Moratuwa','Mount Lavinia','Nawala','Nugegoda','Padukka','Pannipitiya','Pelawatte','Piliyandala','Rajagiriya','Ratmalana','Talawatugoda','Wattala','Wellampitiya',
+  // Gampaha District
+  'Gampaha','Ja-Ela','Kadawatha','Kandana','Katunayake','Kelaniya','Kiribathgoda','Minuwangoda','Mirigama','Negombo','Nittambuwa','Ragama','Seeduwa','Veyangoda','Divulapitiya','Biyagama','Ganemulla','Yakkala','Wattegama (Gampaha)',
+  // Kalutara District
+  'Kalutara','Aluthgama','Bandaragama','Beruwala','Horana','Ingiriya','Matugama','Panadura','Wadduwa','Agalawatta','Dodangoda',
+  // Kandy District
+  'Kandy','Akurana','Gampola','Katugastota','Kundasale','Nawalapitiya','Pilimathalawa','Peradeniya','Pussellawa','Wattegama','Galagedara','Hatton','Madawala','Teldeniya','Digana','Kadugannawa',
+  // Matale District
+  'Matale','Dambulla','Galewela','Naula','Rattota','Ukuwela','Sigiriya','Pallepola',
+  // Nuwara Eliya District
+  'Nuwara Eliya','Talawakele','Ginigathena','Kotagala','Maskeliya','Nanu Oya','Ragala','Walapane','Ramboda','Lindula',
+  // Galle District
+  'Galle','Ambalangoda','Baddegama','Bentota','Elpitiya','Hikkaduwa','Imaduwa','Karapitiya','Koggala','Unawatuna','Habaraduwa','Neluwa','Udugama','Akmeemana',
+  // Matara District
+  'Matara','Akuressa','Deniyaya','Dickwella','Hakmana','Kamburupitiya','Weligama','Mirissa','Devinuwara',
+  // Hambantota District
+  'Hambantota','Ambalantota','Beliatta','Tangalle','Tissamaharama','Weeraketiya','Sooriyawewa','Kataragama','Walasmulla','Angunakolapelessa',
+  // Jaffna District
+  'Jaffna','Chavakachcheri','Kayts','Nallur','Point Pedro','Velanai','Karainagar','Tellippalai','Chankanai','Kopay','Kondavil',
+  // Kilinochchi District
+  'Kilinochchi','Pallai','Paranthan','Poonakary',
+  // Mannar District
+  'Mannar','Madhu','Nanaddan','Pesalai','Talaimannar',
+  // Vavuniya District
+  'Vavuniya','Cheddikulam','Nedunkeni','Omanthai',
+  // Mullaitivu District
+  'Mullaitivu','Mulliyawalai','Oddusuddan','Puthukkudiyiruppu',
+  // Batticaloa District
+  'Batticaloa','Eravur','Kaluwanchikudy','Kattankudy','Valachchenai','Chenkalady','Vakarai',
+  // Ampara District
+  'Ampara','Akkaraipattu','Kalmunai','Sainthamaruthu','Sammanthurai','Pottuvil','Uhana','Dehiattakandiya','Mahaoya','Addalachchenai',
+  // Trincomalee District
+  'Trincomalee','Kantalai','Kinniya','Kuchchaveli','Muttur','Nilaveli',
+  // Kurunegala District
+  'Kurunegala','Galgamuwa','Giriulla','Kuliyapitiya','Mawathagama','Narammala','Nikaweratiya','Pannala','Polgahawela','Wariyapola','Bingiriya','Alawwa','Maho','Melsiripura',
+  // Puttalam District
+  'Puttalam','Chilaw','Anamaduwa','Dankotuwa','Marawila','Nattandiya','Wennappuwa','Madampe','Kalpitiya',
+  // Anuradhapura District
+  'Anuradhapura','Eppawala','Galenbindunuwewa','Kekirawa','Medawachchiya','Mihintale','Thambuttegama','Galnewa','Nochchiyagama','Rambewa',
+  // Polonnaruwa District
+  'Polonnaruwa','Hingurakgoda','Kaduruwela','Medirigiriya','Dimbulagala','Welikanda',
+  // Badulla District
+  'Badulla','Bandarawela','Ella','Haputale','Mahiyanganaya','Passara','Welimada','Hali Ela','Diyatalawa','Uva Paranagama',
+  // Monaragala District
+  'Monaragala','Bibile','Buttala','Wellawaya','Medagama','Siyambalanduwa',
+  // Ratnapura District
+  'Ratnapura','Balangoda','Eheliyagoda','Embilipitiya','Kahawatta','Pelmadulla','Kuruwita','Godakawela',
+  // Kegalle District
+  'Kegalle','Mawanella','Rambukkana','Ruwanwella','Warakapola','Deraniyagala','Yatiyantota','Galigamuwa',
+  'Other',
+];
 
 // ── PayHere JS SDK modal ─────────────────────────────────────────────────────
 const PayHereModal = ({ data, onSuccess, onDismissed, onFail }) => {
@@ -503,13 +557,19 @@ export default function Checkout() {
     }).catch(() => {});
   }, []);
 
+  // Some delivery services (e.g. PickMe Flash) don't support Cash on Delivery.
+  // Admin can configure this per-service in 🚚 Delivery settings.
+  const selectedDeliveryServiceForCOD = deliveryServices.find(s => s.code === selectedDelivery) || null;
+  const codAllowedForDelivery = selectedDeliveryServiceForCOD ? selectedDeliveryServiceForCOD.codAllowed !== false : true;
+  const codEnabled = settings?.codEnabled !== false && codAllowedForDelivery;
+
   // Default payment method
   useEffect(() => {
     if (paymentMethod) return;
     if (settings?.bankTransferEnabled !== false) { setPaymentMethod('bank_transfer'); return; }
-    if (settings?.codEnabled !== false)          { setPaymentMethod('cod'); return; }
+    if (codEnabled)          { setPaymentMethod('cod'); return; }
     if (gateways.length > 0)                     setPaymentMethod(gateways[0].gateway);
-  }, [settings, gateways, paymentMethod]);
+  }, [settings, gateways, paymentMethod, codEnabled]);
 
   // Pre-fill billing from saved address
   useEffect(() => {
@@ -542,6 +602,18 @@ export default function Checkout() {
   const deliveryFee  = resolveDeliveryFee(selectedDeliveryService, billing?.city || '', subtotal, settings);
   const benefit      = resolveBenefit(couponData, giftCardData, subtotal, deliveryFee);
   const totals       = computeTotals({ subtotal, deliveryFee, couponData, giftCardData });
+
+  // If the customer has COD selected and then picks a delivery service that
+  // doesn't allow COD, automatically move them to another payment method.
+  useEffect(() => {
+    if (paymentMethod === 'cod' && !codAllowedForDelivery) {
+      if (settings?.bankTransferEnabled !== false)      setPaymentMethod('bank_transfer');
+      else if (gateways.length > 0)                     setPaymentMethod(gateways[0].gateway);
+      else                                               setPaymentMethod('');
+      toast.error(`${selectedDeliveryService?.name || 'This delivery option'} doesn't support Cash on Delivery — please choose another payment method.`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDelivery, codAllowedForDelivery]);
 
   // Derived display helpers
   const couponDiscount    = totals.couponDiscount;
@@ -829,7 +901,7 @@ export default function Checkout() {
     }
   };
 
-  const hasAnyPayment = settings?.bankTransferEnabled !== false || settings?.codEnabled !== false || gateways.length > 0;
+  const hasAnyPayment = settings?.bankTransferEnabled !== false || codEnabled || gateways.length > 0;
 
   // ── Slip upload ───────────────────────────────────────────────────────────────
   const handleSlipChange = (e) => {
@@ -1293,10 +1365,24 @@ export default function Checkout() {
                     </div>
                   )}
                   {settings?.codEnabled !== false && (
-                    <div className={`pay-method-card ${paymentMethod === 'cod' ? 'selected' : ''}`} onClick={() => setPaymentMethod('cod')}>
-                      <div className="pay-method-radio" /><div className="pay-method-icon">💵</div>
-                      <div><div className="pay-method-label">Cash on Delivery</div><div className="pay-method-desc">Pay when your order arrives</div></div>
-                    </div>
+                    codAllowedForDelivery ? (
+                      <div className={`pay-method-card ${paymentMethod === 'cod' ? 'selected' : ''}`} onClick={() => setPaymentMethod('cod')}>
+                        <div className="pay-method-radio" /><div className="pay-method-icon">💵</div>
+                        <div><div className="pay-method-label">Cash on Delivery</div><div className="pay-method-desc">Pay when your order arrives</div></div>
+                      </div>
+                    ) : (
+                      <div
+                        className="pay-method-card opacity-50 cursor-not-allowed"
+                        title={`${selectedDeliveryService?.name || 'This delivery option'} doesn't support Cash on Delivery`}
+                        onClick={() => toast.error(`Cash on Delivery isn't available for ${selectedDeliveryService?.name || 'this delivery option'}. Please choose a different payment method.`)}
+                      >
+                        <div className="pay-method-radio" /><div className="pay-method-icon">💵</div>
+                        <div>
+                          <div className="pay-method-label">Cash on Delivery</div>
+                          <div className="pay-method-desc">Not available for {selectedDeliveryService?.name || 'this delivery option'}</div>
+                        </div>
+                      </div>
+                    )
                   )}
                   {gateways.map(gw => (
                     <div key={gw.gateway} className={`pay-method-card ${paymentMethod === gw.gateway ? 'selected' : ''}`} onClick={() => setPaymentMethod(gw.gateway)}>

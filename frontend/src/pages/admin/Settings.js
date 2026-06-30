@@ -273,6 +273,20 @@ export default function AdminSettings() {
     }
   };
 
+  // Allow/disallow Cash on Delivery for a specific delivery service
+  // (e.g. PickMe Flash may not support COD while Standard Delivery does).
+  const toggleDeliveryCOD = async (svc) => {
+    const nextCodAllowed = !(svc.codAllowed !== false); // default true -> flips to false, etc.
+    try {
+      const { data } = await API.put(`/delivery/admin/${svc.code}`, { ...svc, codAllowed: nextCodAllowed });
+      setDeliveryServices(p => p.map(s => s.code === svc.code ? data : s));
+      toast.success(nextCodAllowed ? `COD enabled for ${svc.name}` : `COD disabled for ${svc.name}`);
+    } catch (err) {
+      console.error('Toggle delivery COD error:', err);
+      toast.error(err?.response?.data?.message || 'Failed to update COD setting');
+    }
+  };
+
   const savePage = async () => {
     try {
       if (editingPage?._id) await API.put(`/pages/admin/${editingPage._id}`, pageForm);
@@ -450,7 +464,7 @@ export default function AdminSettings() {
               <div>
                 <div className="flex items-center justify-between mb-5">
                   <div><h3 className="font-semibold text-gray-900">Delivery Services</h3><p className="text-xs text-gray-400">Configure shipping options for customers</p></div>
-                  <button onClick={() => { setDeliveryForm({ name:'', code:'', description:'', estimatedDays:'', trackingUrl:'', coverageAreas:'', deliveryNote:'', rates:[{ name:'Standard', price:600, freeAbove:0, estimatedDays:'' }], zoneRates:[], shippingRules:[] }); setEditingDelivery('new'); }} className="btn-primary text-sm">+ Add Service</button>
+                  <button onClick={() => { setDeliveryForm({ name:'', code:'', description:'', estimatedDays:'', trackingUrl:'', coverageAreas:'', deliveryNote:'', codAllowed:true, rates:[{ name:'Standard', price:600, freeAbove:0, estimatedDays:'' }], zoneRates:[], shippingRules:[] }); setEditingDelivery('new'); }} className="btn-primary text-sm">+ Add Service</button>
                 </div>
                 <div className="space-y-3">
                   {deliveryServices.map(svc => (
@@ -459,6 +473,7 @@ export default function AdminSettings() {
                         <div className="flex items-center gap-2 mb-1">
                           <p className="font-semibold text-gray-800 text-sm">{svc.name}</p>
                           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${svc.isEnabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{svc.isEnabled ? 'Active' : 'Disabled'}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${svc.codAllowed !== false ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>{svc.codAllowed !== false ? '💵 COD allowed' : '🚫 COD disabled'}</span>
                         </div>
                         <p className="text-xs text-gray-500">{svc.description}</p>
                         <div className="flex flex-wrap gap-2 mt-2">
@@ -476,6 +491,16 @@ export default function AdminSettings() {
                         </div>
                         {svc.estimatedDays && <p className="text-xs text-gray-400 mt-1">🕐 {svc.estimatedDays}</p>}
                         {svc.trackingUrl && <p className="text-xs text-gray-400 mt-0.5">🔗 Tracking: {svc.trackingUrl}</p>}
+                        <div className="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-gray-50">
+                          <span className="text-xs text-gray-600 whitespace-nowrap">Allow Cash on Delivery for this service</span>
+                          <button
+                            type="button"
+                            onClick={() => toggleDeliveryCOD(svc)}
+                            className={`relative inline-flex flex-shrink-0 items-center w-11 h-6 rounded-full transition-colors duration-200 ${svc.codAllowed !== false ? 'bg-blue-500' : 'bg-gray-300'}`}
+                          >
+                            <span className={`inline-block w-5 h-5 bg-white rounded-full shadow transform transition-transform duration-200 ${svc.codAllowed !== false ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                          </button>
+                        </div>
                       </div>
                       <div className="flex gap-2 flex-shrink-0">
                         <button onClick={() => { setDeliveryForm({ zoneRates:[], shippingRules:[], ...svc }); setEditingDelivery(svc); }} className="text-xs px-2.5 py-1.5 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100">Edit</button>
@@ -502,6 +527,20 @@ export default function AdminSettings() {
                         </div>
                         <div><label className="form-label">Coverage Areas</label><input value={deliveryForm.coverageAreas||''} onChange={e=>setDeliveryForm(p=>({...p,coverageAreas:e.target.value}))} className="form-input" placeholder="Island-wide delivery"/></div>
                         <div><label className="form-label">Checkout Note</label><input value={deliveryForm.deliveryNote||''} onChange={e=>setDeliveryForm(p=>({...p,deliveryNote:e.target.value}))} className="form-input" placeholder="Orders placed before 2pm ship same day"/></div>
+
+                        <div className="flex items-center justify-between border border-gray-100 rounded-2xl p-4">
+                          <div>
+                            <p className="font-semibold text-sm text-gray-700">💵 Allow Cash on Delivery</p>
+                            <p className="text-xs text-gray-400">Turn off if this courier (e.g. PickMe Flash) doesn't support COD</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setDeliveryForm(p => ({ ...p, codAllowed: !(p.codAllowed !== false) }))}
+                            className={`relative inline-flex flex-shrink-0 items-center w-11 h-6 rounded-full transition-colors duration-200 ${deliveryForm.codAllowed !== false ? 'bg-blue-500' : 'bg-gray-300'}`}
+                          >
+                            <span className={`inline-block w-5 h-5 bg-white rounded-full shadow transform transition-transform duration-200 ${deliveryForm.codAllowed !== false ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                          </button>
+                        </div>
 
                         {/* Base Rates */}
                         <div className="border border-gray-100 rounded-2xl p-4">
