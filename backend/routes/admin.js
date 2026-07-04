@@ -3,7 +3,7 @@ const router  = express.Router();
 const Order   = require('../models/Order');
 const Product = require('../models/Product');
 const User    = require('../models/User');
-const { ReturnRequest } = require('../models/index');
+const { ReturnRequest, Settings } = require('../models/index');
 const { adminAuth } = require('../middleware/auth');
 
 // ── Dashboard stats ───────────────────────────────────────────────────────────
@@ -61,6 +61,67 @@ router.get('/dashboard', adminAuth, async (req, res) => {
       ]),
     ]);
 
+    // Real Cost of Goods Sold — computed from each order item's quantity
+    // multiplied by the product's actual costPrice (from the database),
+    // instead of an estimated average margin.
+    const cogsAgg = await Order.aggregate([
+      { $match: revenueFilter },
+      { $unwind: '$items' },
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'items.product',
+          foreignField: '_id',
+          as: 'productInfo'
+        }
+      },
+      { $unwind: { path: '$productInfo', preserveNullAndEmptyArrays: true } },
+      {
+        $group: {
+          _id: null,
+          totalCOGS: {
+            $sum: {
+              $multiply: [
+                { $ifNull: ['$items.quantity', 0] },
+                { $ifNull: ['$productInfo.costPrice', 0] }
+              ]
+            }
+          }
+        }
+      }
+    ]);
+    const totalCOGS = cogsAgg[0]?.totalCOGS || 0;
+
+    // Delivery fee that customers actually paid at checkout — this is NOT a
+    // cost to the business, since the customer covered it. We still report
+    // the total collected for visibility, but it is not deducted from Net
+    // Profit.
+    const shippingAgg = await Order.aggregate([
+      { $match: revenueFilter },
+      { $group: { _id: null, totalShipping: { $sum: { $ifNull: ['$shippingCost', 0] } } } }
+    ]);
+    const totalShippingCost = shippingAgg[0]?.totalShipping || 0;
+
+    const monthShippingAgg = await Order.aggregate([
+      { $match: { ...revenueFilter, createdAt: { $gte: thisMonth } } },
+      { $group: { _id: null, totalShipping: { $sum: { $ifNull: ['$shippingCost', 0] } } } }
+    ]);
+    const monthShippingCost = monthShippingAgg[0]?.totalShipping || 0;
+
+    // The ONLY real delivery cost to the business is when delivery was FREE
+    // for the customer (shippingCost = 0) — the business still had to pay
+    // the courier, it just didn't pass that fee on. We estimate that cost
+    // using the store's standard delivery rate (same rate used at checkout
+    // when an order doesn't qualify for free delivery).
+    const standardDeliverySetting = await Settings.findOne({ key: 'standardDelivery' }).lean();
+    const standardDeliveryRate = Number(standardDeliverySetting?.value) || 600;
+
+    const freeDeliveryFilter = { ...revenueFilter, $or: [{ shippingCost: 0 }, { shippingCost: null }, { shippingCost: { $exists: false } }] };
+    const freeDeliveryOrders      = await Order.countDocuments(freeDeliveryFilter);
+    const freeDeliveryCost        = freeDeliveryOrders * standardDeliveryRate;
+    const monthFreeDeliveryOrders = await Order.countDocuments({ ...freeDeliveryFilter, createdAt: { $gte: thisMonth } });
+    const monthFreeDeliveryCost   = monthFreeDeliveryOrders * standardDeliveryRate;
+
     const thirtyDaysAgo = new Date(today);
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
@@ -97,6 +158,19 @@ router.get('/dashboard', adminAuth, async (req, res) => {
         totalReturns,
         pendingReturns,
         totalRefundedAmount: totalRefundedAmount[0]?.total || 0,
+        // Real Cost of Goods Sold, from product costPrice in the database
+        totalCOGS,
+        // Delivery fees collected from customers (informational only —
+        // this is NOT a business cost since the customer paid it).
+        totalShippingCost,
+        monthShippingCost,
+        // The actual delivery cost to the business: only orders where
+        // delivery was free for the customer. This IS deducted from Net
+        // Profit.
+        freeDeliveryOrders,
+        freeDeliveryCost,
+        monthFreeDeliveryOrders,
+        monthFreeDeliveryCost,
       },
       revenueChart, topProducts, ordersByStatus, recentOrders
     });

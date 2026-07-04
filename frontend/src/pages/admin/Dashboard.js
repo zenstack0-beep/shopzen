@@ -23,6 +23,13 @@ const KPI = ({ label, value, sub, icon, color, trend, suffix = '', to, onClick }
   const navigate = useNavigate();
   const handleClick = () => { if (to) navigate(to); else if (onClick) onClick(); };
   const clickable = !!(to || onClick);
+  // Auto-shrink the value font as the digit count grows, so large numbers
+  // (e.g. Rs. 1,234,567) are never cut off / ellipsized inside the card.
+  const valueStr = `${value}${suffix}`;
+  const valueSizeClass =
+    valueStr.length > 16 ? 'text-base' :
+    valueStr.length > 12 ? 'text-lg'   :
+    valueStr.length > 9  ? 'text-xl'   : 'text-2xl';
   return (
     <div
       onClick={handleClick}
@@ -32,7 +39,7 @@ const KPI = ({ label, value, sub, icon, color, trend, suffix = '', to, onClick }
       <div className="flex items-start justify-between">
         <div className="flex-1 min-w-0">
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider truncate">{label}</p>
-          <p className="font-display text-2xl font-bold text-gray-900 mt-1 truncate">{value}{suffix}</p>
+          <p className={`font-display ${valueSizeClass} font-bold text-gray-900 mt-1 break-words leading-tight`}>{valueStr}</p>
           {sub && <p className="text-xs text-gray-400 mt-0.5 truncate">{sub}</p>}
         </div>
         <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 ml-3 ${color}`}>
@@ -138,23 +145,41 @@ export default function Dashboard() {
   /* ── Derived financial metrics ────────────────────────────────────────── */
   const revTrend      = pct(stats.monthRevenue, stats.lastMonthRevenue);
   const aov           = stats.totalOrders > 0 ? Math.round(stats.totalRevenue / stats.totalOrders) : 0;
-  const estimatedDeliveryCostAllTime = Math.round((stats.totalRevenue * 0.035));
 
-  // Gross profit = revenue - cost of goods (using costPrice from products if available)
-  // We estimate from top product margin data
-  const avgMarginPct  = topProducts.length > 0
-    ? topProducts.reduce((sum, p) => {
-        const cost = p.costPrice || 0;
-        const sell = p.salePrice || p.price || 0;
-        return sum + (sell > 0 && cost > 0 ? ((sell - cost) / sell) * 100 : 40);
-      }, 0) / topProducts.length
-    : 40; // fallback 40% margin assumption
+  // Delivery fees collected from customers — informational only. This is
+  // NOT a cost to the business, since the customer paid it at checkout.
+  const totalDeliveryFeesCollected = Math.round(stats.totalShippingCost || 0);
+  const monthDeliveryFeesCollected = Math.round(stats.monthShippingCost || 0);
 
-  const grossProfit   = Math.round(stats.totalRevenue * (avgMarginPct / 100));
-  const netProfit     = Math.round(grossProfit - estimatedDeliveryCostAllTime - (stats.totalRevenue * 0.05));
+  // The real delivery cost to the business: only orders where delivery was
+  // FREE for the customer (the business still had to pay the courier, it
+  // just didn't charge for it). This is what actually gets deducted from
+  // Net Profit.
+  const freeDeliveryCost      = Math.round(stats.freeDeliveryCost || 0);
+  const monthFreeDeliveryCost = Math.round(stats.monthFreeDeliveryCost || 0);
+
+  // Kept under the old variable name so the rest of the file (KPI cards,
+  // P&L table, "Avg Delivery Cost") automatically reflects the real cost.
+  const estimatedDeliveryCostAllTime = freeDeliveryCost;
+  const monthDelivery = monthFreeDeliveryCost;
+
+  // Operational cost rate — applied to revenue as a flat percentage.
+  // Changed from 5% to 2% per request.
+  const OPERATIONAL_COST_RATE = 0.02;
+
+  // Gross profit = revenue - Cost of Goods Sold.
+  // COGS now comes straight from the database (stats.totalCOGS), computed
+  // server-side as sum(orderItem.quantity * product.costPrice) — no more
+  // estimating from an average top-product margin.
+  const totalCOGS     = stats.totalCOGS || 0;
+  const avgMarginPct  = stats.totalRevenue > 0
+    ? ((stats.totalRevenue - totalCOGS) / stats.totalRevenue) * 100
+    : 0;
+
+  const grossProfit   = Math.round(stats.totalRevenue - totalCOGS);
+  const netProfit     = Math.round(grossProfit - freeDeliveryCost - (stats.totalRevenue * OPERATIONAL_COST_RATE));
   const monthGross    = Math.round(stats.monthRevenue * (avgMarginPct / 100));
-  const monthNet      = Math.round(monthGross - (stats.monthRevenue * 0.035) - (stats.monthRevenue * 0.05));
-  const monthDelivery = Math.round(stats.monthRevenue * 0.035);
+  const monthNet      = Math.round(monthGross - monthFreeDeliveryCost - (stats.monthRevenue * OPERATIONAL_COST_RATE));
 
   /* ── Product velocity classification ─────────────────────────────────── */
   const maxSold = topProducts[0]?.soldCount || 1;
@@ -175,11 +200,14 @@ export default function Dashboard() {
   const slowItems = productsWithVelocity.filter(p => p.needsPromotion);
 
   /* ── Financial chart data ─────────────────────────────────────────────── */
+  // Note: delivery cost per day is still an estimate (3.5% of that day's
+  // revenue) since we only have exact shipping cost totals, not a
+  // day-by-day breakdown. Operational cost rate matches the 2% used above.
   const financialChart = revenueChart.map(d => ({
     ...d,
     gross:    Math.round(d.revenue * (avgMarginPct / 100)),
     delivery: Math.round(d.revenue * 0.035),
-    net:      Math.round(d.revenue * (avgMarginPct / 100) * 0.9 - d.revenue * 0.05),
+    net:      Math.round(d.revenue * (avgMarginPct / 100) * 0.9 - d.revenue * OPERATIONAL_COST_RATE),
   }));
 
   /* ── Funnel (simulated) ───────────────────────────────────────────────── */
@@ -355,7 +383,8 @@ export default function Dashboard() {
             <KPI label="Total Revenue"    value={fmt(stats.totalRevenue)}    sub="All paid orders"       icon="💰" color="bg-amber-50"  trend={revTrend} />
             <KPI label="Gross Profit"     value={fmt(grossProfit)}           sub={`${Math.round(avgMarginPct)}% avg margin`} icon="📊" color="bg-green-50" />
             <KPI label="Net Profit"       value={fmt(netProfit)}             sub="After delivery & ops"  icon="✅" color="bg-emerald-50" />
-            <KPI label="Delivery Costs"   value={fmt(estimatedDeliveryCostAllTime)} sub="Estimated shipping"  icon="🚚" color="bg-blue-50" />
+            <KPI label="Free Delivery Cost" value={fmt(estimatedDeliveryCostAllTime)} sub="Absorbed by us"  icon="🚚" color="bg-blue-50" />
+            <KPI label="Delivery Fees Collected" value={fmt(totalDeliveryFeesCollected)} sub="Paid by customers — not a cost" icon="🧾" color="bg-gray-50" />
           </div>
 
           {/* Monthly breakdown */}
@@ -374,9 +403,9 @@ export default function Dashboard() {
               <p className="text-xs text-emerald-500 mt-0.5">{Math.round(avgMarginPct)}% margin</p>
             </div>
             <div className="bg-blue-50 rounded-2xl border border-blue-100 p-5">
-              <p className="text-xs font-semibold text-blue-500 uppercase tracking-wider">Month Delivery Cost</p>
+              <p className="text-xs font-semibold text-blue-500 uppercase tracking-wider">Month Free Delivery Cost</p>
               <p className="text-2xl font-bold text-blue-700 mt-1">{fmt(monthDelivery)}</p>
-              <p className="text-xs text-blue-500 mt-0.5">~3.5% of revenue</p>
+              <p className="text-xs text-blue-500 mt-0.5">Absorbed by us · Rs. {monthDeliveryFeesCollected.toLocaleString()} collected from customers separately</p>
             </div>
             <div className="bg-purple-50 rounded-2xl border border-purple-100 p-5">
               <p className="text-xs font-semibold text-purple-500 uppercase tracking-wider">Month Net Profit</p>
@@ -412,8 +441,8 @@ export default function Dashboard() {
                 { label: 'Cost of Goods Sold',            value: -(stats.totalRevenue - grossProfit),  color: 'text-red-500',    indent: true },
                 { label: 'Returns / Refunds Paid Out',    value: -(stats.totalRefundedAmount || 0),    color: 'text-orange-500', indent: true },
                 { label: 'Gross Profit',                  value: grossProfit,                          color: 'text-emerald-600',bold: true, border: true },
-                { label: 'Delivery & Shipping',           value: -estimatedDeliveryCostAllTime,        color: 'text-red-400',    indent: true },
-                { label: 'Operational Costs',             value: -Math.round(stats.totalRevenue*0.05), color: 'text-red-400',    indent: true },
+                { label: 'Free Delivery Cost (absorbed)', value: -estimatedDeliveryCostAllTime,        color: 'text-red-400',    indent: true },
+                { label: 'Operational Costs',             value: -Math.round(stats.totalRevenue*OPERATIONAL_COST_RATE), color: 'text-red-400',    indent: true },
                 { label: 'Net Profit',                    value: netProfit,                            color: netProfit >= 0 ? 'text-emerald-700' : 'text-red-600', bold: true, border: true },
                 { label: 'Profit Margin',                 value: null, display: `${Math.round((netProfit/Math.max(stats.totalRevenue,1))*100)}%`, color: 'text-purple-600', bold: true },
               ].map((row, i) => (
@@ -425,6 +454,9 @@ export default function Dashboard() {
                   </span>
                 </div>
               ))}
+              <p className="text-xs text-gray-400 pt-2 border-t border-gray-100 mt-2">
+                ℹ️ Rs. {totalDeliveryFeesCollected.toLocaleString()} in delivery fees was collected directly from customers and isn't included above — it's not a cost to the business. Only delivery that was free for the customer (Rs. {estimatedDeliveryCostAllTime.toLocaleString()}) is deducted as a real cost.
+              </p>
             </div>
           </div>
 
@@ -437,7 +469,7 @@ export default function Dashboard() {
                 {[
                   { label: 'Avg Order Value',      value: fmt(aov),                      icon: '🧾' },
                   { label: 'Avg Gross per Order',  value: fmt(Math.round(grossProfit / Math.max(stats.totalOrders, 1))), icon: '📊' },
-                  { label: 'Avg Delivery Cost',    value: fmt(Math.round(estimatedDeliveryCostAllTime / Math.max(stats.totalOrders, 1))), icon: '🚚' },
+                  { label: 'Avg Free Delivery Cost', value: fmt(Math.round(estimatedDeliveryCostAllTime / Math.max(stats.totalOrders, 1))), icon: '🚚' },
                   { label: 'Revenue per Customer', value: fmt(Math.round(stats.totalRevenue / Math.max(stats.totalCustomers, 1))), icon: '👤' },
                   { label: 'Margin %',             value: `${Math.round(avgMarginPct)}%`, icon: '📈' },
                   { label: 'Net Margin %',         value: `${Math.round((netProfit / Math.max(stats.totalRevenue, 1)) * 100)}%`, icon: '✅' },
