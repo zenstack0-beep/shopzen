@@ -75,6 +75,23 @@ router.post('/capi', capiLimiter, async (req, res) => {
 
   if (!eventName) return; // nothing to send
 
+  // ── Purchase accuracy guard ────────────────────────────────────────────────
+  // This generic relay is used by the frontend for AddToCart, InitiateCheckout,
+  // and ViewContent (see metaPixelHelpers.js sendCapiRequest / useSEO.js).
+  // Purchase must NEVER be sent through this route: it is not tied to any
+  // verified MongoDB order. The only place allowed to fire a Purchase CAPI
+  // event is sendPurchaseEvent() in routes/orders.js, called strictly after
+  // Order.create() succeeds. Accepting 'Purchase' here would let anyone
+  // (a stray frontend call, a replay, a direct request) generate phantom
+  // Purchase events with zero real orders behind them — log and drop.
+  if (eventName === 'Purchase') {
+    console.warn(
+      '[META CAPI] Purchase blocked at /api/meta/capi relay — Purchase must only be sent via sendPurchaseEvent() after a confirmed Order.create() in routes/orders.js. eventId:',
+      eventId || '(none)'
+    );
+    return;
+  }
+
   // ── DEBUG: log browser-supplied eventId arriving at the relay endpoint ──
   console.log(`[META CAPI] ${eventName} — browser event_id received:`, eventId || '(none — will be auto-generated)');
 

@@ -736,6 +736,18 @@ router.post('/', orderRateLimiter, async (req, res) => {
       return res.status(409).json({ message: msg });
     }
 
+    // ── DEBUG: confirm a real order was persisted to MongoDB (survived the ─────
+    // race-condition rollback check above) before any Meta Purchase tracking
+    // runs. If this line is not in the logs, no Purchase event (browser pixel
+    // or CAPI) should exist for this request.
+    console.log(
+      '[ORDER CREATED]',
+      'orderId:', String(order._id),
+      'orderNumber:', order.orderNumber,
+      'total:', order.total,
+      'metaEventId:', order.metaEventId || '(none)'
+    );
+
     // ── Admin in-app notification ──────────────────────────────────────────────
     await Notification.create({
       type:    'new_order',

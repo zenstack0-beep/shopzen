@@ -2,8 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useSearchParams, Link } from 'react-router-dom';
 import API from '../../utils/api';
 import { useTheme } from '../../context/ThemeContext';
-import useSEO, { trackPurchase } from '../../hooks/useSEO';
-import { generateEventId, getFbCookies } from '../../utils/metaPixelHelpers';
+import useSEO from '../../hooks/useSEO';
 import toast from 'react-hot-toast';
 
 
@@ -218,20 +217,26 @@ export function OrderSuccess() {
           const existingEventId = sessionStorage.getItem(ssKey);
           if (!existingEventId) {
             // Checkout.js did NOT already fire in this browser session.
-            // This happens on PayHere redirect, page refresh, or direct link.
-            // Use the eventId the backend stored on the order (metaEventId) so
-            // the browser pixel deduplicates with the CAPI event already sent
-            // by routes/orders.js when the order was created.
-            // If the order has no metaEventId (very old order), generate fresh.
-            const { fbp, fbc } = getFbCookies();
-            const newEventId = data.metaEventId || generateEventId('Purchase', data._id || id);
-            sessionStorage.setItem(ssKey, newEventId);
-            trackPurchase(data, data.items || [], {
-              billing: data.billing || {},
-              eventId: newEventId,
-              fbp,
-              fbc,
-            });
+            // This happens on PayHere redirect, page refresh, direct link,
+            // cross-device open, or a bot/crawler hitting this URL.
+            //
+            // FIX (Meta accuracy bug): this used to fire a FRESH browser
+            // Purchase event here as a "better to count it than drop it"
+            // fallback. That meant every refresh / direct visit / crawler hit
+            // on this page fired an EXTRA browser-side Purchase event with no
+            // way for Meta to line it up with a real order — inflating
+            // Purchase counts far beyond the number of real MongoDB orders.
+            //
+            // The backend already fired the one authoritative CAPI Purchase
+            // event, tied strictly to Order.create() succeeding (see
+            // routes/orders.js "[META CAPI] Purchase" log). We must NOT fire a
+            // second browser-side Purchase here — only log a warning so this
+            // scenario stays visible for debugging.
+            console.warn(
+              '[META PIXEL] Purchase fallback disabled — no stored event_id for order',
+              data._id || id,
+              '— page refresh / direct visit / cross-device. Backend CAPI Purchase was already sent once at order creation; not re-firing browser Purchase.'
+            );
           }
           // If existingEventId is present, Checkout.js already fired trackPurchase
           // (browser pixel) with that eventId and the backend CAPI already used

@@ -196,6 +196,8 @@ export function trackPurchase(order, items, opts = {}) {
   // frontend AND backend produces TWO server-side events, which shows as
   // two "Processed" rows in Meta Events Manager instead of one deduplicated pair.
   // Correct dedup chain: browser pixel (eventID: X) ↔ backend CAPI (event_id: X) = 1 conversion.
+  // ── DEBUG: log the browser Purchase event_id right before it fires ─────────
+  console.log('[META PIXEL] Purchase event_id:', eventId);
   fbqSafe('track', 'Purchase', {
     value,
     currency,
