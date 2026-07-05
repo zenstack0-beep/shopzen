@@ -427,7 +427,177 @@ export function AdminBanners() {
   );
 }
 
-/* ── AdminReviews (unchanged, kept here) ───────────────────────── */
+/* ── Google Reviews config panel (for the homepage "What People Say About Us" section) ── */
+const GoogleReviewsConfig = () => {
+  const [placeId, setPlaceId] = useState('');
+  const [apiKey, setApiKey] = useState(''); // write-only — never pre-filled from the server
+  const [hasApiKey, setHasApiKey] = useState(false);
+  const [enabled, setEnabled] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [showKeyField, setShowKeyField] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [preview, setPreview] = useState(null); // last fetched /reviews/google payload, for a quick sanity check
+
+  const loadStatus = async () => {
+    try {
+      const { data } = await API.get('/reviews/admin/google-config');
+      setPlaceId(data.googlePlaceId || '');
+      setHasApiKey(!!data.hasApiKey);
+      setEnabled(data.showGoogleReviews !== false);
+    } catch {
+      /* non-fatal — panel just shows blank/defaults */
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { loadStatus(); }, []);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const payload = {
+        googlePlaceId: placeId.trim(),
+        showGoogleReviews: enabled,
+      };
+      // Only send the API key if the admin actually typed a new one —
+      // this keeps it write-only and avoids overwriting a saved key with blank.
+      if (apiKey.trim()) payload.googlePlacesApiKey = apiKey.trim();
+      await API.put('/settings', payload);
+      toast.success('Google Reviews settings saved!');
+      setApiKey('');
+      setShowKeyField(false);
+      await loadStatus();
+    } catch {
+      toast.error('Failed to save Google Reviews settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Clears the 1-hour server cache, then fetches fresh so the admin gets an
+  // immediate, honest preview instead of waiting an hour to see if it worked.
+  const refreshNow = async () => {
+    setRefreshing(true);
+    setPreview(null);
+    try {
+      await API.post('/reviews/admin/google-refresh');
+      const { data } = await API.get('/reviews/google');
+      setPreview(data);
+      if (data.enabled && data.reviews?.length) {
+        toast.success(`Fetched ${data.reviews.length} Google review${data.reviews.length === 1 ? '' : 's'}!`);
+      } else {
+        toast.error('No Google reviews came back — check Place ID, API key, and that "Places API (New)" is enabled. See Railway server logs for the exact Google error.');
+      }
+    } catch {
+      toast.error('Refresh failed — check your connection and try again');
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  if (loading) return null;
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 p-6 mb-6">
+      <div className="flex items-start gap-4 mb-4">
+        <div className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl flex-shrink-0 bg-blue-50">🌐</div>
+        <div className="flex-1">
+          <h3 className="font-bold text-gray-900">Google Reviews</h3>
+          <p className="text-sm text-gray-400">Show your Google Business reviews alongside store reviews in "What People Say About Us" on the homepage</p>
+          {hasApiKey && placeId ? (
+            <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-700 bg-green-100 px-2 py-0.5 rounded-full mt-1">✓ Connected</span>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-xs font-semibold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full mt-1">Not configured</span>
+          )}
+        </div>
+        <button
+          onClick={() => setEnabled(v => !v)}
+          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0 ${enabled ? 'bg-green-500' : 'bg-gray-200'}`}
+          title={enabled ? 'Google Reviews enabled — click to disable' : 'Google Reviews disabled — click to enable'}
+        >
+          <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+        </button>
+      </div>
+
+      <div className="space-y-3">
+        <div>
+          <label className="form-label">Google Place ID</label>
+          <input
+            value={placeId}
+            onChange={e => setPlaceId(e.target.value)}
+            className="form-input font-mono text-sm"
+            placeholder="ChIJN1t_tDeuEmsRUsoyG83frY4"
+          />
+          <p className="text-xs text-gray-400 mt-1">Find yours with Google's Place ID Finder (link below)</p>
+        </div>
+
+        <div>
+          <label className="form-label">Google Places API Key</label>
+          {hasApiKey && !showKeyField ? (
+            <div className="flex items-center gap-2">
+              <input value="••••••••••••••••••••" disabled className="form-input font-mono text-sm bg-gray-50 text-gray-400" />
+              <button onClick={() => setShowKeyField(true)} className="btn-outline text-xs px-3 py-2 whitespace-nowrap">Replace key</button>
+            </div>
+          ) : (
+            <input
+              type="password"
+              value={apiKey}
+              onChange={e => setApiKey(e.target.value)}
+              className="form-input font-mono text-sm"
+              placeholder="AIzaSy... (never shown again after saving)"
+            />
+          )}
+          <p className="text-xs text-gray-400 mt-1">
+            Stored server-side only — never sent to the browser or exposed in the public Settings API, even to signed-in admins after saving.
+          </p>
+        </div>
+
+        <div className="bg-amber-50 rounded-xl p-4 border border-amber-100">
+          <p className="text-xs font-bold text-amber-800 uppercase mb-2">⚠️ Enable the right API</p>
+          <p className="text-xs text-amber-800 leading-relaxed">
+            Google has two versions of this API. This integration uses <strong>Places API (New)</strong> —
+            most keys created recently are ONLY authorized for this one, not the older "Places API".
+            If reviews aren't showing after Refresh Now below, this is the most common cause.
+          </p>
+        </div>
+
+        <div className="bg-gray-50 rounded-xl p-4">
+          <p className="text-xs font-bold text-gray-500 uppercase mb-2">Setup Guide</p>
+          <ol className="text-xs text-gray-600 space-y-1.5 list-decimal list-inside">
+            <li>Enable <strong>Places API (New)</strong> in <a href="https://console.cloud.google.com/apis/library/places.googleapis.com" target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">Google Cloud Console</a></li>
+            <li>Make sure billing is enabled on the project (required by Google even within the free monthly credit)</li>
+            <li>Create an API key under APIs &amp; Services → Credentials, and restrict it to <strong>Places API (New)</strong></li>
+            <li>Find your Place ID using Google's <a href="https://developers.google.com/maps/documentation/places/web-service/place-id" target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">Place ID Finder</a></li>
+            <li>Paste both above, save, then click <strong>Refresh Now</strong> to test immediately</li>
+          </ol>
+          <p className="text-xs text-gray-400 mt-2">Note: Google only ever returns up to 5 reviews per place via this API — that's a Google-side limit, not a bug here.</p>
+        </div>
+
+        {preview && (
+          <div className={`rounded-xl p-3 text-xs ${preview.enabled && preview.reviews?.length ? 'bg-green-50 text-green-800 border border-green-100' : 'bg-red-50 text-red-700 border border-red-100'}`}>
+            {preview.enabled && preview.reviews?.length ? (
+              <>✓ Connected — {preview.reviews.length} review{preview.reviews.length === 1 ? '' : 's'} fetched, {preview.rating}/5 average ({preview.totalRatings} total ratings)</>
+            ) : (
+              <>✗ No reviews came back. Check the server logs (Railway → Deploy Logs) for a line starting with <code>[GOOGLE REVIEWS]</code> — it prints Google's exact error message.</>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="flex justify-end gap-2 mt-4">
+        <button onClick={refreshNow} disabled={refreshing || !hasApiKey} className="btn-outline text-sm px-4">
+          {refreshing ? '⏳ Checking…' : '🔄 Refresh Now'}
+        </button>
+        <button onClick={save} disabled={saving} className="btn-primary text-sm px-6">
+          {saving ? 'Saving…' : '💾 Save Google Reviews Settings'}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+/* ── AdminReviews (store reviews moderation + Google Reviews config) ───────── */
 export function AdminReviews() {
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -450,7 +620,10 @@ export function AdminReviews() {
 
   return (
     <div>
-      <div className="mb-6"><h2 className="font-display text-xl font-bold text-gray-900">Reviews</h2><p className="text-sm text-gray-500">Moderate customer reviews</p></div>
+      <div className="mb-6"><h2 className="font-display text-xl font-bold text-gray-900">Reviews</h2><p className="text-sm text-gray-500">Moderate customer reviews, and configure Google Reviews for the homepage</p></div>
+
+      <GoogleReviewsConfig />
+
       <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
         {loading ? <div className="p-8 text-center text-gray-400">Loading...</div> : reviews.length === 0 ? <div className="p-12 text-center text-gray-400">No reviews yet</div> : (
           <div className="divide-y divide-gray-100">

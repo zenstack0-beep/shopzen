@@ -13,6 +13,7 @@ import {
 } from '../../components/Cinematic';
 import toast from 'react-hot-toast';
 import DealsSection from '../../components/DealsSection';
+import TestimonialsSection from '../../components/TestimonialsSection';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -804,7 +805,11 @@ export default function Home() {
     ),
     recently: null, // placeholder — reserved for future recently-viewed component
     gift_cards: null,
-    testimonials: null,
+    // "What People Say About Us" — merges store reviews + Google reviews.
+    // The component fetches its own data and renders null if there's
+    // nothing to show yet, so toggling it off in Layout Builder (or having
+    // no reviews configured) never leaves a gap on the homepage.
+    testimonials: <TestimonialsSection key="testimonials" settings={settings} />,
     brands: null,
   };
 

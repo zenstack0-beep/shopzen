@@ -119,6 +119,11 @@ function invalidateSettingsCache() {
   _settingsCacheAt = 0;
 }
 
+// Keys that must NEVER be sent to the browser via this public endpoint.
+// They are still readable server-side (see backend/routes/reviews.js
+// "GET /google", which reads Settings directly with Settings.find()).
+const PUBLIC_RESPONSE_SECRET_KEYS = ['googlePlacesApiKey'];
+
 // Get all settings as a flat key→value object (public — needed for store name etc.)
 router.get('/', async (req, res) => {
   try {
@@ -128,7 +133,10 @@ router.get('/', async (req, res) => {
     }
     const settings = await Settings.find();
     const obj = {};
-    settings.forEach(s => { obj[s.key] = s.value; });
+    settings.forEach(s => {
+      if (PUBLIC_RESPONSE_SECRET_KEYS.includes(s.key)) return; // never expose secrets here
+      obj[s.key] = s.value;
+    });
     _settingsCache = obj;
     _settingsCacheAt = now;
     res.json(obj);

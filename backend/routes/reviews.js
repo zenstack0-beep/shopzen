@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const { Review } = require('../models/index');
+const https = require('https');
+const { Review, Settings } = require('../models/index');
 const Product = require('../models/Product');
 const { auth, adminAuth } = require('../middleware/auth');
 
@@ -40,6 +41,26 @@ router.delete('/admin/:id', adminAuth, async (req, res) => {
   }
 });
 
+// Admin-only: report Google Reviews config STATUS without ever returning the
+// actual API key (the key is write-only from the browser's point of view —
+// it is never sent back down, even to the admin panel, after it's saved).
+router.get('/admin/google-config', adminAuth, async (req, res) => {
+  try {
+    const rows = await Settings.find({
+      key: { $in: ['googlePlaceId', 'googlePlacesApiKey', 'showGoogleReviews'] },
+    }).lean();
+    const cfg = {};
+    rows.forEach(r => { cfg[r.key] = r.value; });
+    res.json({
+      googlePlaceId: cfg.googlePlaceId || '',
+      hasApiKey: !!cfg.googlePlacesApiKey,
+      showGoogleReviews: cfg.showGoogleReviews !== false,
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // ── Public routes ─────────────────────────────────────────────────────────────
 
 router.get('/product/:productId', async (req, res) => {
@@ -54,6 +75,193 @@ router.get('/product/:productId', async (req, res) => {
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
+});
+
+/**
+ * GET /api/reviews/featured
+ *
+ * Store-wide "featured" reviews for the homepage "What People Say About Us"
+ * section (Layout Builder → Testimonials). Pulls the best APPROVED reviews
+ * across all products — not scoped to a single product page.
+ *
+ * Query params:
+ *   limit  — max reviews to return (default 12, capped at 30)
+ */
+router.get('/featured', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 12, 30);
+
+    // Prefer strong reviews (4★ and up) so the homepage puts its best foot forward.
+    const reviews = await Review.find({ isApproved: true, rating: { $gte: 4 } })
+      .populate('user', 'firstName lastName avatar')
+      .populate('product', 'name thumbnail images slug')
+      .sort({ rating: -1, createdAt: -1 })
+      .limit(limit)
+      .lean();
+
+    // New stores may not have many 4★+ reviews yet — top up with the best
+    // available approved reviews (any rating) so the section isn't sparse.
+    if (reviews.length < 4) {
+      const extra = await Review.find({ isApproved: true })
+        .populate('user', 'firstName lastName avatar')
+        .populate('product', 'name thumbnail images slug')
+        .sort({ rating: -1, createdAt: -1 })
+        .limit(limit)
+        .lean();
+      const seen = new Set(reviews.map(r => String(r._id)));
+      for (const r of extra) {
+        if (reviews.length >= limit) break;
+        if (seen.has(String(r._id))) continue;
+        reviews.push(r);
+        seen.add(String(r._id));
+      }
+    }
+
+    res.json(reviews);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ── Google Reviews (Places API — New) — cached server-side relay ───────────
+//
+// IMPORTANT: Google has two generations of this API:
+//   - "Places API" (legacy)  — maps.googleapis.com/maps/api/place/details/json
+//   - "Places API (New)"     — places.googleapis.com/v1/places/{placeId}
+// API keys created recently are commonly only authorized for the NEW API,
+// so a call to the legacy endpoint silently comes back denied/empty even
+// with a correct key + Place ID. This integration uses the NEW API.
+//
+// Config is stored in Settings (set from Admin → Reviews → Google Reviews):
+//   googlePlaceId       — the store's Google Place ID (not secret)
+//   googlePlacesApiKey  — a Google Places API key (SECRET — never sent to the
+//                          browser; read directly from the DB here, and
+//                          filtered out of the public GET /api/settings
+//                          response in routes/settings.js)
+//   showGoogleReviews   — boolean toggle, defaults to true if a Place ID + key exist
+//
+// Google's Place Details response (both API generations) caps out at a
+// maximum of 5 reviews per place — that's a Google-side limit, not a bug here.
+//
+// Results are cached in-memory for 1 hour to respect quota/cost. A fetch
+// failure never breaks the homepage — it falls back to the last good cache,
+// or an empty/disabled payload. Admin → Reviews has a "Refresh Now" button
+// that calls POST /admin/google-refresh to clear the cache on demand.
+let _googleReviewsCache = null;
+let _googleReviewsCacheAt = 0;
+const GOOGLE_REVIEWS_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+
+function fetchGooglePlaceDetailsNew(placeId, apiKey) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'places.googleapis.com',
+      path: `/v1/places/${encodeURIComponent(placeId)}`,
+      method: 'GET',
+      headers: {
+        'X-Goog-Api-Key': apiKey,
+        // FieldMask is REQUIRED by the New Places API — omitting it returns an error.
+        'X-Goog-FieldMask': 'id,displayName,rating,userRatingCount,googleMapsUri,reviews',
+      },
+      timeout: 8000,
+    };
+    const req = https.request(options, (r) => {
+      let data = '';
+      r.on('data', chunk => { data += chunk; });
+      r.on('end', () => {
+        try { resolve({ statusCode: r.statusCode, body: JSON.parse(data || '{}') }); }
+        catch (err) { reject(err); }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(new Error('Google Places API timeout')); });
+    req.end();
+  });
+}
+
+const EMPTY_GOOGLE_PAYLOAD = { enabled: false, rating: 0, totalRatings: 0, mapsUrl: '', reviews: [] };
+
+router.get('/google', async (req, res) => {
+  try {
+    const now = Date.now();
+    if (_googleReviewsCache && now - _googleReviewsCacheAt < GOOGLE_REVIEWS_CACHE_TTL) {
+      return res.json(_googleReviewsCache);
+    }
+
+    const rows = await Settings.find({
+      key: { $in: ['googlePlaceId', 'googlePlacesApiKey', 'showGoogleReviews'] },
+    }).lean();
+    const cfg = {};
+    rows.forEach(r => { cfg[r.key] = r.value; });
+
+    if (cfg.showGoogleReviews === false || !cfg.googlePlaceId || !cfg.googlePlacesApiKey) {
+      console.log('[GOOGLE REVIEWS] Skipped — not configured or disabled in Admin → Reviews.');
+      _googleReviewsCache = EMPTY_GOOGLE_PAYLOAD;
+      _googleReviewsCacheAt = now;
+      return res.json(EMPTY_GOOGLE_PAYLOAD);
+    }
+
+    const result = await fetchGooglePlaceDetailsNew(cfg.googlePlaceId, cfg.googlePlacesApiKey);
+
+    // ── DEBUG: always log the raw status + a trimmed body so misconfiguration
+    // (wrong Place ID, API not enabled, key restrictions, billing not enabled)
+    // is visible in Railway logs instead of silently showing nothing.
+    console.log(
+      '[GOOGLE REVIEWS] Places API (New) response — status:', result.statusCode,
+      'body:', JSON.stringify(result.body).slice(0, 500)
+    );
+
+    if (result.statusCode !== 200 || result.body.error) {
+      console.warn(
+        '[GOOGLE REVIEWS] Places API (New) error —',
+        'status:', result.statusCode,
+        'code:', result.body?.error?.status || '(none)',
+        'message:', result.body?.error?.message || '(no message)'
+      );
+      // Serve stale cache if we have one rather than a hard empty state
+      if (_googleReviewsCache) return res.json(_googleReviewsCache);
+      return res.json(EMPTY_GOOGLE_PAYLOAD);
+    }
+
+    const place = result.body;
+    const payload = {
+      enabled: true,
+      rating: typeof place.rating === 'number' ? place.rating : 0,
+      totalRatings: place.userRatingCount || 0,
+      mapsUrl: place.googleMapsUri || '',
+      reviews: (place.reviews || [])
+        .slice()
+        .sort((a, b) => new Date(b.publishTime || 0) - new Date(a.publishTime || 0))
+        .slice(0, 10)
+        .map(r => ({
+          authorName:   r.authorAttribution?.displayName || 'Google User',
+          authorPhoto:  r.authorAttribution?.photoUri || '',
+          rating:       r.rating || 0,
+          text:         r.text?.text || r.originalText?.text || '',
+          relativeTime: r.relativePublishTimeDescription || '',
+          time:         r.publishTime ? new Date(r.publishTime).getTime() : 0,
+        })),
+    };
+
+    _googleReviewsCache = payload;
+    _googleReviewsCacheAt = now;
+    console.log('[GOOGLE REVIEWS] Fetched fresh —', payload.reviews.length, 'reviews, place rating', payload.rating, '/ 5, total ratings', payload.totalRatings);
+    res.json(payload);
+  } catch (err) {
+    console.error('[GOOGLE REVIEWS] fetch failed:', err.message);
+    // Never break the homepage over a Google API hiccup
+    if (_googleReviewsCache) return res.json(_googleReviewsCache);
+    res.json(EMPTY_GOOGLE_PAYLOAD);
+  }
+});
+
+// Admin: force a fresh Google Reviews fetch on next GET /google call
+// (bypasses the 1-hour cache) — used by the "Refresh Now" button in
+// Admin → Reviews → Google Reviews, e.g. right after saving new credentials.
+router.post('/admin/google-refresh', adminAuth, async (req, res) => {
+  _googleReviewsCache = null;
+  _googleReviewsCacheAt = 0;
+  console.log('[GOOGLE REVIEWS] Cache cleared by admin — next request will fetch fresh from Google.');
+  res.json({ success: true });
 });
 
 // Get products eligible for review by the current user (delivered orders, not yet reviewed)
