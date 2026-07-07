@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import API from '../../utils/api';
+import API, { API_BASE_URL } from '../../utils/api';
 
 export default function AdminSubscribers() {
   const [subscribers, setSubscribers] = useState([]);
@@ -10,7 +10,7 @@ export default function AdminSubscribers() {
   }, []);
 
   const exportCSV = () => {
-    window.open('/api/subscribers/admin/export', '_blank');
+    window.open(`${API_BASE_URL}/subscribers/admin/export`, '_blank', 'noopener,noreferrer');
   };
 
   return (

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import API from '../../utils/api';
+import API, { API_BASE_URL } from '../../utils/api';
 import toast from 'react-hot-toast';
 import PrintBill from '../../components/PrintBill';
 import PrintWaybill from '../../components/PrintWaybill';
@@ -337,8 +337,8 @@ export default function AdminOrderDetail() {
                     )}
                     {(() => {
                       // Build absolute URL: works both locally and in production
-                      const apiBase = process.env.REACT_APP_API_URL || `${window.location.protocol}//${window.location.hostname}:5001`;
-                      const slipUrl = order.paymentSlip.startsWith('http') ? order.paymentSlip : `${apiBase}${order.paymentSlip}`;
+                      const uploadBase = API_BASE_URL.replace(/\/api$/, '');
+                      const slipUrl = order.paymentSlip.startsWith('http') ? order.paymentSlip : `${uploadBase}${order.paymentSlip}`;
                       const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(order.paymentSlip);
                       const isPdf = /\.pdf$/i.test(order.paymentSlip);
                       return (

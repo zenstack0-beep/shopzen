@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import API from '../../utils/api';
+import API, { API_BASE_URL } from '../../utils/api';
 import toast from 'react-hot-toast';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -483,7 +483,7 @@ export default function BackupCenter() {
                     <b>Setup required (one time):</b><br/>
                     1. Go to <a href='https://console.cloud.google.com/apis/credentials' target='_blank' rel='noreferrer' style={{color:'#b45309'}}>Google Cloud Console → Credentials</a><br/>
                     2. Create an <b>OAuth 2.0 Client ID</b> (Web application)<br/>
-                    3. Add redirect URI: <code style={{fontSize:11}}>{window.location.origin}/api/backup/oauth/callback</code><br/>
+                    3. Add redirect URI: <code style={{fontSize:11}}>{API_BASE_URL}/backup/oauth/callback</code><br/>
                     4. Add to Railway env vars:<br/>
                     &nbsp;&nbsp;<code style={{fontSize:11}}>GOOGLE_OAUTH_CLIENT_ID</code><br/>
                     &nbsp;&nbsp;<code style={{fontSize:11}}>GOOGLE_OAUTH_CLIENT_SECRET</code><br/>

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import API from '../../utils/api';
+import API, { API_BASE_URL } from '../../utils/api';
 import toast from 'react-hot-toast';
 
 const DESIGNS = [
@@ -24,7 +24,7 @@ function SlipModal({ card, onClose, onApprove, onReject }) {
   const [adminNote, setAdminNote]          = useState('');
 
   const slipUrl = card.paymentSlip
-    ? (card.paymentSlip.startsWith('http') ? card.paymentSlip : `${process.env.REACT_APP_API_URL || ''}${card.paymentSlip}`)
+    ? (card.paymentSlip.startsWith('http') ? card.paymentSlip : `${API_BASE_URL.replace(/\/api$/, '')}${card.paymentSlip}`)
     : null;
 
   const isPdf = slipUrl && slipUrl.toLowerCase().endsWith('.pdf');

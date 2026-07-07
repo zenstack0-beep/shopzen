@@ -126,8 +126,8 @@ const PUBLIC_RESPONSE_SECRET_KEYS = ['googlePlacesApiKey'];
 
 // Get all settings as a flat key→value object (public — needed for store name etc.)
 router.get('/', async (req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=1800');
   try {
-    res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=3600');
     const now = Date.now();
     if (_settingsCache && now - _settingsCacheAt < SETTINGS_CACHE_TTL) {
       return res.json(_settingsCache);

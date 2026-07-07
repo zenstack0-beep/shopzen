@@ -5,7 +5,7 @@
 import React, {
   createContext, useContext, useState, useEffect, useLayoutEffect, useCallback,
 } from 'react';
-import API from '../utils/api';
+import API, { clearPublicCache } from '../utils/api';
 
 const ThemeContext = createContext();
 const LS_KEY = 'shopzen_theme_v2';
@@ -237,7 +237,7 @@ export const ThemeProvider = ({ children }) => {
       const updated = { ...(prev || {}), darkMode: val };
       applyTheme(updated);
       writeCache(updated);
-      API.put('/settings', updated).catch(() => {});
+      API.put('/settings', updated).then(() => clearPublicCache()).catch(() => {});
       return updated;
     });
     setDarkModeState(val);
@@ -255,6 +255,7 @@ export const ThemeProvider = ({ children }) => {
     });
     try {
       await API.put('/settings', updates);
+      clearPublicCache();
     } catch (err) {
       console.warn('[ThemeContext] saveTheme error:', err.message);
     }

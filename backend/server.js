@@ -82,6 +82,36 @@ app.use(cors({
   credentials: true,
 }));
 
+
+// ─── Public GET cache headers ────────────────────────────────────────────────
+// These routes are called by the storefront and change relatively slowly.
+// Browser caching + ETag validation reduces repeat Railway traffic and avoids
+// repeated 304 requests noted in Vercel CDN guidance.
+const publicGetCacheRules = [
+  [/^\/api\/settings\/?$/, 'public, max-age=300, stale-while-revalidate=1800'],
+  [/^\/api\/categories(\/|$)/, 'public, max-age=1800, stale-while-revalidate=3600'],
+  [/^\/api\/banners(\/|$)/, 'public, max-age=600, stale-while-revalidate=1800'],
+  [/^\/api\/products(\/|$)/, 'public, max-age=180, stale-while-revalidate=600'],
+  [/^\/api\/reviews\/(featured|google)(\/|$)/, 'public, max-age=600, stale-while-revalidate=1800'],
+  [/^\/api\/seasonal\/(active|page\/)/, 'public, max-age=300, stale-while-revalidate=1800'],
+  [/^\/api\/deals(\/|$)/, 'public, max-age=120, stale-while-revalidate=600'],
+  [/^\/api\/pages(\/|$)/, 'public, max-age=1800, stale-while-revalidate=3600'],
+  [/^\/api\/social-media\/public\/?$/, 'public, max-age=1800, stale-while-revalidate=3600'],
+  [/^\/api\/whatsapp\/config\/?$/, 'public, max-age=1800, stale-while-revalidate=3600'],
+  [/^\/api\/payments\/gateways\/?$/, 'public, max-age=600, stale-while-revalidate=1800'],
+  [/^\/api\/delivery\/?$/, 'public, max-age=600, stale-while-revalidate=1800'],
+];
+
+app.use((req, res, next) => {
+  if (req.method !== 'GET') return next();
+  if (req.headers.authorization) return next();
+  const matched = publicGetCacheRules.find(([re]) => re.test(req.path));
+  if (matched) {
+    res.setHeader('Cache-Control', matched[1]);
+  }
+  next();
+});
+
 // ─── Security middleware (helmet, rate-limit, sanitise, XSS) ─────────────────
 // SECURITY: Must be applied BEFORE express.json() so that request bodies are
 //           sanitised before any route handler can read them.
@@ -124,34 +154,6 @@ app.get('/api/health', (_req, res) => res.json({ status: 'ok', time: new Date() 
 //           credential-stuffing attacks independently of the global limiter.
 app.use('/api/auth/login', loginLimiter);
 app.use('/api/auth',          require('./routes/auth'));
-
-
-// ─── Public API cache headers ────────────────────────────────────────────────
-// These headers reduce repeated browser/Railway traffic for anonymous public GET
-// endpoints. Admin/auth/order/payment/upload routes are intentionally excluded.
-const PUBLIC_API_CACHE_RULES = [
-  [/^\/api\/settings\/?$/, 'public, max-age=300, stale-while-revalidate=3600'],
-  [/^\/api\/categories(?:\/|$)/, 'public, max-age=600, stale-while-revalidate=3600'],
-  [/^\/api\/banners(?:\/|$)/, 'public, max-age=300, stale-while-revalidate=1800'],
-  [/^\/api\/pages(?:\/|$)/, 'public, max-age=600, stale-while-revalidate=3600'],
-  [/^\/api\/products(?:\/|$)/, 'public, max-age=120, stale-while-revalidate=600'],
-  [/^\/api\/reviews(?:\/featured|\/google|\/product\/)/, 'public, max-age=300, stale-while-revalidate=1800'],
-  [/^\/api\/deals(?:\/|$)/, 'public, max-age=60, stale-while-revalidate=300'],
-  [/^\/api\/seasonal\/active\/?$/, 'public, max-age=300, stale-while-revalidate=1800'],
-  [/^\/api\/social-media\/public\/?$/, 'public, max-age=600, stale-while-revalidate=3600'],
-  [/^\/api\/whatsapp\/config\/?$/, 'public, max-age=600, stale-while-revalidate=3600'],
-  [/^\/api\/seo(?:\/|$)/, 'public, max-age=3600, stale-while-revalidate=86400'],
-];
-
-app.use((req, res, next) => {
-  if (req.method !== 'GET') return next();
-  if (req.headers.authorization) return next();
-  const rule = PUBLIC_API_CACHE_RULES.find(([pattern]) => pattern.test(req.path));
-  if (rule) {
-    res.setHeader('Cache-Control', rule[1]);
-  }
-  next();
-});
 
 // ─── Public routes ────────────────────────────────────────────────────────────
 app.use('/api/products',      require('./routes/products'));

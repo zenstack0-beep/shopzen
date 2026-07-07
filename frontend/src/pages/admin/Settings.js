@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import API from '../../utils/api';
+import API, { clearPublicCache } from '../../utils/api';
 import toast from 'react-hot-toast';
 import { THEMES, FONTS, applyTheme } from '../../context/ThemeContext';
 import { Link } from 'react-router-dom';
@@ -195,6 +195,7 @@ export default function AdminSettings() {
     setSaving(true);
     try {
       const res = await API.put('/settings', settings);
+      clearPublicCache();
       // Treat any non-success response as an error so the toast is accurate
       if (res.data && res.data.success === false) {
         throw new Error(res.data.message || 'Server returned success:false');
@@ -209,7 +210,6 @@ export default function AdminSettings() {
       } catch (lsErr) {
         console.warn('localStorage error (non-critical):', lsErr);
       }
-      window.dispatchEvent(new CustomEvent('shopzen:settings-updated'));
       toast.success('✅ Settings saved & applied!');
     } catch (err) {
       console.error('Save settings error:', err);
