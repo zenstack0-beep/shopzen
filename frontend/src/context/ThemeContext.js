@@ -5,7 +5,7 @@
 import React, {
   createContext, useContext, useState, useEffect, useLayoutEffect, useCallback,
 } from 'react';
-import API, { clearPublicCache } from '../utils/api';
+import API from '../utils/api';
 
 const ThemeContext = createContext();
 const LS_KEY = 'shopzen_theme_v2';
@@ -178,7 +178,7 @@ export const ThemeProvider = ({ children }) => {
     // Don't overwrite a theme that was just saved (5s grace period)
     if (Date.now() - lastSaveRef.current < 5000) return;
     try {
-      const { data } = await API.get('/settings');
+      const { data } = await API.get('/settings', { cacheTtl: 30 * 60 * 1000 });
       if (!data || typeof data !== 'object' || Array.isArray(data)) return;
       if (!('storeName' in data || 'theme' in data)) return;
       setSettings(data);
@@ -214,7 +214,6 @@ export const ThemeProvider = ({ children }) => {
       window.dispatchEvent(new CustomEvent('shopzen:seo-ready'));
     } catch (err) {
       // Silently ignore ECONNREFUSED / network errors (backend not yet started)
-      // The interval will retry automatically
       if (err?.code !== 'ERR_NETWORK' && err?.response) {
         console.warn('[ThemeContext] settings fetch error:', err.message);
       }
@@ -224,7 +223,10 @@ export const ThemeProvider = ({ children }) => {
   useEffect(() => {
     loadAndApply();
 
-    const refresh = () => loadAndApply();
+    const refresh = () => {
+      if (typeof API.clearPublicCache === 'function') API.clearPublicCache('/settings');
+      loadAndApply();
+    };
     window.addEventListener('shopzen:settings-updated', refresh);
 
     return () => {
@@ -237,7 +239,11 @@ export const ThemeProvider = ({ children }) => {
       const updated = { ...(prev || {}), darkMode: val };
       applyTheme(updated);
       writeCache(updated);
-      API.put('/settings', updated).then(() => clearPublicCache()).catch(() => {});
+      if (typeof API.clearPublicCache === 'function') API.clearPublicCache('/settings');
+      API.put('/settings', updated).then(() => {
+        if (typeof API.clearPublicCache === 'function') API.clearPublicCache('/settings');
+        window.dispatchEvent(new CustomEvent('shopzen:settings-updated'));
+      }).catch(() => {});
       return updated;
     });
     setDarkModeState(val);
@@ -254,8 +260,10 @@ export const ThemeProvider = ({ children }) => {
       return updated;
     });
     try {
+      if (typeof API.clearPublicCache === 'function') API.clearPublicCache('/settings');
       await API.put('/settings', updates);
-      clearPublicCache();
+      if (typeof API.clearPublicCache === 'function') API.clearPublicCache('/settings');
+      window.dispatchEvent(new CustomEvent('shopzen:settings-updated'));
     } catch (err) {
       console.warn('[ThemeContext] saveTheme error:', err.message);
     }

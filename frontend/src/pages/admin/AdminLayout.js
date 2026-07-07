@@ -179,13 +179,8 @@ export default function AdminLayout() {
   // persists across route changes and we can scroll it without touching the page.
   const navRef = useRef(null);
 
-  const fetchNotifications = useCallback(async () => {
-    try {
-      const { data } = await API.get('/notifications');
-      setNotifications(data.notifications);
-      setUnreadCount(data.unreadCount);
-    } catch {}
-  }, []);
+  // Notifications are intentionally not polled or fetched automatically.
+  // This removes the high-volume /api/notifications requests from Vercel/Railway.
 
   useEffect(() => {
     API.get('/admin/dashboard')
@@ -194,8 +189,11 @@ export default function AdminLayout() {
   }, []);
 
   useEffect(() => {
-    if (notifOpen) fetchNotifications();
-  }, [notifOpen, fetchNotifications]);
+    if (notifOpen) {
+      setNotifications([]);
+      setUnreadCount(0);
+    }
+  }, [notifOpen]);
 
   // Close mobile drawer on navigation
   useEffect(() => { setSidebarOpen(false); }, [location.pathname]);
@@ -227,14 +225,12 @@ export default function AdminLayout() {
   );
 
   const markAllRead = async () => {
-    await API.put('/notifications/read-all');
     setUnreadCount(0);
     setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
   };
 
   const handleNotifClick = async (notif) => {
     if (!notif.isRead) {
-      await API.put(`/notifications/${notif._id}/read`);
       setUnreadCount(prev => Math.max(0, prev - 1));
       setNotifications(prev => prev.map(n => n._id === notif._id ? { ...n, isRead: true } : n));
     }
@@ -361,7 +357,7 @@ export default function AdminLayout() {
                             <button onClick={markAllRead} className="text-xs text-blue-600 hover:underline">Mark all read</button>
                           )}
                           <button
-                            onClick={async () => { await API.delete('/notifications/clear-read'); fetchNotifications(); }}
+                            onClick={() => setNotifications(prev => prev.filter(n => !n.isRead))}
                             className="text-xs text-gray-400 hover:text-red-500"
                           >Clear read</button>
                         </div>
@@ -435,7 +431,7 @@ export default function AdminLayout() {
                         {notifFilter === 'all' ? notifications.length : notifications.filter(n=>n.type===notifFilter).length} notification(s)
                       </p>
                       <button
-                        onClick={async () => { await API.delete('/notifications/clear-all'); fetchNotifications(); setNotifOpen(false); }}
+                        onClick={() => { setNotifications([]); setUnreadCount(0); setNotifOpen(false); }}
                         className="text-xs text-red-400 hover:text-red-600 hover:underline"
                       >Clear all</button>
                     </div>

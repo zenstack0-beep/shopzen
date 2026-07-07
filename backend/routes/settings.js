@@ -5,6 +5,7 @@ const { adminAuth } = require('../middleware/auth');
 const { clearThemeCache } = require('../utils/mailer');
 const https = require('https');
 const http = require('http');
+const crypto = require('crypto');
 
 // ── Helper: proxy an image URL to the response ────────────────────────────────
 function proxyImage(imageUrl, res, fallbackContentType = 'image/png') {
@@ -107,16 +108,18 @@ router.get('/apple-touch-icon.png', async (req, res) => {
   } catch (err) { res.status(500).send(err.message); }
 });
 
-// ── In-memory settings cache (30s TTL) ───────────────────────────────────────
+// ── In-memory settings cache (10 min TTL) ───────────────────────────────────────
 // Prevents a DB hit on every frontend poll of GET /api/settings,
 // and returns the last-known value gracefully during brief Atlas blips.
 let _settingsCache = null;
 let _settingsCacheAt = 0;
-const SETTINGS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+let _settingsCacheEtag = null;
+const SETTINGS_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 
 function invalidateSettingsCache() {
   _settingsCache = null;
   _settingsCacheAt = 0;
+  _settingsCacheEtag = null;
 }
 
 // Keys that must NEVER be sent to the browser via this public endpoint.
@@ -126,25 +129,46 @@ const PUBLIC_RESPONSE_SECRET_KEYS = ['googlePlacesApiKey'];
 
 // Get all settings as a flat key→value object (public — needed for store name etc.)
 router.get('/', async (req, res) => {
-  res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=1800');
   try {
     const now = Date.now();
+
+    const sendSettings = (obj) => {
+      if (!_settingsCacheEtag) {
+        _settingsCacheEtag = `W/"${crypto.createHash('sha1').update(JSON.stringify(obj)).digest('hex')}"`;
+      }
+
+      res.setHeader('Cache-Control', 'public, max-age=600, stale-while-revalidate=3600');
+      res.setHeader('ETag', _settingsCacheEtag);
+      res.setHeader('Vary', 'Origin, Accept-Encoding');
+
+      if (req.headers['if-none-match'] === _settingsCacheEtag) {
+        return res.status(304).end();
+      }
+
+      return res.json(obj);
+    };
+
     if (_settingsCache && now - _settingsCacheAt < SETTINGS_CACHE_TTL) {
-      return res.json(_settingsCache);
+      return sendSettings(_settingsCache);
     }
-    const settings = await Settings.find();
+
+    const settings = await Settings.find().lean();
     const obj = {};
     settings.forEach(s => {
       if (PUBLIC_RESPONSE_SECRET_KEYS.includes(s.key)) return; // never expose secrets here
       obj[s.key] = s.value;
     });
+
     _settingsCache = obj;
     _settingsCacheAt = now;
-    res.json(obj);
+    _settingsCacheEtag = `W/"${crypto.createHash('sha1').update(JSON.stringify(obj)).digest('hex')}"`;
+    return sendSettings(obj);
   } catch (err) {
     // If DB is temporarily down but we have a cached value, serve it
     if (_settingsCache) {
       console.warn('[Settings] DB error, serving cached settings:', err.message);
+      res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=600');
+      if (_settingsCacheEtag) res.setHeader('ETag', _settingsCacheEtag);
       return res.json(_settingsCache);
     }
     res.status(500).json({ message: err.message });

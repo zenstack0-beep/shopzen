@@ -104,7 +104,10 @@ export default function AdminSEO() {
         await API.put('/settings', { meta_test_event_code: merged.capiTestEventCode }).catch(() => {});
       }
       const payload = { ...merged, seo_config };
+      if (typeof API.clearPublicCache === 'function') API.clearPublicCache('/settings');
       await API.put('/settings', payload);
+      if (typeof API.clearPublicCache === 'function') API.clearPublicCache('/settings');
+      window.dispatchEvent(new CustomEvent('shopzen:settings-updated'));
       // Immediately inject into window so analytics fires without page reload
       window.__SHOPZEN_SEO__ = seo_config;
       window.dispatchEvent(new CustomEvent('shopzen:seo-ready'));

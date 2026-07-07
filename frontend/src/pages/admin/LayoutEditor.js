@@ -212,7 +212,10 @@ export default function LayoutEditor() {
       PAGE_TABS.forEach(p => {
         toSave[p.id] = (layouts[p.id] || initLayout(p.id)).map(({ id, enabled, order }) => ({ id, enabled, order }));
       });
+      if (typeof API.clearPublicCache === 'function') API.clearPublicCache('/settings');
       await API.put('/settings', { layout_builder: toSave });
+      if (typeof API.clearPublicCache === 'function') API.clearPublicCache('/settings');
+      window.dispatchEvent(new CustomEvent('shopzen:settings-updated'));
       toast.success('✅ All layouts saved!');
     } catch { toast.error('Failed to save layouts'); }
     finally { setSaving(false); }

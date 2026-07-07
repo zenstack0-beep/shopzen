@@ -60,7 +60,9 @@ export const AnimationProvider = ({ children }) => {
   const save = useCallback(async (updates) => {
     const next = { ...config, ...updates };
     try {
+      if (typeof API.clearPublicCache === 'function') API.clearPublicCache('/settings');
       await API.put('/settings', { animationConfig: JSON.stringify(next) });
+      if (typeof API.clearPublicCache === 'function') API.clearPublicCache('/settings');
       window.dispatchEvent(new CustomEvent('shopzen:settings-updated'));
       if (typeof refreshTheme === 'function') refreshTheme();
     } catch {}

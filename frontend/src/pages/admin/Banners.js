@@ -463,7 +463,10 @@ const GoogleReviewsConfig = () => {
       // Only send the API key if the admin actually typed a new one —
       // this keeps it write-only and avoids overwriting a saved key with blank.
       if (apiKey.trim()) payload.googlePlacesApiKey = apiKey.trim();
+      if (typeof API.clearPublicCache === 'function') API.clearPublicCache('/settings');
       await API.put('/settings', payload);
+      if (typeof API.clearPublicCache === 'function') API.clearPublicCache('/settings');
+      window.dispatchEvent(new CustomEvent('shopzen:settings-updated'));
       toast.success('Google Reviews settings saved!');
       setApiKey('');
       setShowKeyField(false);

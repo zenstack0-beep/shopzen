@@ -1,184 +1,200 @@
 import axios from 'axios';
 
 /**
- * Central API client optimized for Vercel CDN/Edge Request reduction.
+ * Central API client.
  *
- * Rules:
- * 1. Production frontend calls Railway directly; never proxy /api/* through Vercel.
- * 2. Public GET requests do not send JWT/cookies. This avoids cache fragmentation,
- *    smaller request headers, and unnecessary protected-route failures.
- * 3. Frequently reused public GET requests are deduped and cached in-memory/sessionStorage.
+ * Production must call Railway directly. Do NOT use /api on shopzen.lk,
+ * because Vercel counts every proxied /api/* request as an Edge Request and
+ * can also increase Function Invocation usage.
+ *
+ * Required Vercel frontend env:
+ *   REACT_APP_API_URL=https://shopzen-production.up.railway.app/api
  */
 const DEFAULT_API_URL = 'https://shopzen-production.up.railway.app/api';
+export const API_BASE_URL = DEFAULT_API_URL;
+const PUBLIC_CACHE_PREFIX = 'shopzen_public_api_cache_v1:';
 
 const normalizeBaseURL = (url) => {
-  const raw = (url || DEFAULT_API_URL).trim().replace(/\/+$/, '');
-  return raw.endsWith('/api') ? raw : `${raw}/api`;
-};
+  const rawInput = (url || DEFAULT_API_URL).trim().replace(/\/+$/, '');
 
-const API_BASE_URL = normalizeBaseURL(process.env.REACT_APP_API_URL);
+  // Safety guard: if production env was accidentally set to shopzen.lk/api,
+  // force Railway direct API to avoid Vercel /api Edge Requests.
+  try {
+    const parsed = new URL(rawInput, window.location.origin);
+    const isShopzenFrontend = /(^|\.)shopzen\.lk$/i.test(parsed.hostname);
+    if (process.env.NODE_ENV === 'production' && isShopzenFrontend) {
+      return DEFAULT_API_URL;
+    }
+  } catch {}
+
+  return rawInput.endsWith('/api') ? rawInput : `${rawInput}/api`;
+};
 
 const API = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: normalizeBaseURL(process.env.REACT_APP_API_URL),
   timeout: 45000,
-  withCredentials: false,
+  withCredentials: true,
 });
 
-const PUBLIC_GET_RULES = [
-  { test: /^\/settings(?:$|[/?])/, ttl: 10 * 60 * 1000 },
-  { test: /^\/categories(?:$|[/?])/, ttl: 30 * 60 * 1000 },
-  { test: /^\/banners(?:$|[/?])/, ttl: 10 * 60 * 1000 },
-  { test: /^\/products(?:$|[/?])/, ttl: 3 * 60 * 1000 },
-  { test: /^\/reviews\/(featured|google)(?:$|[/?])/, ttl: 10 * 60 * 1000 },
-  { test: /^\/seasonal\/(active|page\/)/, ttl: 5 * 60 * 1000 },
-  { test: /^\/deals(?:$|[/?])/, ttl: 2 * 60 * 1000 },
-  { test: /^\/pages(?:$|[/?])/, ttl: 30 * 60 * 1000 },
-  { test: /^\/social-media\/public(?:$|[/?])/, ttl: 30 * 60 * 1000 },
-  { test: /^\/whatsapp\/config(?:$|[/?])/, ttl: 30 * 60 * 1000 },
-  { test: /^\/payments\/gateways(?:$|[/?])/, ttl: 10 * 60 * 1000 },
-  { test: /^\/delivery(?:$|[/?])/, ttl: 10 * 60 * 1000 },
-];
-
-const PROTECTED_PREFIXES = [
-  '/admin', '/auth', '/orders', '/returns', '/gift-cards', '/notifications',
-  '/upload', '/scrape', '/payments/admin', '/delivery/admin', '/backup',
-  '/automation', '/monitoring', '/ai', '/ai-post-creator', '/social-media',
-];
-
-const memoryCache = new Map();
-const pending = new Map();
-const SESSION_PREFIX = 'shopzen_api_cache:';
-
-const serializeParams = (params) => {
-  if (!params) return '';
-  const usp = new URLSearchParams();
-  Object.keys(params).sort().forEach((key) => {
-    const value = params[key];
-    if (value === undefined || value === null || value === '') return;
-    if (Array.isArray(value)) value.forEach(v => usp.append(key, v));
-    else usp.append(key, value);
-  });
-  const s = usp.toString();
-  return s ? `?${s}` : '';
-};
-
-const normalizePath = (url = '', params) => {
-  const raw = String(url || '');
-  if (/^https?:\/\//i.test(raw)) {
-    try {
-      const u = new URL(raw);
-      return `${u.pathname.replace(/^\/api/, '')}${u.search || serializeParams(params)}`;
-    } catch { return raw; }
+const getPath = (url = '') => {
+  try {
+    const parsed = new URL(url, API.defaults.baseURL);
+    return `${parsed.pathname.replace(/^\/api/, '')}${parsed.search || ''}` || '/';
+  } catch {
+    return String(url || '');
   }
-  return `${raw.startsWith('/') ? raw : `/${raw}`}${raw.includes('?') ? '' : serializeParams(params)}`;
 };
 
-const publicRuleFor = (method, url, params) => {
-  if ((method || 'get').toLowerCase() !== 'get') return null;
-  const path = normalizePath(url, params);
-  if (PROTECTED_PREFIXES.some(prefix => path === prefix || path.startsWith(`${prefix}/`))) return null;
-  return PUBLIC_GET_RULES.find(rule => rule.test.test(path)) || null;
+const isPublicGetPath = (url = '') => {
+  const path = getPath(url);
+  return (
+    path === '/settings' ||
+    path.startsWith('/products') ||
+    path.startsWith('/categories') ||
+    path.startsWith('/banners') ||
+    path.startsWith('/deals') ||
+    path.startsWith('/seasonal/active') ||
+    path.startsWith('/seasonal/page/') ||
+    path.startsWith('/social-media/public') ||
+    path.startsWith('/pages') ||
+    path.startsWith('/whatsapp/config') ||
+    path.startsWith('/reviews/product/') ||
+    path.startsWith('/reviews/featured') ||
+    path.startsWith('/reviews/google') ||
+    path.startsWith('/payments/gateways') ||
+    path === '/delivery' ||
+    path.startsWith('/gift-cards/balance/')
+  );
 };
 
-const cacheKeyFor = (config) => `${(config.method || 'get').toUpperCase()} ${normalizePath(config.url, config.params)}`;
+const ttlForPath = (url = '') => {
+  const path = getPath(url);
+  if (path === '/settings') return 30 * 60 * 1000;
+  if (path.startsWith('/notifications')) return 60 * 1000;
+  if (path.startsWith('/products') || path.startsWith('/categories')) return 5 * 60 * 1000;
+  if (path.startsWith('/banners') || path.startsWith('/deals') || path.startsWith('/seasonal')) return 5 * 60 * 1000;
+  if (path.startsWith('/whatsapp/config') || path.startsWith('/social-media/public') || path.startsWith('/pages')) return 15 * 60 * 1000;
+  if (path.startsWith('/reviews/')) return 10 * 60 * 1000;
+  return 2 * 60 * 1000;
+};
 
-const readSession = (key) => {
+const pendingPublicGets = new Map();
+const memoryPublicCache = new Map();
+
+const cacheKeyFor = (url, config = {}) => {
+  const params = config.params ? `::${JSON.stringify(config.params)}` : '';
+  return `${getPath(url)}${params}`;
+};
+
+const readStoredCache = (key) => {
   try {
-    const raw = sessionStorage.getItem(SESSION_PREFIX + key);
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
+    const raw = localStorage.getItem(PUBLIC_CACHE_PREFIX + key);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 };
 
-const writeSession = (key, entry) => {
-  try { sessionStorage.setItem(SESSION_PREFIX + key, JSON.stringify(entry)); } catch {}
-};
-
-const clearPublicCache = () => {
-  memoryCache.clear();
-  pending.clear();
+const writeStoredCache = (key, entry) => {
   try {
-    Object.keys(sessionStorage)
-      .filter(k => k.startsWith(SESSION_PREFIX))
-      .forEach(k => sessionStorage.removeItem(k));
+    localStorage.setItem(PUBLIC_CACHE_PREFIX + key, JSON.stringify(entry));
   } catch {}
 };
 
-export { API_BASE_URL, clearPublicCache };
+const makeCachedResponse = (entry) => ({
+  data: entry.data,
+  status: 200,
+  statusText: 'OK (client cache)',
+  headers: entry.headers || {},
+  config: entry.config || {},
+  request: null,
+  fromClientCache: true,
+});
+
+const rawGet = API.get.bind(API);
+
+API.get = (url, config = {}) => {
+  const shouldCache =
+    config.cache !== false &&
+    isPublicGetPath(url) &&
+    !(config.headers && config.headers.Authorization);
+
+  if (!shouldCache) return rawGet(url, config);
+
+  const key = cacheKeyFor(url, config);
+  const ttl = Number.isFinite(config.cacheTtl) ? config.cacheTtl : ttlForPath(url);
+  const now = Date.now();
+  const mem = memoryPublicCache.get(key);
+
+  if (mem && now - mem.cachedAt < ttl) {
+    return Promise.resolve(makeCachedResponse(mem));
+  }
+
+  const stored = readStoredCache(key);
+  if (stored && now - stored.cachedAt < ttl) {
+    memoryPublicCache.set(key, stored);
+    return Promise.resolve(makeCachedResponse(stored));
+  }
+
+  if (pendingPublicGets.has(key)) return pendingPublicGets.get(key);
+
+  const request = rawGet(url, config)
+    .then((res) => {
+      const entry = {
+        data: res.data,
+        headers: res.headers,
+        config: res.config,
+        cachedAt: Date.now(),
+      };
+      memoryPublicCache.set(key, entry);
+      writeStoredCache(key, entry);
+      return res;
+    })
+    .finally(() => pendingPublicGets.delete(key));
+
+  pendingPublicGets.set(key, request);
+  return request;
+};
+
+API.clearPublicCache = (pathPrefix = '') => {
+  const prefix = pathPrefix ? getPath(pathPrefix).replace(/\?.*$/, '') : '';
+  [...memoryPublicCache.keys()].forEach((key) => {
+    if (!prefix || key.startsWith(prefix)) memoryPublicCache.delete(key);
+  });
+  try {
+    Object.keys(localStorage).forEach((key) => {
+      if (!key.startsWith(PUBLIC_CACHE_PREFIX)) return;
+      if (!prefix || key.slice(PUBLIC_CACHE_PREFIX.length).startsWith(prefix)) {
+        localStorage.removeItem(key);
+      }
+    });
+  } catch {}
+};
 
 API.interceptors.request.use(config => {
   const method = (config.method || 'get').toLowerCase();
-  const isPublicGet = !!publicRuleFor(method, config.url, config.params);
 
-  config.headers = config.headers || {};
-
-  if (isPublicGet) {
-    delete config.headers.Authorization;
-    config.withCredentials = false;
-  } else {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
+  // Public GET endpoints should not carry JWT. This improves CDN/browser cache
+  // behaviour and avoids user-specific variants for shared storefront data.
+  if (method === 'get' && isPublicGetPath(config.url || '')) {
+    if (config.headers) delete config.headers.Authorization;
+    return config;
   }
 
+  const token = localStorage.getItem('token');
+  if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
-});
-
-const originalRequest = API.request.bind(API);
-
-API.request = function optimizedRequest(configOrUrl, config = {}) {
-  const cfg = typeof configOrUrl === 'string'
-    ? { ...config, url: configOrUrl }
-    : { ...(configOrUrl || {}) };
-
-  cfg.method = (cfg.method || 'get').toLowerCase();
-  const rule = publicRuleFor(cfg.method, cfg.url, cfg.params);
-  if (!rule || cfg.skipClientCache) return originalRequest(cfg);
-
-  const key = cacheKeyFor(cfg);
-  const now = Date.now();
-  const mem = memoryCache.get(key);
-  if (mem && mem.expiresAt > now) return Promise.resolve({ ...mem.response, fromClientCache: true });
-
-  const stored = readSession(key);
-  if (stored && stored.expiresAt > now) {
-    memoryCache.set(key, stored);
-    return Promise.resolve({ ...stored.response, fromClientCache: true });
-  }
-
-  if (pending.has(key)) return pending.get(key);
-
-  const promise = originalRequest(cfg).then((response) => {
-    const slim = {
-      data: response.data,
-      status: response.status,
-      statusText: response.statusText,
-      headers: response.headers,
-      config: response.config,
-    };
-    const entry = { response: slim, expiresAt: Date.now() + rule.ttl };
-    memoryCache.set(key, entry);
-    writeSession(key, entry);
-    return response;
-  }).finally(() => pending.delete(key));
-
-  pending.set(key, promise);
-  return promise;
-};
-
-['get', 'delete', 'head', 'options'].forEach(method => {
-  API[method] = (url, config = {}) => API.request({ ...config, method, url });
-});
-
-['post', 'put', 'patch'].forEach(method => {
-  API[method] = (url, data, config = {}) => API.request({ ...config, method, url, data });
 });
 
 API.interceptors.response.use(
   res => res,
   err => {
     if (err.response?.status === 401) {
-      const path = normalizePath(err.config?.url, err.config?.params);
-      const isProtected = PROTECTED_PREFIXES.some(prefix => path === prefix || path.startsWith(`${prefix}/`));
-      if (isProtected) {
+      const path = getPath(err.config?.url || '');
+      const isAuthPage = window.location.pathname === '/login' || window.location.pathname === '/register';
+      const isPublicGet = (err.config?.method || 'get').toLowerCase() === 'get' && isPublicGetPath(path);
+      if (!isPublicGet && !isAuthPage) {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
         window.location.href = '/login';
