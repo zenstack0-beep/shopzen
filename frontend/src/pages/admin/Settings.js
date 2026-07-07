@@ -209,6 +209,7 @@ export default function AdminSettings() {
       } catch (lsErr) {
         console.warn('localStorage error (non-critical):', lsErr);
       }
+      window.dispatchEvent(new CustomEvent('shopzen:settings-updated'));
       toast.success('✅ Settings saved & applied!');
     } catch (err) {
       console.error('Save settings error:', err);

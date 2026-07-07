@@ -112,7 +112,7 @@ router.get('/apple-touch-icon.png', async (req, res) => {
 // and returns the last-known value gracefully during brief Atlas blips.
 let _settingsCache = null;
 let _settingsCacheAt = 0;
-const SETTINGS_CACHE_TTL = 30 * 1000; // 30 seconds
+const SETTINGS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 function invalidateSettingsCache() {
   _settingsCache = null;
@@ -127,6 +127,7 @@ const PUBLIC_RESPONSE_SECRET_KEYS = ['googlePlacesApiKey'];
 // Get all settings as a flat key→value object (public — needed for store name etc.)
 router.get('/', async (req, res) => {
   try {
+    res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=3600');
     const now = Date.now();
     if (_settingsCache && now - _settingsCacheAt < SETTINGS_CACHE_TTL) {
       return res.json(_settingsCache);
