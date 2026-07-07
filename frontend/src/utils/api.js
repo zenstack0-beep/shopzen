@@ -3,54 +3,90 @@ import axios from 'axios';
 /**
  * Central API client.
  *
- * Production must call Railway directly. Do NOT use /api on shopzen.lk,
- * because Vercel counts every proxied /api/* request as an Edge Request and
- * can also increase Function Invocation usage.
- *
- * Required Vercel frontend env:
- *   REACT_APP_API_URL=https://shopzen-production.up.railway.app/api
+ * Important for Vercel usage:
+ * - Production storefront/admin API calls must go directly to Railway.
+ * - Do not use https://shopzen.lk/api because that goes through Vercel CDN/rewrite
+ *   and increases Edge Requests / Function Invocations.
  */
 const DEFAULT_API_URL = 'https://shopzen-production.up.railway.app/api';
-export const API_BASE_URL = DEFAULT_API_URL;
-const PUBLIC_CACHE_PREFIX = 'shopzen_public_api_cache_v1:';
+const PUBLIC_CACHE_PREFIX = 'shopzen_public_api_cache_v2:';
+
+const hasWindow = typeof window !== 'undefined';
+const hasLocalStorage = () => hasWindow && typeof window.localStorage !== 'undefined';
 
 const normalizeBaseURL = (url) => {
   const rawInput = (url || DEFAULT_API_URL).trim().replace(/\/+$/, '');
 
-  // Safety guard: if production env was accidentally set to shopzen.lk/api,
-  // force Railway direct API to avoid Vercel /api Edge Requests.
   try {
-    const parsed = new URL(rawInput, window.location.origin);
+    const parsed = new URL(rawInput, hasWindow ? window.location.origin : DEFAULT_API_URL);
     const isShopzenFrontend = /(^|\.)shopzen\.lk$/i.test(parsed.hostname);
+
+    // Safety guard: never let production API calls go through Vercel domain.
     if (process.env.NODE_ENV === 'production' && isShopzenFrontend) {
       return DEFAULT_API_URL;
     }
-  } catch {}
+  } catch {
+    // Keep fallback below.
+  }
 
   return rawInput.endsWith('/api') ? rawInput : `${rawInput}/api`;
 };
 
+export const API_BASE_URL = normalizeBaseURL(process.env.REACT_APP_API_URL);
+
 const API = axios.create({
-  baseURL: normalizeBaseURL(process.env.REACT_APP_API_URL),
+  baseURL: API_BASE_URL,
   timeout: 45000,
   withCredentials: true,
 });
 
 const getPath = (url = '') => {
   try {
-    const parsed = new URL(url, API.defaults.baseURL);
+    const parsed = new URL(url, API_BASE_URL);
     return `${parsed.pathname.replace(/^\/api/, '')}${parsed.search || ''}` || '/';
   } catch {
     return String(url || '');
   }
 };
 
+const isAdminOrPrivatePath = (path = '') => {
+  return (
+    path.includes('/admin') ||
+    path.startsWith('/auth') ||
+    path.startsWith('/orders') ||
+    path.startsWith('/returns') ||
+    path.startsWith('/backup') ||
+    path.startsWith('/monitoring') ||
+    path.startsWith('/automation') ||
+    path.startsWith('/subscribers') ||
+    path.startsWith('/upload') ||
+    path.startsWith('/notifications') ||
+    path.startsWith('/ai-post-creator') ||
+    path.startsWith('/social-media') ||
+    path.startsWith('/gift-cards/admin') ||
+    path.startsWith('/gift-cards/my') ||
+    path.startsWith('/reviews/reviewable') ||
+    path.startsWith('/reviews/admin') ||
+    path.startsWith('/coupons')
+  );
+};
+
 const isPublicGetPath = (url = '') => {
   const path = getPath(url);
+
+  // Critical: never treat admin/private endpoints as public.
+  // This fixes admin "No products found" / "Failed to load categories" caused by JWT removal.
+  if (isAdminOrPrivatePath(path)) return false;
+
   return (
     path === '/settings' ||
-    path.startsWith('/products') ||
-    path.startsWith('/categories') ||
+    path === '/categories' ||
+    path === '/categories/all' ||
+    path.startsWith('/categories/siblings/') ||
+    path.startsWith('/categories/sub/') ||
+    path === '/products' ||
+    path.startsWith('/products?') ||
+    path.startsWith('/products/') ||
     path.startsWith('/banners') ||
     path.startsWith('/deals') ||
     path.startsWith('/seasonal/active') ||
@@ -70,7 +106,6 @@ const isPublicGetPath = (url = '') => {
 const ttlForPath = (url = '') => {
   const path = getPath(url);
   if (path === '/settings') return 30 * 60 * 1000;
-  if (path.startsWith('/notifications')) return 60 * 1000;
   if (path.startsWith('/products') || path.startsWith('/categories')) return 5 * 60 * 1000;
   if (path.startsWith('/banners') || path.startsWith('/deals') || path.startsWith('/seasonal')) return 5 * 60 * 1000;
   if (path.startsWith('/whatsapp/config') || path.startsWith('/social-media/public') || path.startsWith('/pages')) return 15 * 60 * 1000;
@@ -87,8 +122,9 @@ const cacheKeyFor = (url, config = {}) => {
 };
 
 const readStoredCache = (key) => {
+  if (!hasLocalStorage()) return null;
   try {
-    const raw = localStorage.getItem(PUBLIC_CACHE_PREFIX + key);
+    const raw = window.localStorage.getItem(PUBLIC_CACHE_PREFIX + key);
     if (!raw) return null;
     return JSON.parse(raw);
   } catch {
@@ -97,17 +133,20 @@ const readStoredCache = (key) => {
 };
 
 const writeStoredCache = (key, entry) => {
+  if (!hasLocalStorage()) return;
   try {
-    localStorage.setItem(PUBLIC_CACHE_PREFIX + key, JSON.stringify(entry));
-  } catch {}
+    window.localStorage.setItem(PUBLIC_CACHE_PREFIX + key, JSON.stringify(entry));
+  } catch {
+    // Ignore quota/private-mode errors.
+  }
 };
 
-const makeCachedResponse = (entry) => ({
+const makeCachedResponse = (entry, config = {}) => ({
   data: entry.data,
   status: 200,
   statusText: 'OK (client cache)',
   headers: entry.headers || {},
-  config: entry.config || {},
+  config,
   request: null,
   fromClientCache: true,
 });
@@ -115,26 +154,27 @@ const makeCachedResponse = (entry) => ({
 const rawGet = API.get.bind(API);
 
 API.get = (url, config = {}) => {
+  const path = getPath(url);
   const shouldCache =
     config.cache !== false &&
-    isPublicGetPath(url) &&
-    !(config.headers && config.headers.Authorization);
+    isPublicGetPath(path) &&
+    !(config.headers && (config.headers.Authorization || config.headers.authorization));
 
   if (!shouldCache) return rawGet(url, config);
 
   const key = cacheKeyFor(url, config);
-  const ttl = Number.isFinite(config.cacheTtl) ? config.cacheTtl : ttlForPath(url);
+  const ttl = Number.isFinite(config.cacheTtl) ? config.cacheTtl : ttlForPath(path);
   const now = Date.now();
   const mem = memoryPublicCache.get(key);
 
   if (mem && now - mem.cachedAt < ttl) {
-    return Promise.resolve(makeCachedResponse(mem));
+    return Promise.resolve(makeCachedResponse(mem, config));
   }
 
   const stored = readStoredCache(key);
   if (stored && now - stored.cachedAt < ttl) {
     memoryPublicCache.set(key, stored);
-    return Promise.resolve(makeCachedResponse(stored));
+    return Promise.resolve(makeCachedResponse(stored, config));
   }
 
   if (pendingPublicGets.has(key)) return pendingPublicGets.get(key);
@@ -144,7 +184,6 @@ API.get = (url, config = {}) => {
       const entry = {
         data: res.data,
         headers: res.headers,
-        config: res.config,
         cachedAt: Date.now(),
       };
       memoryPublicCache.set(key, entry);
@@ -159,44 +198,62 @@ API.get = (url, config = {}) => {
 
 API.clearPublicCache = (pathPrefix = '') => {
   const prefix = pathPrefix ? getPath(pathPrefix).replace(/\?.*$/, '') : '';
+
   [...memoryPublicCache.keys()].forEach((key) => {
     if (!prefix || key.startsWith(prefix)) memoryPublicCache.delete(key);
   });
+
+  if (!hasLocalStorage()) return;
+
   try {
-    Object.keys(localStorage).forEach((key) => {
+    Object.keys(window.localStorage).forEach((key) => {
       if (!key.startsWith(PUBLIC_CACHE_PREFIX)) return;
-      if (!prefix || key.slice(PUBLIC_CACHE_PREFIX.length).startsWith(prefix)) {
-        localStorage.removeItem(key);
+      const publicKey = key.slice(PUBLIC_CACHE_PREFIX.length);
+      if (!prefix || publicKey.startsWith(prefix)) {
+        window.localStorage.removeItem(key);
       }
     });
-  } catch {}
+  } catch {
+    // Ignore.
+  }
 };
 
-API.interceptors.request.use(config => {
+API.interceptors.request.use((config) => {
   const method = (config.method || 'get').toLowerCase();
+  const path = getPath(config.url || '');
+  config.headers = config.headers || {};
 
-  // Public GET endpoints should not carry JWT. This improves CDN/browser cache
-  // behaviour and avoids user-specific variants for shared storefront data.
-  if (method === 'get' && isPublicGetPath(config.url || '')) {
-    if (config.headers) delete config.headers.Authorization;
+  const token = hasLocalStorage() ? window.localStorage.getItem('token') : null;
+  const isPublicGet = method === 'get' && isPublicGetPath(path);
+
+  if (isPublicGet) {
+    // Public GET endpoints should not carry JWT. This improves cache behavior
+    // and avoids user-specific variants for storefront data.
+    delete config.headers.Authorization;
+    delete config.headers.authorization;
     return config;
   }
 
-  const token = localStorage.getItem('token');
-  if (token) config.headers.Authorization = `Bearer ${token}`;
+  // Admin/customer/private endpoints must always receive JWT.
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+
   return config;
 });
 
 API.interceptors.response.use(
-  res => res,
-  err => {
+  (res) => res,
+  (err) => {
     if (err.response?.status === 401) {
       const path = getPath(err.config?.url || '');
-      const isAuthPage = window.location.pathname === '/login' || window.location.pathname === '/register';
-      const isPublicGet = (err.config?.method || 'get').toLowerCase() === 'get' && isPublicGetPath(path);
-      if (!isPublicGet && !isAuthPage) {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
+      const method = (err.config?.method || 'get').toLowerCase();
+      const isPublicGet = method === 'get' && isPublicGetPath(path);
+      const isAuthPage = hasWindow && (window.location.pathname === '/login' || window.location.pathname === '/register');
+
+      if (!isPublicGet && !isAuthPage && hasLocalStorage()) {
+        window.localStorage.removeItem('token');
+        window.localStorage.removeItem('user');
         window.location.href = '/login';
       }
     }
