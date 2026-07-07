@@ -74,105 +74,105 @@
     {
       "source": "/(.*)\\.(png|jpg|jpeg|gif|webp|svg|ico)",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=86400" }
+        { "key": "Cache-Control", "value": "public, max-age=604800, immutable" }
       ]
     },
     {
       "source": "/favicon.ico",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=3600" },
+        { "key": "Cache-Control", "value": "public, max-age=86400" },
         { "key": "Content-Type", "value": "image/x-icon" }
       ]
     },
     {
       "source": "/favicon.png",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=3600" },
+        { "key": "Cache-Control", "value": "public, max-age=86400" },
         { "key": "Content-Type", "value": "image/png" }
       ]
     },
     {
       "source": "/favicon-32x32.png",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=3600" },
+        { "key": "Cache-Control", "value": "public, max-age=86400" },
         { "key": "Content-Type", "value": "image/png" }
       ]
     },
     {
       "source": "/favicon-96x96.png",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=3600" },
+        { "key": "Cache-Control", "value": "public, max-age=86400" },
         { "key": "Content-Type", "value": "image/png" }
       ]
     },
     {
       "source": "/apple-touch-icon.png",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=3600" },
+        { "key": "Cache-Control", "value": "public, max-age=86400" },
         { "key": "Content-Type", "value": "image/png" }
       ]
     },
     {
       "source": "/",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=300, stale-while-revalidate=600" },
-        { "key": "Vercel-CDN-Cache-Control", "value": "public, s-maxage=600, stale-while-revalidate=3600" }
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+        { "key": "Vercel-CDN-Cache-Control", "value": "public, s-maxage=300, stale-while-revalidate=1800" }
       ]
     },
     {
       "source": "/product/(.*)",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=300, stale-while-revalidate=600" },
-        { "key": "Vercel-CDN-Cache-Control", "value": "public, s-maxage=600, stale-while-revalidate=3600" }
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+        { "key": "Vercel-CDN-Cache-Control", "value": "public, s-maxage=300, stale-while-revalidate=1800" }
       ]
     },
     {
       "source": "/category/(.*)",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=300, stale-while-revalidate=600" },
-        { "key": "Vercel-CDN-Cache-Control", "value": "public, s-maxage=600, stale-while-revalidate=3600" }
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+        { "key": "Vercel-CDN-Cache-Control", "value": "public, s-maxage=300, stale-while-revalidate=1800" }
       ]
     },
     {
       "source": "/brand/(.*)",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=300, stale-while-revalidate=600" },
-        { "key": "Vercel-CDN-Cache-Control", "value": "public, s-maxage=600, stale-while-revalidate=3600" }
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+        { "key": "Vercel-CDN-Cache-Control", "value": "public, s-maxage=300, stale-while-revalidate=1800" }
       ]
     },
     {
       "source": "/shop",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=300, stale-while-revalidate=600" },
-        { "key": "Vercel-CDN-Cache-Control", "value": "public, s-maxage=600, stale-while-revalidate=3600" }
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+        { "key": "Vercel-CDN-Cache-Control", "value": "public, s-maxage=300, stale-while-revalidate=1800" }
       ]
     },
     {
       "source": "/shop/(.*)",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=300, stale-while-revalidate=600" },
-        { "key": "Vercel-CDN-Cache-Control", "value": "public, s-maxage=600, stale-while-revalidate=3600" }
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+        { "key": "Vercel-CDN-Cache-Control", "value": "public, s-maxage=300, stale-while-revalidate=1800" }
       ]
     },
     {
       "source": "/page/(.*)",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=300, stale-while-revalidate=600" },
-        { "key": "Vercel-CDN-Cache-Control", "value": "public, s-maxage=600, stale-while-revalidate=3600" }
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+        { "key": "Vercel-CDN-Cache-Control", "value": "public, s-maxage=300, stale-while-revalidate=1800" }
       ]
     },
     {
       "source": "/campaign/(.*)",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=300, stale-while-revalidate=600" },
-        { "key": "Vercel-CDN-Cache-Control", "value": "public, s-maxage=600, stale-while-revalidate=3600" }
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+        { "key": "Vercel-CDN-Cache-Control", "value": "public, s-maxage=300, stale-while-revalidate=1800" }
       ]
     },
     {
       "source": "/index.html",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=300, stale-while-revalidate=600" },
-        { "key": "Vercel-CDN-Cache-Control", "value": "public, s-maxage=600, stale-while-revalidate=3600" }
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+        { "key": "Vercel-CDN-Cache-Control", "value": "public, s-maxage=300, stale-while-revalidate=1800" }
       ]
     }
   ]

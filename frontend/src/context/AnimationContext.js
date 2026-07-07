@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useMemo, useCallback } from 'react';
 import API from '../utils/api';
+import { useTheme } from './ThemeContext';
 
 const AnimationContext = createContext({});
 
@@ -45,43 +46,28 @@ export const ANIMATION_DEFAULTS = {
 };
 
 export const AnimationProvider = ({ children }) => {
-  const [config, setConfig] = useState(ANIMATION_DEFAULTS);
-  const [loaded, setLoaded] = useState(false);
+  const { settings, refreshTheme } = useTheme();
 
-  const load = useCallback(async () => {
+  const config = useMemo(() => {
+    if (!settings?.animationConfig) return ANIMATION_DEFAULTS;
     try {
-      const cached = localStorage.getItem('shopzen_theme_v2');
-      if (cached) {
-        const data = JSON.parse(cached);
-        if (data?.animationConfig) {
-          setConfig({ ...ANIMATION_DEFAULTS, ...JSON.parse(data.animationConfig) });
-          setLoaded(true);
-          return;
-        }
-      }
-    } catch {}
-
-    // Fallback only when cache has no animation config. This prevents an
-    // extra /settings request on most page loads.
-    try {
-      const { data } = await API.get('/settings');
-      if (data?.animationConfig) {
-        setConfig({ ...ANIMATION_DEFAULTS, ...JSON.parse(data.animationConfig) });
-      }
-    } catch {}
-    setLoaded(true);
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
+      return { ...ANIMATION_DEFAULTS, ...JSON.parse(settings.animationConfig) };
+    } catch {
+      return ANIMATION_DEFAULTS;
+    }
+  }, [settings?.animationConfig]);
 
   const save = useCallback(async (updates) => {
     const next = { ...config, ...updates };
-    setConfig(next);
-    try { await API.put('/settings', { animationConfig: JSON.stringify(next) }); } catch {}
-  }, [config]);
+    try {
+      await API.put('/settings', { animationConfig: JSON.stringify(next) });
+      window.dispatchEvent(new CustomEvent('shopzen:settings-updated'));
+      if (typeof refreshTheme === 'function') refreshTheme();
+    } catch {}
+  }, [config, refreshTheme]);
 
   return (
-    <AnimationContext.Provider value={{ config, save, loaded }}>
+    <AnimationContext.Provider value={{ config, save, loaded: true }}>
       {children}
     </AnimationContext.Provider>
   );

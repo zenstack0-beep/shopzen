@@ -1,18 +1,20 @@
 import axios from 'axios';
 
 /**
- * Edge-request-safe API client.
+ * Central API client.
  *
- * Production MUST call Railway directly, not /api through Vercel.
- * Required Vercel env:
+ * Production must call Railway directly. Do NOT use /api on shopzen.lk,
+ * because Vercel counts every proxied /api/* request as an Edge Request and
+ * can also increase Function Invocation usage.
+ *
+ * Required Vercel frontend env:
  *   REACT_APP_API_URL=https://shopzen-production.up.railway.app/api
- *
- * Local fallback remains /api so CRA proxy/local dev can still work.
  */
-const normalizeBaseURL = (value) => {
-  const raw = (value || '').trim();
-  if (!raw) return '/api';
-  return raw.replace(/\/+$/, '');
+const DEFAULT_API_URL = 'https://shopzen-production.up.railway.app/api';
+
+const normalizeBaseURL = (url) => {
+  const raw = (url || DEFAULT_API_URL).trim().replace(/\/+$/, '');
+  return raw.endsWith('/api') ? raw : `${raw}/api`;
 };
 
 const API = axios.create({

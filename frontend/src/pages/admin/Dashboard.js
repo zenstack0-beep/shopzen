@@ -137,7 +137,6 @@ export default function Dashboard() {
   // CHANGE 1: stats now also includes: totalReturns, pendingReturns, totalRefundedAmount
   // Revenue figures from the API already exclude refunded orders (handled server-side)
   const { stats, revenueChart = [], topProducts = [], ordersByStatus = [], recentOrders = [] } = data;
-  const operationalStats = { slaBreached: 0, stuckOrders: 0, pendingPayment: 0, urgent: 0 };
 
   /* ── Derived financial metrics ────────────────────────────────────────── */
   const revTrend      = pct(stats.monthRevenue, stats.lastMonthRevenue);
@@ -777,88 +776,42 @@ export default function Dashboard() {
       {/* ═══════════ OPERATIONS ═══════════ */}
       {activeSection === 'operations' && (
         <>
-          <div className="bg-white rounded-2xl border border-gray-100 p-5">
-            <SH title="📦 Order Operations" />
-            <p className="text-sm text-gray-500">Unused reminder widgets were removed because this workflow is no longer used.</p>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <KPI label="Pending Orders" value={stats.pendingOrders} sub="Awaiting confirmation" icon="⏳" color="bg-orange-50" to="/admin/orders?status=pending" />
+            <KPI label="Today Orders" value={stats.todayOrders} sub="Placed today" icon="📦" color="bg-blue-50" to="/admin/orders" />
+            <KPI label="Low Stock Items" value={stats.lowStockProducts} sub="Needs restocking" icon="⚠️" color="bg-red-50" to="/admin/products?filter=low-stock" />
+            <KPI label="Total Orders" value={stats.totalOrders} sub="All order history" icon="🧾" color="bg-green-50" to="/admin/orders" />
           </div>
 
-          {/* SLA targets */}
           <div className="bg-white rounded-2xl border border-gray-100 p-5">
-            <SH title="⏱ SLA Targets by Order Status" />
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-              {[
-                { status: 'Pending',          sla: '2 hours',  icon: '🕑', color: 'bg-yellow-50 border-yellow-100 text-yellow-700' },
-                { status: 'Confirmed',        sla: '4 hours',  icon: '✅', color: 'bg-blue-50 border-blue-100 text-blue-700' },
-                { status: 'Processing',       sla: '24 hours', icon: '⚙️', color: 'bg-purple-50 border-purple-100 text-purple-700' },
-                { status: 'Shipped',          sla: '72 hours', icon: '🚚', color: 'bg-green-50 border-green-100 text-green-700' },
-                { status: 'Out for Delivery', sla: '24 hours', icon: '📦', color: 'bg-orange-50 border-orange-100 text-orange-700' },
-              ].map(s => (
-                <div key={s.status} className={`rounded-xl border p-3 text-center ${s.color}`}>
-                  <p className="text-2xl mb-1">{s.icon}</p>
-                  <p className="text-xs font-bold">{s.status}</p>
-                  <p className="text-xs opacity-70 mt-0.5">Move within</p>
-                  <p className="text-sm font-bold mt-0.5">{s.sla}</p>
-                </div>
+            <SH title="Order Status Summary" />
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              {ordersByStatus.map(s => (
+                <button key={s._id || s.status} onClick={() => navigate(`/admin/orders?status=${s._id || s.status}`)}
+                  className="rounded-xl border border-gray-100 p-4 text-left hover:shadow-md transition-all bg-gray-50">
+                  <p className="text-xs font-semibold text-gray-500 capitalize">{String(s._id || s.status || 'unknown').replace(/_/g, ' ')}</p>
+                  <p className="text-2xl font-bold text-gray-900 mt-1">{s.count || 0}</p>
+                  <p className="text-xs mt-2" style={{ color: 'var(--color-primary)' }}>View orders →</p>
+                </button>
               ))}
             </div>
           </div>
 
-          {/* Checklist + pipeline health */}
-          <div className="grid lg:grid-cols-2 gap-6">
-            <div className="bg-white rounded-2xl border border-gray-100 p-5">
-              <SH title="✅ Daily Operations Checklist" />
-              <div className="space-y-2">
-                {[
-                  { task: 'Review & confirm all new pending orders',           urgent: false },
-                  { task: 'Verify bank transfer payment slips',                urgent: false },
-                  { task: 'Update tracking numbers for shipped orders',        urgent: false },
-                  { task: 'Clear SLA-breached orders immediately',             urgent: false },
-                  { task: 'Check orders stuck in same status > 12 hours',     urgent: false },
-                  { task: 'Review urgent priority orders first',               urgent: false },
-                  { task: 'Add internal notes for any customer communication', urgent: false },
-                ].map((item, i) => (
-                  <div key={i} className={`flex items-start gap-3 p-3 rounded-xl ${item.urgent ? 'bg-red-50 border border-red-100' : 'bg-gray-50'}`}>
-                    <div className={`w-5 h-5 rounded-full border-2 flex-shrink-0 mt-0.5 ${item.urgent ? 'border-red-400' : 'border-gray-300'}`} />
-                    <p className={`text-sm ${item.urgent ? 'text-red-700 font-medium' : 'text-gray-600'}`}>{item.task}</p>
-                    {item.urgent && <span className="text-xs text-red-500 font-bold flex-shrink-0 ml-auto">!</span>}
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="bg-white rounded-2xl border border-gray-100 p-5">
-              <SH title="📊 Order Pipeline Health" />
-              <div className="space-y-3">
-                {[
-                  { label: 'SLA Breached',          value: operationalStats.slaBreached    ?? 0, max: 10, color: '#ef4444', warn: 1 },
-                  { label: 'Stuck Orders',          value: operationalStats.stuckOrders    ?? 0, max: 10, color: '#f97316', warn: 2 },
-                  { label: 'Pending Payment',       value: operationalStats.pendingPayment ?? 0, max: 20, color: '#eab308', warn: 5 },
-                  { label: 'Urgent Priority',       value: operationalStats.urgent         ?? 0, max: 5,  color: '#dc2626', warn: 1 },
-                ].map(m => (
-                  <div key={m.label}>
-                    <div className="flex justify-between text-xs mb-1">
-                      <span className={`font-medium ${m.value >= m.warn ? 'text-gray-800' : 'text-gray-400'}`}>{m.label}</span>
-                      <span className={`font-bold ${m.value >= m.warn ? 'text-gray-800' : 'text-gray-400'}`}>{m.value}</span>
-                    </div>
-                    <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
-                      <div className="h-full rounded-full transition-all"
-                        style={{ width: `${Math.min(100,(m.value/m.max)*100)}%`, background: m.color }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className={`mt-4 p-3 rounded-xl text-xs font-medium ${
-                ((operationalStats.slaBreached ?? 0) > 0 || (operationalStats.urgent ?? 0) > 0)
-                  ? 'bg-red-50 border border-red-200 text-red-700'
-                  : ((operationalStats.stuckOrders ?? 0) > 0)
-                  ? 'bg-yellow-50 border border-yellow-200 text-yellow-700'
-                  : 'bg-green-50 border border-green-200 text-green-700'
-              }`}>
-                {((operationalStats.slaBreached ?? 0) > 0 || (operationalStats.urgent ?? 0) > 0)
-                  ? '🔴 Immediate action required — SLA breaches or urgent orders need attention now'
-                  : ((operationalStats.stuckOrders ?? 0) > 0)
-                  ? '🟡 Some orders need attention — review stuck orders today'
-                  : '🟢 Operations healthy — no critical issues detected'}
-              </div>
+          <div className="bg-white rounded-2xl border border-gray-100 p-5">
+            <SH title="Daily Operations Checklist" />
+            <div className="space-y-2">
+              {[
+                'Review and confirm new pending orders',
+                'Verify bank transfer payment slips',
+                'Update tracking numbers for shipped orders',
+                'Restock low-stock products',
+                'Reply to customer questions and returns',
+              ].map((task, i) => (
+                <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-gray-50">
+                  <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex-shrink-0 mt-0.5" />
+                  <p className="text-sm text-gray-600">{task}</p>
+                </div>
+              ))}
             </div>
           </div>
         </>

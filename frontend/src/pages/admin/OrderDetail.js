@@ -49,6 +49,7 @@ export default function AdminOrderDetail() {
     } catch { toast.error('Action failed'); }
   };
 
+
   const handleAddNote = async () => {
     if (!newNote.trim()) return;
     setAddingNote(true);

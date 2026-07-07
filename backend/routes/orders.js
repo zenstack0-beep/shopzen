@@ -193,6 +193,10 @@ const runAutoCancelDecisions = async () => {
 setInterval(runAutoCancelDecisions, 60 * 1000);
 setTimeout(runAutoCancelDecisions, 5000);
 
+// Follow-up reminder scheduler removed. The business no longer uses follow-up workflows,
+// so the backend no longer runs periodic follow-up scans or creates related notifications.
+
+
 // ── Admin — Get all orders ────────────────────────────────────────────────────
 router.get('/admin/all', adminAuth, async (req, res) => {
   try {

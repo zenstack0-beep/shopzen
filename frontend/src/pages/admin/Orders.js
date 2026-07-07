@@ -15,11 +15,6 @@ const PAYMENT_COLORS = {
   failed: 'bg-red-100 text-red-700'
 };
 const ALL_STATUSES = ['all','pending','confirmed','processing','shipped','out_for_delivery','delivered','cancelled'];
-const PRIORITY_BADGE = {
-  high: <span className="text-xs font-bold text-orange-600 bg-orange-100 px-1.5 py-0.5 rounded">HIGH</span>,
-  urgent: <span className="text-xs font-bold text-red-600 bg-red-100 px-1.5 py-0.5 rounded animate-pulse">URGENT</span>,
-};
-
 // ── SLA countdown helper ──────────────────────────────────────────────────────
 function SlaCell({ order }) {
   const [label, setLabel] = useState('');
@@ -64,7 +59,6 @@ export default function AdminOrders() {
       const params = new URLSearchParams({
         status: statusFilter, search, page, limit: 20,
       });
-
       const { data } = await API.get(`/orders/admin/all?${params}`);
       setOrders(data.orders);
       setTotalPages(data.pages);
@@ -81,6 +75,7 @@ export default function AdminOrders() {
       fetchOrders();
     } catch { toast.error('Update failed'); }
   };
+
 
   return (
     <div>
@@ -142,13 +137,7 @@ export default function AdminOrders() {
                   const pendingSlip = order.paymentMethod === 'bank_transfer' && order.paymentStatus === 'pending';
 
                   return (
-                    <tr key={order._id}
-                      className={`transition-colors ${
-                        order.priority === 'urgent' ? 'bg-red-50/40' :
-                        order.priority === 'high'   ? 'bg-orange-50/40' :
-                        !order.isRead             ? 'bg-blue-50/20' : ''
-                      }`}
-                    >
+                    <tr key={order._id} className={`transition-colors ${!order.isRead ? 'bg-blue-50/20' : ''}`}> 
                       <td>
                         <div className="flex items-center gap-1.5 flex-wrap">
                           {!order.isRead && <div className="w-2 h-2 bg-primary rounded-full flex-shrink-0" />}
@@ -159,7 +148,6 @@ export default function AdminOrders() {
                             {order.orderNumber}
                           </Link>
                         </div>
-                        {PRIORITY_BADGE[order.priority]}
                       </td>
                       <td>
                         <p className="text-sm font-medium text-gray-800">{order.billing?.firstName} {order.billing?.lastName}</p>

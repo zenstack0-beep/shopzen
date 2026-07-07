@@ -156,9 +156,9 @@ export const applyTheme = (settings) => {
 };
 
 /* ── IIFE: runs before React ─────────────────────────────────────────── */
-// Edge-safe: do not fetch settings from index.html. Apply cached/default theme
-// immediately; React will load settings once after app boot.
-try { applyTheme(readCache()); } catch {}
+// Only apply cache if index.html bootstrap hasn't already fetched the real
+// theme from the API (window.__szApiFetched is set by index.html on success).
+try { if (!window.__szApiFetched) { applyTheme(readCache()); } } catch {}
 
 /* ── ThemeProvider ───────────────────────────────────────────────────── */
 export const ThemeProvider = ({ children }) => {
@@ -222,25 +222,13 @@ export const ThemeProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
-    // Load settings once on boot. Do NOT poll /settings.
     loadAndApply();
 
-    // Refresh only when useful: tab returns to focus, browser regains focus,
-    // or admin/settings code dispatches shopzen:settings-updated after saving.
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') loadAndApply();
-    };
-    const onFocus = () => loadAndApply();
-    const onSettingsUpdated = () => loadAndApply();
-
-    document.addEventListener('visibilitychange', onVisible);
-    window.addEventListener('focus', onFocus);
-    window.addEventListener('shopzen:settings-updated', onSettingsUpdated);
+    const refresh = () => loadAndApply();
+    window.addEventListener('shopzen:settings-updated', refresh);
 
     return () => {
-      document.removeEventListener('visibilitychange', onVisible);
-      window.removeEventListener('focus', onFocus);
-      window.removeEventListener('shopzen:settings-updated', onSettingsUpdated);
+      window.removeEventListener('shopzen:settings-updated', refresh);
     };
   }, [loadAndApply]);
 
@@ -249,9 +237,7 @@ export const ThemeProvider = ({ children }) => {
       const updated = { ...(prev || {}), darkMode: val };
       applyTheme(updated);
       writeCache(updated);
-      API.put('/settings', updated)
-        .then(() => window.dispatchEvent(new CustomEvent('shopzen:settings-updated')))
-        .catch(() => {});
+      API.put('/settings', updated).catch(() => {});
       return updated;
     });
     setDarkModeState(val);
@@ -269,7 +255,6 @@ export const ThemeProvider = ({ children }) => {
     });
     try {
       await API.put('/settings', updates);
-      window.dispatchEvent(new CustomEvent('shopzen:settings-updated'));
     } catch (err) {
       console.warn('[ThemeContext] saveTheme error:', err.message);
     }

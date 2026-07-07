@@ -161,8 +161,10 @@
       try{var raw=localStorage.getItem('shopzen_theme_v2');if(raw)cached=JSON.parse(raw);}catch(e){}
       if(cached) applySettings(cached);
 
-      // 2. Edge-safe: do NOT fetch /api/settings from index.html.
-      // React ThemeContext loads settings once after boot using REACT_APP_API_URL.
+      // 2. Do not call /api/settings here. React ThemeContext loads settings once
+      // from Railway directly through the central API client. Keeping this
+      // static HTML API-free prevents duplicate requests and avoids Vercel
+      // Edge Requests from /api rewrites.
       window.__szApiFetched=false;
     })();
     </script>
