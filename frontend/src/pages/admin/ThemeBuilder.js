@@ -41,10 +41,10 @@ export default function ThemeBuilder() {
   const [selectedTheme, setSelectedTheme] = useState(themeKey || 'default');
   const [selectedFont, setSelectedFont] = useState(settings?.fontStyle || 'default');
   const [customColors, setCustomColors] = useState({
-    primary: settings?.primaryColor || THEMES[themeKey || 'default']?.primary || '#b5451b',
-    primaryDark: settings?.primaryDarkColor || THEMES[themeKey || 'default']?.primaryDark || '#8b3214',
-    primaryLight: settings?.primaryLightColor || THEMES[themeKey || 'default']?.primaryLight || '#e8643c',
-    accent: settings?.secondaryColor || THEMES[themeKey || 'default']?.accent || '#f0a500',
+    primary: settings?.primaryColor || THEMES[themeKey || 'default']?.primary || '#15803d',
+    primaryDark: settings?.primaryDarkColor || THEMES[themeKey || 'default']?.primaryDark || '#0f5f2e',
+    primaryLight: settings?.primaryLightColor || THEMES[themeKey || 'default']?.primaryLight || '#22c55e',
+    accent: settings?.secondaryColor || THEMES[themeKey || 'default']?.accent || '#84cc16',
   });
   const [customCSS, setCustomCSS] = useState(settings?.customCSS || '');
   const [saving, setSaving] = useState(false);
