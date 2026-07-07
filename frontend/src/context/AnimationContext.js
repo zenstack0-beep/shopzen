@@ -50,6 +50,20 @@ export const AnimationProvider = ({ children }) => {
 
   const load = useCallback(async () => {
     try {
+      const cached = localStorage.getItem('shopzen_theme_v2');
+      if (cached) {
+        const data = JSON.parse(cached);
+        if (data?.animationConfig) {
+          setConfig({ ...ANIMATION_DEFAULTS, ...JSON.parse(data.animationConfig) });
+          setLoaded(true);
+          return;
+        }
+      }
+    } catch {}
+
+    // Fallback only when cache has no animation config. This prevents an
+    // extra /settings request on most page loads.
+    try {
       const { data } = await API.get('/settings');
       if (data?.animationConfig) {
         setConfig({ ...ANIMATION_DEFAULTS, ...JSON.parse(data.animationConfig) });

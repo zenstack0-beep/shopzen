@@ -912,7 +912,7 @@ const Footer = ({ settings }) => {
                 <input type="email" id="footer-nl" placeholder="your@email.com"
                   className="flex-1 min-w-0 bg-white/10 border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder-white/40 outline-none focus:border-white/30 transition-colors"
                   style={{fontSize:'16px'}}/>
-                <button onClick={()=>{const e=document.getElementById('footer-nl').value;if(e){fetch('/api/subscribers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:e})}).then(()=>{document.getElementById('footer-nl').value='';alert('Subscribed 🎉');});}}}
+                <button onClick={()=>{const e=document.getElementById('footer-nl').value;if(e){API.post('/subscribers', { email:e }).then(()=>{document.getElementById('footer-nl').value='';alert('Subscribed 🎉');});}}}
                   className="flex-shrink-0 px-4 py-2 rounded-xl text-white text-sm font-bold transition-all hover:opacity-90" style={{background:'var(--theme-gradient)'}}>
                   Subscribe
                 </button>

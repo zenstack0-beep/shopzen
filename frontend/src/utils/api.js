@@ -1,23 +1,22 @@
 import axios from 'axios';
 
 /**
- * API base URL resolution:
- *  - Production (Vercel): /api is rewritten to Railway via vercel.json rewrites.
- *    REACT_APP_API_URL is no longer needed — all /api/* calls stay on the same
- *    Vercel domain and are proxied server-side, so cookies & CORS are never an issue.
- *  - Local dev: React proxy in package.json forwards /api/* to localhost:5001.
+ * Edge-request-safe API client.
  *
- * We always use /api as the base — Vercel handles the routing in both cases.
+ * Production MUST call Railway directly, not /api through Vercel.
+ * Required Vercel env:
+ *   REACT_APP_API_URL=https://shopzen-production.up.railway.app/api
  *
- * TIMEOUT NOTE:
- *   Instagram publishing requires polling the container status API until the
- *   media container reaches FINISHED state, which can take 5–12 seconds.
- *   The previous 15s timeout was too close to this limit, causing the frontend
- *   to show "failed" even though the backend successfully published the post.
- *   Increased to 45s to safely cover Instagram (≤12s) and any other slow ops.
+ * Local fallback remains /api so CRA proxy/local dev can still work.
  */
+const normalizeBaseURL = (value) => {
+  const raw = (value || '').trim();
+  if (!raw) return '/api';
+  return raw.replace(/\/+$/, '');
+};
+
 const API = axios.create({
-  baseURL: '/api',
+  baseURL: normalizeBaseURL(process.env.REACT_APP_API_URL),
   timeout: 45000,
   withCredentials: true,
 });

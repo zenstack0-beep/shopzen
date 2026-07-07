@@ -161,20 +161,9 @@
       try{var raw=localStorage.getItem('shopzen_theme_v2');if(raw)cached=JSON.parse(raw);}catch(e){}
       if(cached) applySettings(cached);
 
-      // 2. Pre-fetch latest theme from API so ThemeContext gets it without an extra round-trip
+      // 2. Edge-safe: do NOT fetch /api/settings from index.html.
+      // React ThemeContext loads settings once after boot using REACT_APP_API_URL.
       window.__szApiFetched=false;
-      fetch('/api/settings')
-        .then(function(r){return r.ok?r.json():null;})
-        .then(function(data){
-          if(data&&typeof data==='object'&&!Array.isArray(data)&&('theme' in data||'storeName' in data)){
-            applySettings(data);
-            window.__szApiFetched=true;
-            try{localStorage.setItem('shopzen_theme_v2',JSON.stringify(data));}catch(e){}
-          }
-        })
-        .catch(function(){
-          if(cached) applySettings(cached);
-        });
     })();
     </script>
       <meta name="google-site-verification" content="JBwfXhDxBe4cSEra_DYfuPe1BtNCXxW0yMBPCo8VSwI"/>

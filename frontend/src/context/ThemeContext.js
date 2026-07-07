@@ -156,9 +156,9 @@ export const applyTheme = (settings) => {
 };
 
 /* ── IIFE: runs before React ─────────────────────────────────────────── */
-// Only apply cache if index.html bootstrap hasn't already fetched the real
-// theme from the API (window.__szApiFetched is set by index.html on success).
-try { if (!window.__szApiFetched) { applyTheme(readCache()); } } catch {}
+// Edge-safe: do not fetch settings from index.html. Apply cached/default theme
+// immediately; React will load settings once after app boot.
+try { applyTheme(readCache()); } catch {}
 
 /* ── ThemeProvider ───────────────────────────────────────────────────── */
 export const ThemeProvider = ({ children }) => {
@@ -222,18 +222,26 @@ export const ThemeProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
+    // Load settings once on boot. Do NOT poll /settings.
     loadAndApply();
-    // Retry quickly at first (backend may be starting), then slow down
-    const retry = () => {
-      loadAndApply();
+
+    // Refresh only when useful: tab returns to focus, browser regains focus,
+    // or admin/settings code dispatches shopzen:settings-updated after saving.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') loadAndApply();
     };
-    // Fast retries for first 30s (every 3s), then every 10s
-    const fast = setInterval(retry, 3000);
-    const slow = setTimeout(() => {
-      clearInterval(fast);
-      setInterval(loadAndApply, 10000);
-    }, 30000);
-    return () => { clearInterval(fast); clearTimeout(slow); };
+    const onFocus = () => loadAndApply();
+    const onSettingsUpdated = () => loadAndApply();
+
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('shopzen:settings-updated', onSettingsUpdated);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('shopzen:settings-updated', onSettingsUpdated);
+    };
   }, [loadAndApply]);
 
   const setDarkMode = useCallback((val) => {
@@ -241,7 +249,9 @@ export const ThemeProvider = ({ children }) => {
       const updated = { ...(prev || {}), darkMode: val };
       applyTheme(updated);
       writeCache(updated);
-      API.put('/settings', updated).catch(() => {});
+      API.put('/settings', updated)
+        .then(() => window.dispatchEvent(new CustomEvent('shopzen:settings-updated')))
+        .catch(() => {});
       return updated;
     });
     setDarkModeState(val);
@@ -259,6 +269,7 @@ export const ThemeProvider = ({ children }) => {
     });
     try {
       await API.put('/settings', updates);
+      window.dispatchEvent(new CustomEvent('shopzen:settings-updated'));
     } catch (err) {
       console.warn('[ThemeContext] saveTheme error:', err.message);
     }

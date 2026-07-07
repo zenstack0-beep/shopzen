@@ -192,8 +192,15 @@ export default function AdminLayout() {
     API.get('/admin/dashboard')
       .then(r => setBadges({ orders: r.data.stats.pendingOrders, returns: 0 }))
       .catch(() => {});
-    const id = setInterval(fetchNotifications, 30000);
-    return () => clearInterval(id);
+    // Edge-safe: notifications do not need 30s polling.
+    // Refresh every 5 minutes and when the admin returns to the tab.
+    const id = setInterval(fetchNotifications, 5 * 60 * 1000);
+    const onFocus = () => fetchNotifications();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('focus', onFocus);
+    };
   }, [fetchNotifications]);
 
   // Close mobile drawer on navigation

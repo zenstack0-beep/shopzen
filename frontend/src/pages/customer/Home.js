@@ -636,7 +636,7 @@ const NewsletterSection = ({ settings }) => {
               <input type="email" id="home-nl" placeholder="your@email.com" className="form-input flex-1 text-sm"/>
               <MagneticButton onClick={() => {
                 const e=document.getElementById('home-nl').value;
-                if(e){fetch('/api/subscribers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:e})})
+                if(e){API.post('/subscribers', { email:e })
                   .then(()=>{document.getElementById('home-nl').value='';toast.success('Subscribed! 🎉');}).catch(()=>{});}
               }} className="btn-primary text-sm px-5 flex-shrink-0">{cta}</MagneticButton>
             </div>

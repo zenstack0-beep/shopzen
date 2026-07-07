@@ -118,7 +118,7 @@ export default function Monitoring() {
 
   useEffect(() => {
     if (!autoRefresh) return;
-    const id = setInterval(fetchData, 10000);
+    const id = setInterval(fetchData, 60000);
     return () => clearInterval(id);
   }, [autoRefresh, fetchData]);
 
