@@ -22,6 +22,16 @@ const rateLimit  = require('express-rate-limit');
 const router     = express.Router();
 const { sendCapiEvent } = require('../services/metaCAPI');
 
+function normalizeCurrencyCode(currency, fallback = 'LKR') {
+  const raw = String(currency || '').trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(raw) ? raw : fallback;
+}
+
+function normalizeEventValue(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? Number(n.toFixed(2)) : undefined;
+}
+
 // Rate-limit: max 60 CAPI calls per IP per minute
 // (one per page action — add to cart, checkout, purchase)
 const capiLimiter = rateLimit({
@@ -116,8 +126,8 @@ router.post('/capi', capiLimiter, async (req, res) => {
     userAgent:      userAgent      || req.headers['user-agent'] || undefined,
     fbp:            fbp            || undefined,
     fbc:            fbc            || undefined,
-    value:          typeof value === 'number' ? value : undefined,
-    currency:       currency       || 'LKR',
+    value:          normalizeEventValue(value),
+    currency:       normalizeCurrencyCode(currency || 'LKR'),
     contentIds:     Array.isArray(contentIds) ? contentIds : undefined,
     contentType:    contentType    || undefined,
     numItems:       typeof numItems === 'number' ? numItems : undefined,

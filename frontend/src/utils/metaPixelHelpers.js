@@ -31,6 +31,62 @@
 
 import API from './api';
 
+// ── Normalisation helpers ───────────────────────────────────────────────────
+const VALID_CURRENCY_RE = /^[A-Z]{3}$/;
+
+export function normalizeCurrencyCode(currency, fallback = 'LKR') {
+  const raw = String(currency || '').trim().toUpperCase();
+  return VALID_CURRENCY_RE.test(raw) ? raw : fallback;
+}
+
+export function normalizeEventValue(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? Number(n.toFixed(2)) : fallback;
+}
+
+export function normalizeCountryCode(country, fallback = 'LK') {
+  const raw = String(country || '').trim().toLowerCase();
+  if (!raw) return fallback.toLowerCase();
+  if (raw === 'lk' || raw === 'lka' || raw.includes('sri')) return 'lk';
+  return raw.replace(/[^a-z]/g, '').slice(0, 2) || fallback.toLowerCase();
+}
+
+function readLocalUser() {
+  try {
+    const raw = localStorage.getItem('user');
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function mergeKnownUserData(billing = {}) {
+  const user = readLocalUser();
+  return {
+    email: billing.email || user.email || '',
+    phone: billing.phone || user.phone || user.mobile || '',
+    firstName: billing.firstName || user.firstName || user.name?.split?.(' ')?.[0] || '',
+    lastName: billing.lastName || user.lastName || user.name?.split?.(' ')?.slice?.(1)?.join?.(' ') || '',
+    city: billing.city || user.city || user.address?.city || '',
+    country: billing.country || user.country || user.address?.country || 'LK',
+  };
+}
+
+export function ensureFbp() {
+  try {
+    const existing = getFbCookies(false).fbp;
+    if (existing) return existing;
+
+    const fbp = `fb.1.${Date.now()}.${Math.random().toString(36).slice(2, 12)}${Math.random().toString(36).slice(2, 12)}`;
+    const expires = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toUTCString();
+    document.cookie = `_fbp=${encodeURIComponent(fbp)}; expires=${expires}; path=/; SameSite=Lax`;
+    try { localStorage.setItem('_fbp', fbp); } catch { }
+    return fbp;
+  } catch {
+    return '';
+  }
+}
+
 // ── 1. Event ID ───────────────────────────────────────────────────────────────
 /**
  * Generate a unique event ID that links the browser pixel event to the
@@ -90,13 +146,26 @@ export function captureFbclid() {
  * Read _fbp and _fbc cookies. Meta uses these for audience matching
  * and attribution — always pass them through to CAPI.
  */
-export function getFbCookies() {
+export function getFbCookies(createFallback = true) {
   const cookies = {};
   document.cookie.split(';').forEach(c => {
-    const [k, v] = c.trim().split('=');
+    const [k, ...rest] = c.trim().split('=');
+    const v = rest.join('=');
     if (k === '_fbp' || k === '_fbc') cookies[k] = decodeURIComponent(v || '');
   });
-  return { fbp: cookies._fbp || '', fbc: cookies._fbc || '' };
+
+  let fbp = cookies._fbp || '';
+  let fbc = cookies._fbc || '';
+
+  if (!fbp) {
+    try { fbp = localStorage.getItem('_fbp') || ''; } catch { }
+  }
+  if (!fbc) {
+    try { fbc = sessionStorage.getItem('_fbc') || ''; } catch { }
+  }
+
+  if (!fbp && createFallback) fbp = ensureFbp();
+  return { fbp, fbc };
 }
 
 // ── 4. Best-effort fbc getter ─────────────────────────────────────────────────
@@ -145,13 +214,14 @@ export function getFbc() {
  * @returns {object}       — matching fields, undefined if empty
  */
 export function getAdvancedMatchingData(billing = {}) {
+  const src = mergeKnownUserData(billing);
   const data = {};
-  if (billing.email)     data.em  = billing.email.toLowerCase().trim();
-  if (billing.phone)     data.ph  = billing.phone.replace(/[^0-9]/g, '');
-  if (billing.firstName) data.fn  = billing.firstName.toLowerCase().trim();
-  if (billing.lastName)  data.ln  = billing.lastName.toLowerCase().trim();
-  if (billing.city)      data.ct  = billing.city.toLowerCase().trim();
-  if (billing.country)   data.country = billing.country.toLowerCase().trim().slice(0, 2); // 2-letter ISO
+  if (src.email)     data.em  = String(src.email).toLowerCase().trim();
+  if (src.phone)     data.ph  = String(src.phone).replace(/[^0-9]/g, '');
+  if (src.firstName) data.fn  = String(src.firstName).toLowerCase().trim();
+  if (src.lastName)  data.ln  = String(src.lastName).toLowerCase().trim();
+  if (src.city)      data.ct  = String(src.city).toLowerCase().trim();
+  if (src.country)   data.country = normalizeCountryCode(src.country);
   return Object.keys(data).length ? data : undefined;
 }
 
@@ -167,9 +237,10 @@ export function getAdvancedMatchingData(billing = {}) {
  */
 export async function sendCapiRequest(eventName, payload, eventId, billing = {}) {
   try {
-    const { fbp } = getFbCookies();
+    const { fbp } = getFbCookies(true);
     // Use getFbc() for maximum fbc coverage (cookie → sessionStorage → URL)
     const fbc = getFbc();
+    const matchData = mergeKnownUserData(billing);
 
     await API.post('/meta/capi', {
       eventName,
@@ -179,14 +250,16 @@ export async function sendCapiRequest(eventName, payload, eventId, billing = {})
       fbc,
       userAgent: navigator.userAgent,
       // PII — hashed on the backend, never logged
-      email:     billing.email,
-      phone:     billing.phone,
-      firstName: billing.firstName,
-      lastName:  billing.lastName,
-      city:      billing.city,
-      country:   billing.country,
+      email:     matchData.email,
+      phone:     matchData.phone,
+      firstName: matchData.firstName,
+      lastName:  matchData.lastName,
+      city:      matchData.city,
+      country:   normalizeCountryCode(matchData.country),
       // Event data
       ...payload,
+      currency: normalizeCurrencyCode(payload.currency || 'LKR'),
+      value: payload.value == null ? undefined : normalizeEventValue(payload.value),
     });
   } catch (err) {
     // Silently swallow — CAPI is supplemental, never mission-critical

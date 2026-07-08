@@ -698,9 +698,9 @@ router.post('/', orderRateLimiter, async (req, res) => {
     sendPurchaseEvent(order, {
       clientIp:   req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || '',
       userAgent:  req.headers['user-agent'] || '',
-      fbp:        req.body.fbp || req.cookies?._fbp || '',
-      fbc:        req.body.fbc || req.cookies?._fbc || '',
-      eventId:    req.body.metaEventId || undefined,  // sent by frontend for deduplication
+      fbp:        req.body.fbp || order.metaFbp || req.cookies?._fbp || '',
+      fbc:        req.body.fbc || order.metaFbc || req.cookies?._fbc || '',
+      eventId:    req.body.metaEventId || order.metaEventId || undefined,  // sent by frontend for deduplication
       siteUrl:    `${process.env.FRONTEND_URL || 'https://shopzen.lk'}/order-success/${order._id}`,
       contentIds: _capiContentIds,
       numItems:   _capiNumItems,
@@ -730,6 +730,7 @@ router.post('/', orderRateLimiter, async (req, res) => {
       orderNumber: order.orderNumber,
       total:       totals.total,
       paymentMethod,
+      metaEventId:  order.metaEventId || metaEventId || undefined,
     });
   } catch (err) {
     console.error('Order error:', err);

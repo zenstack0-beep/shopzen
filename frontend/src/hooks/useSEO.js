@@ -18,6 +18,8 @@ import {
   generateEventId,
   getAdvancedMatchingData,
   sendCapiRequest,
+  normalizeCurrencyCode,
+  normalizeEventValue,
 } from '../utils/metaPixelHelpers';
 
 // ─── DOM meta helpers ─────────────────────────────────────────────────────────
@@ -89,11 +91,7 @@ export function getSeoConfig() {
  * drop the event. This normalises whatever is stored in admin settings.
  */
 export function getPixelCurrency() {
-  const raw = getSeoConfig().currencyCode;
-  if (raw && /^[A-Z]{3}$/.test(raw.trim().toUpperCase())) {
-    return raw.trim().toUpperCase();
-  }
-  return 'LKR';
+  return normalizeCurrencyCode(getSeoConfig().currencyCode || 'LKR');
 }
 
 // ─── Advanced Matching for pixel fbq('init') ──────────────────────────────────
@@ -145,12 +143,11 @@ export function trackEvent(eventName, params = {}) {
  *   eventId: pre-generated dedup key (if not supplied, one is generated)
  */
 export function trackPurchase(order, items, opts = {}) {
-  const value = typeof order.total === 'number' ? order.total
-    : typeof order.grandTotal === 'number' ? order.grandTotal
-    : null;
+  const rawValue = order.total ?? order.grandTotal ?? order.amount ?? null;
+  const value = rawValue === null ? null : normalizeEventValue(rawValue, null);
 
-  if (value === null) {
-    console.warn('[ShopZen] trackPurchase: order.total missing, skipping', order);
+  if (value === null || !Number.isFinite(Number(value))) {
+    console.warn('[ShopZen] trackPurchase: valid order total missing, skipping', order);
     return;
   }
 
@@ -214,8 +211,9 @@ export function trackPurchase(order, items, opts = {}) {
  * @param {object} [opts]  — { billing, eventId }
  */
 export function trackAddToCart(product, quantity = 1, opts = {}) {
-  const price    = Number(product.salePrice || product.price) || 0;
-  const value    = price * (typeof quantity === 'number' ? quantity : 1);
+  const price    = normalizeEventValue(product.salePrice || product.price || 0);
+  const safeQty  = Number.isFinite(Number(quantity)) && Number(quantity) > 0 ? Number(quantity) : 1;
+  const value    = normalizeEventValue(price * safeQty);
   const currency = getPixelCurrency();
   const id       = String(product._id || '');
   const eventId  = opts.eventId || generateEventId('AddToCart', product._id);
@@ -242,7 +240,7 @@ export function trackAddToCart(product, quantity = 1, opts = {}) {
     currency,
     contentIds:  [id],
     contentType: 'product',
-    numItems:    quantity,
+    numItems:    safeQty,
   }, eventId, billing);
 }
 
@@ -252,7 +250,7 @@ export function trackAddToCart(product, quantity = 1, opts = {}) {
  * @param {object} [opts]  — { billing, eventId }
  */
 export function trackViewItem(product, opts = {}) {
-  const price    = Number(product.salePrice || product.price) || 0;
+  const price    = normalizeEventValue(product.salePrice || product.price || 0);
   const currency = getPixelCurrency();
   const id       = String(product._id || '');
   const eventId  = opts.eventId || generateEventId('ViewContent', product._id);
@@ -290,7 +288,7 @@ export function trackViewItem(product, opts = {}) {
  */
 export function trackInitiateCheckout(items = [], value = 0, opts = {}) {
   const currency   = getPixelCurrency();
-  const safeValue  = typeof value === 'number' ? value : 0;
+  const safeValue  = normalizeEventValue(value || 0);
   const contentIds = items.map(i => String(i._id || i.productId || i.product?._id || i.product || '')).filter(id => id && id !== 'undefined' && id !== 'null');
   const numItems   = items.reduce((s, i) => s + (typeof i.quantity === 'number' ? i.quantity : 1), 0);
   const eventId    = opts.eventId || generateEventId('InitiateCheckout', safeValue);

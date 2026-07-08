@@ -41,6 +41,24 @@ function hashPhone(phone) {
   return digits ? hash(digits) : undefined;
 }
 
+const VALID_CURRENCY_RE = /^[A-Z]{3}$/;
+function normalizeCurrencyCode(currency, fallback = 'LKR') {
+  const raw = String(currency || '').trim().toUpperCase();
+  return VALID_CURRENCY_RE.test(raw) ? raw : fallback;
+}
+
+function normalizeEventValue(value, fallback = undefined) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? Number(n.toFixed(2)) : fallback;
+}
+
+function normalizeCountryCode(country, fallback = 'LK') {
+  const raw = String(country || '').trim().toLowerCase();
+  if (!raw) return fallback.toLowerCase();
+  if (raw === 'lk' || raw === 'lka' || raw.includes('sri')) return 'lk';
+  return raw.replace(/[^a-z]/g, '').slice(0, 2) || fallback.toLowerCase();
+}
+
 // ── Get config from DB or env ─────────────────────────────────────────────────
 let _cfg = null;
 async function getCapiCfg() {
@@ -149,7 +167,7 @@ async function sendCapiEvent(eventName, payload = {}) {
   if (payload.firstName) userData.fn  = hash(payload.firstName);
   if (payload.lastName)  userData.ln  = hash(payload.lastName);
   if (payload.city)      userData.ct  = hash(payload.city);
-  if (payload.country)   userData.country = hash(payload.country);
+  if (payload.country)   userData.country = hash(normalizeCountryCode(payload.country));
   if (payload.clientIp)  userData.client_ip_address = payload.clientIp;
   if (payload.userAgent) userData.client_user_agent  = payload.userAgent;
   if (payload.fbp)       userData.fbp = payload.fbp;
@@ -157,8 +175,15 @@ async function sendCapiEvent(eventName, payload = {}) {
 
   // ── Build custom_data ─────────────────────────────────────────────────────
   const customData = {};
-  if (typeof payload.value    === 'number') customData.value     = payload.value;
-  if (payload.currency)    customData.currency     = String(payload.currency).toUpperCase();
+  const safeValue = normalizeEventValue(payload.value, eventName === 'Purchase' ? 0 : undefined);
+  const safeCurrency = normalizeCurrencyCode(payload.currency || 'LKR');
+
+  // Purchase value/currency are mandatory for accurate ROAS. For non-purchase
+  // events include value only when valid, but always keep currency valid.
+  if (safeValue !== undefined) customData.value = safeValue;
+  if (safeValue !== undefined || eventName === 'Purchase' || payload.currency) {
+    customData.currency = safeCurrency;
+  }
   // Only include content arrays when they contain real product IDs.
   // An empty content_ids array causes Meta to reject the event silently.
   const validContentIds = Array.isArray(payload.contentIds)
@@ -255,7 +280,7 @@ async function sendPurchaseEvent(order, options = {}) {
     userAgent:      options.userAgent,
     fbp:            options.fbp,
     fbc:            options.fbc,
-    value:          typeof order.total === 'number' ? order.total : 0,
+    value:          normalizeEventValue(order.total, 0),
     currency,
     contentIds,
     contentType:    'product',
