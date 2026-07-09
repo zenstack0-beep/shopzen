@@ -2,23 +2,19 @@ const { Resend } = require('resend');
 
 // ── Resend client ─────────────────────────────────────────────────────────────
 const getResendClient = () => {
-  return new Resend(process.env.RESEND_API_KEY || 're_6rTy1uYg_Pyw8zzzKx7EKKsxk8pRTmHVe');
+  if (!process.env.RESEND_API_KEY) {
+    throw new Error('RESEND_API_KEY is not configured');
+  }
+  return new Resend(process.env.RESEND_API_KEY);
 };
 
-// ── SMTP connection verification (called once at startup) ─────────────────────
-const verifySmtp = async () => {
-  try {
-    const resend = getResendClient();
-    await resend.emails.send({
-      from: 'onboarding@resend.dev',
-      to: 'delivered@resend.dev',
-      subject: 'SMTP verify test',
-      html: '<p>test</p>',
-    });
-    console.log('[MAIL] ✅ Resend API verified — emails will work');
-  } catch (err) {
-    console.error('[MAIL] ❌ Resend API FAILED:', err.message);
-    console.error('[MAIL] ⚠️  Check RESEND_API_KEY in your Railway env vars.');
+// ── Mail configuration check ─────────────────────────────────────────────────
+// Do not send a real test email on startup; that consumes Resend daily quota.
+const verifyMailConfig = () => {
+  if (process.env.RESEND_API_KEY) {
+    console.log('[MAIL] Resend API key configured');
+  } else {
+    console.warn('[MAIL] RESEND_API_KEY is missing — email sending is disabled');
   }
 };
 
@@ -867,8 +863,8 @@ const cancelRejectedAdminHtml = async (order) => {
     </div>`, t);
 };
 
-// ── Run verify on startup (non-blocking) ──────────────────────────────────────
-setTimeout(() => verifySmtp(), 3000);
+// ── Run config check on startup (non-blocking, no email sent) ────────────────
+setTimeout(() => verifyMailConfig(), 3000);
 
 // ── Email notification guard ──────────────────────────────────────────────────
 // Checks if a specific email notification type is enabled in Settings.
