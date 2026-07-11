@@ -179,8 +179,29 @@ export default function AdminLayout() {
   // persists across route changes and we can scroll it without touching the page.
   const navRef = useRef(null);
 
-  // Notifications are intentionally not polled or fetched automatically.
-  // This removes the high-volume /api/notifications requests from Vercel/Railway.
+  const fetchNotifications = useCallback(async () => {
+    try {
+      const { data } = await API.get('/notifications');
+      setNotifications(Array.isArray(data?.notifications) ? data.notifications : []);
+      setUnreadCount(Number(data?.unreadCount) || 0);
+    } catch (err) {
+      console.error('Failed to load notifications:', err);
+    }
+  }, []);
+
+  // Load immediately and refresh often enough for new orders/customers to appear
+  // without requiring an admin page reload. Refreshing on focus also catches
+  // events that arrived while the admin tab was in the background.
+  useEffect(() => {
+    fetchNotifications();
+    const intervalId = window.setInterval(fetchNotifications, 30000);
+    const handleFocus = () => fetchNotifications();
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [fetchNotifications]);
 
   useEffect(() => {
     API.get('/admin/dashboard')
@@ -189,11 +210,8 @@ export default function AdminLayout() {
   }, []);
 
   useEffect(() => {
-    if (notifOpen) {
-      setNotifications([]);
-      setUnreadCount(0);
-    }
-  }, [notifOpen]);
+    if (notifOpen) fetchNotifications();
+  }, [notifOpen, fetchNotifications]);
 
   // Close mobile drawer on navigation
   useEffect(() => { setSidebarOpen(false); }, [location.pathname]);
@@ -225,14 +243,24 @@ export default function AdminLayout() {
   );
 
   const markAllRead = async () => {
-    setUnreadCount(0);
-    setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+    try {
+      await API.put('/notifications/read-all');
+      setUnreadCount(0);
+      setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+    } catch (err) {
+      console.error('Failed to mark notifications as read:', err);
+    }
   };
 
   const handleNotifClick = async (notif) => {
     if (!notif.isRead) {
-      setUnreadCount(prev => Math.max(0, prev - 1));
-      setNotifications(prev => prev.map(n => n._id === notif._id ? { ...n, isRead: true } : n));
+      try {
+        await API.put(`/notifications/${notif._id}/read`);
+        setUnreadCount(prev => Math.max(0, prev - 1));
+        setNotifications(prev => prev.map(n => n._id === notif._id ? { ...n, isRead: true } : n));
+      } catch (err) {
+        console.error('Failed to mark notification as read:', err);
+      }
     }
     if (notif.link) { navigate(notif.link); setNotifOpen(false); }
   };
@@ -357,7 +385,14 @@ export default function AdminLayout() {
                             <button onClick={markAllRead} className="text-xs text-blue-600 hover:underline">Mark all read</button>
                           )}
                           <button
-                            onClick={() => setNotifications(prev => prev.filter(n => !n.isRead))}
+                            onClick={async () => {
+                              try {
+                                await API.delete('/notifications/clear-read');
+                                setNotifications(prev => prev.filter(n => !n.isRead));
+                              } catch (err) {
+                                console.error('Failed to clear read notifications:', err);
+                              }
+                            }}
                             className="text-xs text-gray-400 hover:text-red-500"
                           >Clear read</button>
                         </div>
@@ -431,7 +466,16 @@ export default function AdminLayout() {
                         {notifFilter === 'all' ? notifications.length : notifications.filter(n=>n.type===notifFilter).length} notification(s)
                       </p>
                       <button
-                        onClick={() => { setNotifications([]); setUnreadCount(0); setNotifOpen(false); }}
+                        onClick={async () => {
+                          try {
+                            await API.delete('/notifications/clear-all');
+                            setNotifications([]);
+                            setUnreadCount(0);
+                            setNotifOpen(false);
+                          } catch (err) {
+                            console.error('Failed to clear notifications:', err);
+                          }
+                        }}
                         className="text-xs text-red-400 hover:text-red-600 hover:underline"
                       >Clear all</button>
                     </div>

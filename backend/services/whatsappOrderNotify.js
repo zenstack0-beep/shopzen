@@ -41,7 +41,8 @@
  *      Social Media → WhatsApp screen, so no new admin UI is required.
  *   2. Falls back to WHATSAPP_ADMIN_NUMBER in .env.
  *
- * Enable/disable: WHATSAPP_BOT_ENABLED in .env still gates this feature.
+ * Enable/disable: alerts run when credentials are configured. Set
+ * WHATSAPP_BOT_ENABLED=false as an explicit emergency kill switch.
  *
  * NOTE: WhatsApp Cloud API only allows free-text messages within a 24h
  * window after the recipient has messaged the business number at least
@@ -55,7 +56,10 @@ const GRAPH_VER = 'v23.0';
 const GRAPH     = `https://graph.facebook.com/${GRAPH_VER}`;
 
 function isEnabled() {
-  return process.env.WHATSAPP_BOT_ENABLED === 'true';
+  // A configured WhatsApp connection should work without requiring a second,
+  // undocumented environment switch. Keep an explicit "false" as an emergency
+  // kill switch; otherwise order alerts are enabled when credentials exist.
+  return String(process.env.WHATSAPP_BOT_ENABLED || '').toLowerCase() !== 'false';
 }
 
 // ─── Resolve credentials: admin panel settings first, env vars as fallback ───
@@ -63,6 +67,8 @@ async function resolveCredentials() {
   let accessToken   = '';
   let phoneNumberId = '';
   let adminNumber   = '';
+  let templateName  = '';
+  let languageCode  = '';
 
   try {
     const { getOrCreate, decryptPlatformFields } = require('./socialMediaService');
@@ -75,6 +81,8 @@ async function resolveCredentials() {
       phoneNumberId = creds.accountId   || '';
       const broadcastList = (creds.extraConfig?.broadcastList || '').toString().trim();
       adminNumber = broadcastList.split(',').map(n => n.trim()).filter(Boolean)[0] || '';
+      templateName = (creds.extraConfig?.templateName || '').toString().trim();
+      languageCode = (creds.extraConfig?.languageCode || '').toString().trim();
     }
   } catch (err) {
     console.warn('[WhatsApp Order Alert] Could not read admin-configured WhatsApp settings, falling back to .env:', err.message);
@@ -84,8 +92,14 @@ async function resolveCredentials() {
   if (!accessToken)   accessToken   = process.env.WHATSAPP_ACCESS_TOKEN || '';
   if (!phoneNumberId) phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
   if (!adminNumber)   adminNumber   = process.env.WHATSAPP_ADMIN_NUMBER || '';
+  if (!templateName)  templateName  = process.env.WHATSAPP_ORDER_TEMPLATE || '';
+  if (!languageCode)  languageCode  = process.env.WHATSAPP_TEMPLATE_LANGUAGE || 'en_US';
 
-  return { accessToken, phoneNumberId, adminNumber };
+  // Meta accepts E.164 recipients without formatting characters. Admin fields
+  // commonly contain spaces or a leading '+', so normalize before sending.
+  adminNumber = adminNumber.toString().replace(/[^0-9]/g, '');
+
+  return { accessToken, phoneNumberId, adminNumber, templateName, languageCode };
 }
 
 function buildOrderMessage(order) {
@@ -125,7 +139,7 @@ async function sendOrderWhatsAppNotification(order) {
   try {
     if (!isEnabled()) return;
 
-    const { accessToken, phoneNumberId, adminNumber } = await resolveCredentials();
+    const { accessToken, phoneNumberId, adminNumber, templateName, languageCode } = await resolveCredentials();
 
     if (!accessToken || !phoneNumberId || !adminNumber) {
       console.warn('[WhatsApp Order Alert] Missing access token / phone number ID / admin number (checked admin Social Media settings and .env) — skipping.');
@@ -150,6 +164,34 @@ async function sendOrderWhatsAppNotification(order) {
     });
 
     const json = await res.json();
+
+    // Free-text messages are rejected outside Meta's 24-hour conversation
+    // window. If the admin configured an approved template, retry with it so a
+    // new-order alert is still delivered. Order details remain available in the
+    // admin notification center.
+    if (json.error?.code === 131047 && templateName) {
+      const templateRes = await fetch(`${GRAPH}/${phoneNumberId}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: adminNumber,
+          type: 'template',
+          template: { name: templateName, language: { code: languageCode } },
+        }),
+      });
+      const templateJson = await templateRes.json();
+      if (!templateJson.error) {
+        console.log(`[WhatsApp Order Alert] ✅ Sent template ${templateName} to ${adminNumber} for order ${order.orderNumber}`);
+        return;
+      }
+      console.error(`[WhatsApp Order Alert] Template fallback failed for ${adminNumber}: ${templateJson.error.message} (code ${templateJson.error.code})`);
+      return;
+    }
 
     if (json.error) {
       console.error(`[WhatsApp Order Alert] Failed to notify ${adminNumber}: ${json.error.message} (code ${json.error.code})`);
