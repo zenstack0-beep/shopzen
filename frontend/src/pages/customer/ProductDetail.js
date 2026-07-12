@@ -293,6 +293,12 @@ export default function ProductDetail() {
     API.get('/whatsapp/config').then(r => setWaConfig(r.data)).catch(() => {});
   }, [slug, user]);
 
+  useEffect(() => {
+    if (!loading && tab === 'reviews' && window.location.hash === '#reviews') {
+      requestAnimationFrame(() => document.getElementById('reviews')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    }
+  }, [loading, tab, reviewableOrderId]);
+
   /* Cinematic entrance */
   useEffect(() => {
     if (!product || !heroRef.current) return;
@@ -666,7 +672,7 @@ export default function ProductDetail() {
         )}
 
         {tab === 'reviews' && (
-          <div>
+          <div id="reviews" style={{ scrollMarginTop: '110px' }}>
             {reviews.length > 0 ? (
               <div className="space-y-4 mb-10">
                 {reviews.map(r => (
@@ -693,7 +699,7 @@ export default function ProductDetail() {
             <div className="rounded-3xl p-6 sm:p-8 border" style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)' }}>
               <h3 className="font-black text-lg mb-5" style={{ fontFamily: 'var(--font-display)', color: 'var(--color-dark)' }}>Write a Review</h3>
               {!user ? (
-                <p className="text-gray-500 text-sm">Please <Link to="/login" className="font-bold hover:underline" style={{ color: 'var(--color-primary)' }}>sign in</Link> to write a review.</p>
+                <p className="text-gray-500 text-sm">Please <Link to="/login" state={{ from: { pathname: `/product/${slug}`, hash: '#reviews' } }} className="font-bold hover:underline" style={{ color: 'var(--color-primary)' }}>sign in</Link> to write a review.</p>
               ) : checkingReviewEligibility ? (
                 <p className="text-gray-400 text-sm">Checking your purchase history...</p>
               ) : !reviewableOrderId ? (

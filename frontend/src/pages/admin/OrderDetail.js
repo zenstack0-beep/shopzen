@@ -16,6 +16,7 @@ export default function AdminOrderDetail() {
   const [loading, setLoading] = useState(true);
   const [statusUpdate, setStatusUpdate] = useState({ status: '', note: '', trackingNumber: '', deliveryPartner: '' });
   const [saving, setSaving] = useState(false);
+  const [resendingInvoice, setResendingInvoice] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState('');
   // ── Internal admin notes state ──
   const [newNote, setNewNote]         = useState('');
@@ -47,6 +48,18 @@ export default function AdminOrderDetail() {
       setOrder(data);
       toast.success(decision === 'approved' ? '🚫 Order cancelled & customer notified' : '✅ Cancellation rejected & customer notified');
     } catch { toast.error('Action failed'); }
+  };
+
+  const handleResendInvoice = async () => {
+    if (!window.confirm(`Resend the PDF invoice and review links to ${order.billing?.email}?`)) return;
+    setResendingInvoice(true);
+    try {
+      const { data } = await API.post(`/orders/admin/${id}/resend-delivered-bill`, {});
+      setOrder(data);
+      toast.success('Invoice email resent successfully');
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Invoice email could not be resent');
+    } finally { setResendingInvoice(false); }
   };
 
 
@@ -169,6 +182,16 @@ export default function AdminOrderDetail() {
               </div>
             </div>
             <button onClick={handleStatusUpdate} disabled={saving} className="btn-primary">{saving ? 'Updating...' : 'Update Status'}</button>
+            {order.orderStatus === 'delivered' && (
+              <div className="mt-4 pt-4 border-t border-gray-100">
+                <button onClick={handleResendInvoice} disabled={resendingInvoice} className="px-4 py-2 rounded-xl border border-primary text-primary text-sm font-bold hover:bg-primary/5 disabled:opacity-50">
+                  {resendingInvoice ? 'Sending invoice…' : '📧 Resend PDF Invoice & Review Links'}
+                </button>
+                <p className="text-xs text-gray-400 mt-2">
+                  Last email: {order.deliveredBillEmailSentAt ? new Date(order.deliveredBillEmailSentAt).toLocaleString() : 'Not sent successfully yet'}
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Status History */}

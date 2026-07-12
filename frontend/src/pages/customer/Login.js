@@ -213,7 +213,7 @@ export function Login() {
   const navigate = useNavigate();
   const location = useLocation();
   const from = location.state?.from?.pathname
-    ? (location.state.from.pathname + (location.state.from.search || ''))
+    ? (location.state.from.pathname + (location.state.from.search || '') + (location.state.from.hash || ''))
     : null;
   const [form, setForm] = useState({ email: '', password: '' });
   const [loading, setLoading] = useState(false);

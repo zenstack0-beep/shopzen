@@ -50,6 +50,11 @@ const orderSchema = new mongoose.Schema({
   deliveryPartner: { type: String },
   estimatedDelivery: { type: Date },
   deliveredAt: { type: Date },
+  // Idempotency state for the automatic delivered invoice email.
+  deliveredBillEmailStatus: { type: String, enum: ['sending', 'sent', 'failed'] },
+  deliveredBillEmailSentAt: Date,
+  deliveredBillEmailProviderId: String,
+  deliveredBillEmailError: String,
   isRead: { type: Boolean, default: false },
   giftCard: { type: String },
   giftCardDiscount: { type: Number, default: 0 },

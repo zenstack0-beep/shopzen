@@ -9,6 +9,7 @@ const { Coupon, GiftCard, Notification, Settings, DeliveryService } = require('.
 const { auth, adminAuth } = require('../middleware/auth');
 const { sendPurchaseEvent } = require('../services/metaCAPI');
 const { sendOrderWhatsAppNotification } = require('../services/whatsappOrderNotify');
+const { buildInvoicePdf } = require('../services/invoicePdf');
 const {
   sendMail,
   getAdminEmail,
@@ -25,6 +26,7 @@ const {
   cancelRejectedAdminHtml,
   cancelAutoDecisionAdminHtml,
   orderStatusUpdateHtml,
+  orderDeliveredCustomerHtml,
   isEmailEnabled,
 } = require('../utils/mailer');
 const multer = require('multer');
@@ -46,6 +48,25 @@ function absoluteSlipUrl(relPath) {
   }
 
   return `${base.replace(/\/$/, '')}${relPath}`;
+}
+
+async function sendDeliveredBill(order, note) {
+  const deliveredHtml = await orderDeliveredCustomerHtml(order, note);
+  const settingRows = await Settings.find({ key: { $in: ['storeName','storeTagline','storeEmail','storePhone','storeAddress','logoUrl','primaryColor'] } }).lean();
+  const invoiceSettings = Object.fromEntries(settingRows.map(row => [row.key, row.value]));
+  const invoicePdf = await buildInvoicePdf(order, invoiceSettings);
+  const safeInvoiceNumber = String(order.orderNumber || order._id).replace(/[^a-zA-Z0-9_-]/g, '-');
+  return sendMail({
+    to: order.billing.email,
+    subject: `Delivered — Invoice for ${order.orderNumber} | ShopZen`,
+    html: deliveredHtml,
+    text: `Hi ${order.billing.firstName || 'Customer'},\n\nYour order ${order.orderNumber} has been delivered.\n\n${(order.items || []).map(item => `${item.name} × ${item.quantity}: Rs. ${Number(item.subtotal || 0).toLocaleString()}`).join('\n')}\n\nSubtotal: Rs. ${Number(order.subtotal || 0).toLocaleString()}\nShipping: Rs. ${Number(order.shippingCost || 0).toLocaleString()}\nTotal: Rs. ${Number(order.total || 0).toLocaleString()}\n\nThank you for shopping with ShopZen.`,
+    attachments: [{
+      filename: `ShopZen-Invoice-${safeInvoiceNumber}.pdf`,
+      content: invoicePdf,
+      contentType: 'application/pdf',
+    }],
+  });
 }
 
 // ── Cloudinary setup for payment slips ───────────────────────────────────────
@@ -225,6 +246,8 @@ router.get('/admin/all', adminAuth, async (req, res) => {
 router.put('/admin/:id/status', adminAuth, async (req, res) => {
   try {
     const { status, note, trackingNumber, deliveryPartner } = req.body;
+    const previousOrder = await Order.findById(req.params.id).select('orderStatus').lean();
+    if (!previousOrder) return res.status(404).json({ message: 'Order not found' });
     const update = { orderStatus: status, updatedAt: Date.now() };
     if (trackingNumber) update.trackingNumber = trackingNumber;
     if (deliveryPartner) update.deliveryPartner = deliveryPartner;
@@ -243,7 +266,7 @@ router.put('/admin/:id/status', adminAuth, async (req, res) => {
         },
       },
       { new: true }
-    );
+    ).populate('items.product', 'name slug');
 
     if (!order) return res.status(404).json({ message: 'Order not found' });
 
@@ -259,16 +282,81 @@ router.put('/admin/:id/status', adminAuth, async (req, res) => {
     // Email customer
     const notifyStatuses = ['confirmed', 'processing', 'shipped', 'out_for_delivery', 'delivered', 'cancelled'];
     if (order.billing?.email && notifyStatuses.includes(status)) {
-      if (await isEmailEnabled('order_status_customer')) sendMail({
-        to: order.billing.email,
-        subject: `Order Update — ${order.orderNumber} | ShopZen`,
-        html: await orderStatusUpdateHtml(order, status, note),
-      }).catch(err => console.error('[STATUS EMAIL]', err.message));
+      if (status === 'delivered') {
+        if (await isEmailEnabled('order_delivered_bill_customer')) {
+          // Atomic claim prevents duplicate invoice delivery if two admins save
+          // Delivered simultaneously. A failed claim may be retried safely by
+          // saving Delivered again; a sent invoice is never sent twice.
+          const claimed = await Order.findOneAndUpdate(
+            { _id: order._id, deliveredBillEmailStatus: { $nin: ['sending', 'sent'] } },
+            { $set: { deliveredBillEmailStatus: 'sending', deliveredBillEmailError: '' } },
+            { new: true }
+          );
+          if (claimed) {
+            sendDeliveredBill(order, note).then(data => Order.findByIdAndUpdate(order._id, {
+              deliveredBillEmailStatus: 'sent',
+              deliveredBillEmailSentAt: new Date(),
+              deliveredBillEmailProviderId: data?.id || '',
+              deliveredBillEmailError: '',
+            })).catch(err => {
+              console.error('[DELIVERED BILL EMAIL]', err.message);
+              return Order.findByIdAndUpdate(order._id, {
+                deliveredBillEmailStatus: 'failed',
+                deliveredBillEmailError: String(err.message || 'Email delivery failed').slice(0, 500),
+              });
+            });
+          }
+        }
+      } else if (status !== 'delivered' && await isEmailEnabled('order_status_customer')) {
+        sendMail({
+          to: order.billing.email,
+          subject: `Order Update — ${order.orderNumber} | ShopZen`,
+          html: await orderStatusUpdateHtml(order, status, note),
+        }).catch(err => console.error('[STATUS EMAIL]', err.message));
+      }
     }
 
     res.json(order);
   } catch (err) {
     res.status(500).json({ message: err.message });
+  }
+});
+
+// ── Admin — Explicitly resend delivered invoice + review links ───────────────
+router.post('/admin/:id/resend-delivered-bill', adminAuth, async (req, res) => {
+  try {
+    const order = await Order.findOne({ _id: req.params.id, orderStatus: 'delivered' })
+      .populate('items.product', 'name slug');
+    if (!order) return res.status(404).json({ message: 'Delivered order not found' });
+    if (!order.billing?.email) return res.status(400).json({ message: 'Customer email is missing' });
+
+    // Manual resend intentionally allows a previously sent invoice to be sent
+    // again, but still prevents two resend requests from running concurrently.
+    const claimed = await Order.findOneAndUpdate(
+      { _id: order._id, deliveredBillEmailStatus: { $ne: 'sending' } },
+      { $set: { deliveredBillEmailStatus: 'sending', deliveredBillEmailError: '' } },
+      { new: true }
+    );
+    if (!claimed) return res.status(409).json({ message: 'Invoice email is already being sent' });
+
+    try {
+      const data = await sendDeliveredBill(order, req.body.note || 'Invoice resent by ShopZen support.');
+      const updated = await Order.findByIdAndUpdate(order._id, {
+        deliveredBillEmailStatus: 'sent', deliveredBillEmailSentAt: new Date(),
+        deliveredBillEmailProviderId: data?.id || '', deliveredBillEmailError: '',
+        $push: { statusHistory: { status: 'delivered', note: 'Delivered invoice email resent to customer', updatedBy: req.user.email } },
+      }, { new: true });
+      return res.json(updated);
+    } catch (error) {
+      await Order.findByIdAndUpdate(order._id, {
+        deliveredBillEmailStatus: 'failed',
+        deliveredBillEmailError: String(error.message || 'Email delivery failed').slice(0, 500),
+      });
+      return res.status(502).json({ message: 'Invoice email could not be sent' });
+    }
+  } catch (error) {
+    console.error('[RESEND DELIVERED BILL]', error.message);
+    res.status(500).json({ message: 'Invoice resend failed' });
   }
 });
 

@@ -42,7 +42,7 @@ const getFromAddress = async (theme) => {
 };
 
 // ── sendMail ──────────────────────────────────────────────────────────────────
-const sendMail = async ({ to, subject, html, text }) => {
+const sendMail = async ({ to, subject, html, text, attachments }) => {
   try {
     const resend = getResendClient();
     const theme = await getTheme().catch(() => ({ storeName: 'ShopZen', primary: '#15803d' }));
@@ -53,7 +53,11 @@ const sendMail = async ({ to, subject, html, text }) => {
       console.log(`[MAIL] Sending via Resend | from:${from} → to:${to}`);
     }
 
-    const { data, error } = await resend.emails.send({ from, to, subject, html, ...(text ? { text } : {}) });
+    const { data, error } = await resend.emails.send({
+      from, to, subject, html,
+      ...(text ? { text } : {}),
+      ...(Array.isArray(attachments) && attachments.length ? { attachments } : {}),
+    });
 
     if (error) {
       // Resend returns structured errors — surface them clearly
@@ -512,6 +516,16 @@ const orderDeliveredCustomerHtml = async (order, note) => {
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;color:#374151">${item.name} × ${item.quantity}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;color:#374151;text-align:right;font-weight:600">${sym} ${item.subtotal?.toLocaleString()}</td>
     </tr>`).join('');
+  const couponDiscount = Number(order.couponDiscount || order.discount || 0);
+  const giftCardDiscount = Number(order.giftCardDeduction || order.giftCardDiscount || 0);
+  const billingAddress = [order.billing?.street, order.billing?.city, order.billing?.country].filter(Boolean).join(', ');
+  const shippingAddress = [order.shipping?.street, order.shipping?.city, order.shipping?.country].filter(Boolean).join(', ');
+  const storefrontUrl = (process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
+  const reviewLinks = order.customer ? (order.items || []).map(item => {
+    const slug = item.product?.slug;
+    if (!slug) return '';
+    return `<a href="${storefrontUrl}/product/${encodeURIComponent(slug)}#reviews" style="display:inline-block;margin:5px;padding:10px 16px;background:#15803d;color:#fff;text-decoration:none;border-radius:8px;font-size:13px;font-weight:700">Review ${item.name}</a>`;
+  }).filter(Boolean).join('') : '';
   return wrapper(`
     ${header('📦 Order Delivered! 🎉', t)}
     <div style="padding:32px">
@@ -523,6 +537,18 @@ const orderDeliveredCustomerHtml = async (order, note) => {
         <p style="margin:8px 0 0;font-size:13px;color:#166534">Delivered on ${new Date().toLocaleDateString('en-LK', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
         ${note ? `<p style="margin:8px 0 0;font-size:13px;color:#166534;font-style:italic">${note}</p>` : ''}
       </div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px">
+        <div style="flex:1;min-width:210px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;padding:14px">
+          <p style="margin:0 0 6px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase">Billed To</p>
+          <p style="margin:0;font-size:13px;font-weight:700;color:#111">${order.billing?.firstName || ''} ${order.billing?.lastName || ''}</p>
+          <p style="margin:4px 0 0;font-size:12px;line-height:1.5;color:#6b7280">${order.billing?.email || ''}${order.billing?.phone ? `<br>${order.billing.phone}` : ''}${billingAddress ? `<br>${billingAddress}` : ''}</p>
+        </div>
+        <div style="flex:1;min-width:210px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;padding:14px">
+          <p style="margin:0 0 6px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase">Delivered To</p>
+          <p style="margin:0;font-size:13px;font-weight:700;color:#111">${order.shipping?.firstName || order.billing?.firstName || ''} ${order.shipping?.lastName || order.billing?.lastName || ''}</p>
+          <p style="margin:4px 0 0;font-size:12px;line-height:1.5;color:#6b7280">${shippingAddress || billingAddress}${order.shipping?.phone ? `<br>${order.shipping.phone}` : ''}</p>
+        </div>
+      </div>
       <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
         <thead><tr style="background:#f8fafc">
           <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600">ITEM</th>
@@ -530,12 +556,17 @@ const orderDeliveredCustomerHtml = async (order, note) => {
         </tr></thead>
         <tbody>${itemRows}</tbody>
         <tfoot>
-          <tr style="border-top:2px solid #e5e7eb"><td style="padding:12px;font-size:15px;font-weight:700;color:#111">Total Paid</td><td style="padding:12px;font-size:15px;font-weight:700;color:#15803d;text-align:right">${sym} ${order.total?.toLocaleString()}</td></tr>
+          <tr style="border-top:2px solid #e5e7eb"><td style="padding:8px 12px;font-size:13px;color:#6b7280">Subtotal</td><td style="padding:8px 12px;font-size:13px;color:#374151;text-align:right">${sym} ${Number(order.subtotal || 0).toLocaleString()}</td></tr>
+          ${couponDiscount > 0 ? `<tr><td style="padding:8px 12px;font-size:13px;color:#16a34a">Coupon discount</td><td style="padding:8px 12px;font-size:13px;color:#16a34a;text-align:right">− ${sym} ${couponDiscount.toLocaleString()}</td></tr>` : ''}
+          ${giftCardDiscount > 0 ? `<tr><td style="padding:8px 12px;font-size:13px;color:#7c3aed">Gift card</td><td style="padding:8px 12px;font-size:13px;color:#7c3aed;text-align:right">− ${sym} ${giftCardDiscount.toLocaleString()}</td></tr>` : ''}
+          <tr><td style="padding:8px 12px;font-size:13px;color:#6b7280">Shipping</td><td style="padding:8px 12px;font-size:13px;color:#374151;text-align:right">${sym} ${Number(order.shippingCost || 0).toLocaleString()}</td></tr>
+          <tr style="border-top:2px solid #e5e7eb"><td style="padding:12px;font-size:15px;font-weight:700;color:#111">Total</td><td style="padding:12px;font-size:15px;font-weight:700;color:#15803d;text-align:right">${sym} ${Number(order.total || 0).toLocaleString()}</td></tr>
         </tfoot>
       </table>
       <div style="background:#fefce8;border:1px solid #fde047;border-radius:10px;padding:16px;text-align:center;margin-bottom:20px">
         <p style="margin:0;font-size:14px;font-weight:600;color:#854d0e">Enjoyed your order? Leave us a review! ⭐</p>
         <p style="margin:6px 0 0;font-size:13px;color:#92400e">Your feedback helps us serve you better.</p>
+        ${reviewLinks ? `<div style="margin-top:12px">${reviewLinks}</div>` : ''}
       </div>
       <p style="color:#9ca3af;font-size:12px;text-align:center">Thank you for shopping with ${t.storeName}! 🙏</p>
     </div>`, t);
