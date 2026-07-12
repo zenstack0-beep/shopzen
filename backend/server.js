@@ -179,6 +179,8 @@ app.use('/api/meta',          require('./routes/meta'));   // Meta CAPI relay
 // ─── SEO aliases ──────────────────────────────────────────────────────────────
 app.get('/sitemap.xml', (req, res) => res.redirect(301, '/api/seo/sitemap.xml'));
 app.get('/robots.txt',  (req, res) => res.redirect(301, '/api/seo/robots.txt'));
+app.get('/product-sitemap.xml', (req, res) => res.redirect(301, '/api/seo/product-sitemap.xml'));
+app.get('/google-merchant-feed.xml', (req, res) => res.redirect(301, '/api/seo/google-merchant-feed.xml'));
 
 // ─── Admin routes (+ audit logging) ──────────────────────────────────────────
 // SECURITY: auditLog writes one-line JSON to logs/audit.log for every mutating

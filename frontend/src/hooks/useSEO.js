@@ -496,7 +496,10 @@ export default function useSEO({
                        .replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() || product.name,
         image: imageArr.length > 0 ? imageArr : undefined,
         sku: product.sku || product._id,
-        mpn: product.sku || undefined,
+        mpn: product.mpn || product.sku || undefined,
+        ...(product.gtin ? { gtin: product.gtin } : {}),
+        category: product.category?.name || undefined,
+        url: finalUrl,
         brand: product.brand
           ? { '@type': 'Brand', name: product.brand }
           : { '@type': 'Brand', name: siteName },
@@ -506,7 +509,12 @@ export default function useSEO({
           priceCurrency: cfg.currencyCode || 'LKR',
           price: price != null ? String(price) : '0',
           availability,
-          itemCondition: 'https://schema.org/NewCondition',
+          itemCondition: product.condition === 'used'
+            ? 'https://schema.org/UsedCondition'
+            : product.condition === 'refurbished'
+              ? 'https://schema.org/RefurbishedCondition'
+              : 'https://schema.org/NewCondition',
+          validFrom: product.createdAt ? new Date(product.createdAt).toISOString() : undefined,
           priceValidUntil: product.saleEndsAt
             ? new Date(product.saleEndsAt).toISOString().split('T')[0]
             : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],

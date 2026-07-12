@@ -9,6 +9,14 @@
       "destination": "https://shopzen-production.up.railway.app/api/seo/products-sitemap.xml"
     },
     {
+      "source": "/product-sitemap.xml",
+      "destination": "https://shopzen-production.up.railway.app/api/seo/product-sitemap.xml"
+    },
+    {
+      "source": "/google-merchant-feed.xml",
+      "destination": "https://shopzen-production.up.railway.app/api/seo/google-merchant-feed.xml"
+    },
+    {
       "source": "/api/seo/categories-sitemap.xml",
       "destination": "https://shopzen-production.up.railway.app/api/seo/categories-sitemap.xml"
     },

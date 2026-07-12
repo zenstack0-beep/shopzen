@@ -32,6 +32,16 @@ function xe(str) {
     .replace(/"/g,  '&quot;');
 }
 
+function productConditionUrl(condition) {
+  if (condition === 'used') return 'https://schema.org/UsedCondition';
+  if (condition === 'refurbished') return 'https://schema.org/RefurbishedCondition';
+  return 'https://schema.org/NewCondition';
+}
+
+function googleCondition(condition) {
+  return ['used', 'refurbished'].includes(condition) ? condition : 'new';
+}
+
 // ── Logo constant ─────────────────────────────────────────────────────────────
 // Google Organization schema logo: square PNG, min 112x112, max 1000x1000.
 // This is the Cloudinary URL for your ShopZen logo, padded to 512x512.
@@ -125,13 +135,6 @@ router.get('/sitemap.xml', async (req, res) => {
 // ── GET /api/seo/products-sitemap.xml  — All products with ALL images ─────────
 router.get('/products-sitemap.xml', async (req, res) => {
   try {
-    const now = Date.now();
-    if (cache.productsSitemap && now - cache.productsSitemap.at < CACHE_TTL) {
-      res.setHeader('Content-Type', 'application/xml');
-      res.setHeader('Cache-Control', 'public, max-age=3600');
-      return res.send(cache.productsSitemap.data);
-    }
-
     const [siteUrl, products] = await Promise.all([
       getSiteUrl(),
       Product.find(
@@ -168,13 +171,59 @@ router.get('/products-sitemap.xml', async (req, res) => {
 ${entries.join('\n')}
 </urlset>`;
 
-    cache.productsSitemap = { data: xml, at: now };
     res.setHeader('Content-Type', 'application/xml');
-    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=300, stale-while-revalidate=60');
     res.send(xml);
   } catch (err) {
     console.error('Products sitemap error:', err);
     res.status(500).send('<?xml version="1.0"?><error>Failed</error>');
+  }
+});
+
+router.get('/product-sitemap.xml', (_req, res) => {
+  res.redirect(301, '/api/seo/products-sitemap.xml');
+});
+
+// Google Merchant Center RSS feed, generated from the current MongoDB data.
+router.get('/google-merchant-feed.xml', async (_req, res) => {
+  try {
+    const [siteUrl, products] = await Promise.all([
+      getSiteUrl(),
+      Product.find({ isActive: true }).populate('category', 'name').lean(),
+    ]);
+    const items = products.map(product => {
+      const url = `${siteUrl}/product/${product.slug}`;
+      const images = [...new Set([product.thumbnail, ...(product.images || [])].filter(Boolean))];
+      const description = String(product.shortDescription || product.description || product.name)
+        .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 5000);
+      const additionalImages = images.slice(1, 11)
+        .map(image => `    <g:additional_image_link>${xe(image)}</g:additional_image_link>`).join('\n');
+      return `  <item>
+    <g:id>${xe(product.sku || product._id)}</g:id>
+    <title>${xe(product.name)}</title>
+    <description>${xe(description)}</description>
+    <link>${xe(url)}</link>
+    <g:image_link>${xe(images[0] || `${siteUrl}/og-default.png`)}</g:image_link>
+${additionalImages ? additionalImages + '\n' : ''}    <g:availability>${product.stock > 0 ? 'in_stock' : 'out_of_stock'}</g:availability>
+    <g:condition>${googleCondition(product.condition)}</g:condition>
+    <g:price>${Number(product.price).toFixed(2)} LKR</g:price>
+${product.salePrice ? `    <g:sale_price>${Number(product.salePrice).toFixed(2)} LKR</g:sale_price>\n` : ''}    <g:brand>${xe(product.brand || 'ShopZen')}</g:brand>
+${product.gtin ? `    <g:gtin>${xe(product.gtin)}</g:gtin>\n` : ''}${product.mpn ? `    <g:mpn>${xe(product.mpn)}</g:mpn>\n` : ''}    <g:identifier_exists>${product.gtin || product.mpn || product.brand ? 'yes' : 'no'}</g:identifier_exists>
+${product.category?.name ? `    <g:product_type>${xe(product.category.name)}</g:product_type>\n` : ''}    <g:shipping><g:country>LK</g:country><g:service>Standard</g:service><g:price>0.00 LKR</g:price></g:shipping>
+  </item>`;
+    }).join('\n');
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<rss xmlns:g="http://base.google.com/ns/1.0" version="2.0"><channel>
+  <title>ShopZen Products</title><link>${xe(siteUrl)}</link>
+  <description>Automatically synchronized ShopZen product feed</description>
+${items}
+</channel></rss>`;
+    res.setHeader('Content-Type', 'application/rss+xml; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=300, stale-while-revalidate=60');
+    res.send(xml);
+  } catch (err) {
+    console.error('Google Merchant feed error:', err.message);
+    res.status(500).send('<?xml version="1.0"?><error>Feed generation failed</error>');
   }
 });
 
@@ -341,6 +390,7 @@ Crawl-delay: 1
 
 # Sitemap index
 Sitemap: ${siteUrl}/sitemap.xml
+Sitemap: ${siteUrl}/product-sitemap.xml
 `;
     }
 
@@ -647,7 +697,9 @@ router.get('/product-meta/:slug', async (req, res) => {
         ? new Date(product.saleEndsAt).toISOString().split('T')[0]
         : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       availability,
-      itemCondition: 'https://schema.org/NewCondition',
+      itemCondition: productConditionUrl(product.condition),
+      availabilityStarts: product.createdAt ? new Date(product.createdAt).toISOString() : undefined,
+      validFrom: product.createdAt ? new Date(product.createdAt).toISOString() : undefined,
       seller: { '@type': 'Organization', name: storeName },
       shippingDetails: {
         '@type': 'OfferShippingDetails',
@@ -687,7 +739,8 @@ router.get('/product-meta/:slug', async (req, res) => {
       // ALL images included for rich results eligibility
       image:       uniqueImages.slice(0, 10),
       sku:         product.sku || product._id.toString(),
-      mpn:         product.sku || undefined,
+      mpn:         product.mpn || product.sku || undefined,
+      ...(product.gtin ? { gtin: product.gtin } : {}),
       brand:       product.brand ? { '@type': 'Brand', name: product.brand } : undefined,
       category:    catName,
       url:         productUrl,
@@ -705,7 +758,7 @@ router.get('/product-meta/:slug', async (req, res) => {
     };
 
     if (!product.brand) delete schema.brand;
-    if (!product.sku)   delete schema.mpn;
+    if (!product.mpn && !product.sku) delete schema.mpn;
 
     // Organization schema on every page
     const orgSchema = {
@@ -1250,7 +1303,10 @@ const seoRenderMiddleware = async (req, res) => {
           // ALL images for rich results
           image: uniqueImages.slice(0, 10),
           sku: product.sku || product._id.toString(),
-          mpn: product.sku || undefined,
+          mpn: product.mpn || product.sku || undefined,
+          ...(product.gtin ? { gtin: product.gtin } : {}),
+          category: product.category?.name || undefined,
+          url: productUrl,
           ...(product.brand ? { brand: { '@type': 'Brand', name: product.brand } } : {}),
           offers: {
             '@type': 'Offer', url: productUrl, priceCurrency: 'LKR',
@@ -1259,7 +1315,9 @@ const seoRenderMiddleware = async (req, res) => {
               ? new Date(product.saleEndsAt).toISOString().split('T')[0]
               : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
             availability: product.stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
-            itemCondition: 'https://schema.org/NewCondition',
+            itemCondition: productConditionUrl(product.condition),
+            availabilityStarts: product.createdAt ? new Date(product.createdAt).toISOString() : undefined,
+            validFrom: product.createdAt ? new Date(product.createdAt).toISOString() : undefined,
             seller: { '@type': 'Organization', name: storeName },
             shippingDetails: {
               '@type': 'OfferShippingDetails',
@@ -1289,7 +1347,7 @@ const seoRenderMiddleware = async (req, res) => {
           } : {}),
           ...(reviewSchemas.length ? { review: reviewSchemas } : {}),
         };
-        if (!product.sku) delete schema.mpn;
+        if (!product.mpn && !product.sku) delete schema.mpn;
 
         const breadcrumb = {
           '@context': 'https://schema.org', '@type': 'BreadcrumbList',
@@ -1319,6 +1377,18 @@ const seoRenderMiddleware = async (req, res) => {
     } catch (err) {
       console.error('[SSR product]', err.message);
     }
+    const notFound = injectMeta(html, {
+      title: `Product Not Found | ${storeName}`,
+      desc: 'This product is no longer available. Browse current products at ShopZen.',
+      canonical: `${siteUrl}${req.path}`,
+      ogImage: defaultOgImage,
+      ogType: 'website',
+      robots: 'noindex,follow',
+      schemas: [orgSchema],
+    });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(404).send(injectSeoWindowConfig(notFound, _topMeta));
   }
 
   // ── /category/:slug ─────────────────────────────────────────────────────────
