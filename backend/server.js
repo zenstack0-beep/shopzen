@@ -175,6 +175,8 @@ app.use('/api/pages',         require('./routes/pages'));
 app.use('/api/subscribers',   require('./routes/subscribers'));
 app.use('/api/seo',           require('./routes/seo'));
 app.use('/api/meta',          require('./routes/meta'));   // Meta CAPI relay
+app.use('/api/marketing',     require('./routes/marketing'));
+app.use('/api/admin/marketing', auditLog, require('./routes/marketingAdmin'));
 
 // ─── SEO aliases ──────────────────────────────────────────────────────────────
 app.get('/sitemap.xml', (req, res) => res.redirect(301, '/api/seo/sitemap.xml'));
@@ -241,6 +243,9 @@ async function startServer() {
 
     const { startBackupScheduler } = require('./services/backupScheduler');
     startBackupScheduler();
+
+    const { startMarketingScheduler } = require('./services/marketingScheduler');
+    startMarketingScheduler();
 
     const PORT = process.env.PORT || 5001;
     app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));

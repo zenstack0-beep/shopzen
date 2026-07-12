@@ -8,6 +8,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { useSeasonal } from '../../context/SeasonalContext';
 import API from '../../utils/api';
 import toast from 'react-hot-toast';
+import { trackMarketingEvent } from '../../utils/marketingTracking';
 import {
   resolveDeliveryFee,
   resolveBenefit,
@@ -529,6 +530,13 @@ export default function Checkout() {
   useEffect(() => {
     if (items.length === 0 && !orderPlaced.current) navigate('/cart');
   }, [items, navigate]);
+
+  const checkoutTracked = useRef(false);
+  useEffect(() => {
+    if (checkoutTracked.current || !items.length) return;
+    checkoutTracked.current = true;
+    items.forEach(item => trackMarketingEvent('checkout_started', { productId: item._id, metadata: { quantity: item.quantity } }));
+  }, [items]);
 
   // Restore saved checkout state
   useEffect(() => {

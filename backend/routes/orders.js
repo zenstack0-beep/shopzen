@@ -659,6 +659,20 @@ router.post('/', orderRateLimiter, async (req, res) => {
       return res.status(409).json({ message: msg });
     }
 
+    // Marketing conversion/purchase exclusion runs only after the order and
+    // benefit transaction are authoritative. It never delays checkout.
+    Promise.resolve().then(async () => {
+      const { CustomerBehaviorEvent, MarketingRecommendation } = require('../models/Marketing');
+      const purchasedIds = orderItems.map(item => item.product);
+      if (!userId) return;
+      await CustomerBehaviorEvent.insertMany(purchasedIds.map(productId => ({ customerId: userId, productId, eventType: 'purchase_completed', source: 'checkout', metadata: { orderId: order._id } })), { ordered: false });
+      await MarketingRecommendation.updateMany({ customerId: userId, productId: { $in: purchasedIds }, status: { $in: ['pending_approval','approved','scheduled'] } }, { status: 'cancelled', cancelledAt: new Date(), cancellationReason: 'Customer purchased product before send' });
+      const candidates = await MarketingRecommendation.find({ customerId: userId, productId: { $in: purchasedIds }, status: 'sent', sentAt: { $gte: new Date(Date.now() - 7 * 86400000) } });
+      for (const rec of candidates) {
+        rec.status = 'converted'; rec.convertedAt = new Date(); rec.attribution = { orderId: order._id, revenue: orderItems.filter(i => String(i.product) === String(rec.productId)).reduce((n,i)=>n+i.subtotal,0), method: rec.clickAt ? 'click' : 'view_through', purchaseTimestamp: new Date() }; await rec.save();
+      }
+    }).catch(error => console.error('[Marketing attribution]', error.message));
+
     // ── DEBUG: confirm a real order was persisted to MongoDB (survived the ─────
     // race-condition rollback check above) before any Meta Purchase tracking
     // runs. If this line is not in the logs, no Purchase event (browser pixel

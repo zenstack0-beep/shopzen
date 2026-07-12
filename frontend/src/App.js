@@ -45,6 +45,7 @@ const AdminReturns       = lazy(() => import('./pages/admin/Returns'));
 const AdminGiftCards     = lazy(() => import('./pages/admin/GiftCards'));
 const AdminSeasonal      = lazy(() => import('./pages/admin/Seasonal'));
 const AdminSubscribers   = lazy(() => import('./pages/admin/Subscribers'));
+const AdminMarketing     = lazy(() => import('./pages/admin/Marketing'));
 const AdminSEO           = lazy(() => import('./pages/admin/SEO'));
 const AnimationSettings  = lazy(() => import('./pages/admin/AnimationSettings'));
 const ThemeBuilder       = lazy(() => import('./pages/admin/ThemeBuilder'));
@@ -185,7 +186,7 @@ export default function App() {
         <ThemeProvider>
           <SeasonalProvider>
             <AnimationProvider>
-              <BrowserRouter>
+              <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
                 <ScrollToTop/>
                 <AnalyticsBootstrap />
                 <Toaster
@@ -246,6 +247,7 @@ export default function App() {
                       <Route path="returns"          element={<AdminReturns/>}/>
                       <Route path="gift-cards"       element={<AdminGiftCards/>}/>
                       <Route path="subscribers"      element={<AdminSubscribers/>}/>
+                      <Route path="marketing"        element={<AdminMarketing/>}/>
                       <Route path="seo"              element={<AdminSEO/>}/>
                       <Route path="settings"         element={<AdminSettings/>}/>
                       <Route path="layout"           element={<LayoutEditor/>}/>

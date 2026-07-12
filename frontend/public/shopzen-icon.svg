@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="ShopZen">
+  <rect width="512" height="512" rx="112" fill="#15803d"/>
+  <path d="M142 190h228l-22 218H164l-22-218Z" fill="#fff"/>
+  <path d="M190 205v-35c0-43 27-74 66-74s66 31 66 74v35" fill="none" stroke="#fff" stroke-width="30" stroke-linecap="round"/>
+  <path d="M307 245c-13-12-31-18-52-18-29 0-49 14-49 35 0 19 15 28 51 36 39 9 58 25 58 54 0 34-27 56-69 56-28 0-53-9-70-25" fill="none" stroke="#15803d" stroke-width="25" stroke-linecap="round"/>
+</svg>

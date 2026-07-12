@@ -15,7 +15,11 @@ const hasWindow = typeof window !== 'undefined';
 const hasLocalStorage = () => hasWindow && typeof window.localStorage !== 'undefined';
 
 const normalizeBaseURL = (url) => {
-  const rawInput = (url || DEFAULT_API_URL).trim().replace(/\/+$/, '');
+  const configured = String(url || '').trim();
+  // In local development, an intentionally blank REACT_APP_API_URL uses the
+  // CRA proxy from package.json (/api → localhost:5001). Production continues
+  // to bypass Vercel and call Railway directly.
+  const rawInput = (configured || (process.env.NODE_ENV === 'development' ? '/api' : DEFAULT_API_URL)).replace(/\/+$/, '');
 
   try {
     const parsed = new URL(rawInput, hasWindow ? window.location.origin : DEFAULT_API_URL);

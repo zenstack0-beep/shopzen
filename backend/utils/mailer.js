@@ -42,7 +42,7 @@ const getFromAddress = async (theme) => {
 };
 
 // ── sendMail ──────────────────────────────────────────────────────────────────
-const sendMail = async ({ to, subject, html }) => {
+const sendMail = async ({ to, subject, html, text }) => {
   try {
     const resend = getResendClient();
     const theme = await getTheme().catch(() => ({ storeName: 'ShopZen', primary: '#15803d' }));
@@ -53,7 +53,7 @@ const sendMail = async ({ to, subject, html }) => {
       console.log(`[MAIL] Sending via Resend | from:${from} → to:${to}`);
     }
 
-    const { data, error } = await resend.emails.send({ from, to, subject, html });
+    const { data, error } = await resend.emails.send({ from, to, subject, html, ...(text ? { text } : {}) });
 
     if (error) {
       // Resend returns structured errors — surface them clearly

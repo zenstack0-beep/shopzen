@@ -10,6 +10,7 @@ import { useAnimation } from '../../context/AnimationContext';
 import { use3DTilt, MagneticButton, Card3D } from '../../components/Cinematic';
 import toast from 'react-hot-toast';
 import useSEO, { trackAddToCart, trackViewItem } from '../../hooks/useSEO';
+import { trackMarketingEvent } from '../../utils/marketingTracking';
 import { WhatsAppProductInquiry } from '../../components/WhatsAppWidget';
 
 gsap.registerPlugin(ScrollTrigger);
@@ -180,6 +181,7 @@ export default function ProductDetail() {
     API.get(`/products/${slug}`).then(r => {
       setProduct(r.data);
       trackViewItem(r.data);
+      trackMarketingEvent('product_viewed', { productId: r.data._id, categoryId: r.data.category?._id });
       API.get(`/reviews/product/${r.data._id}`).then(rr => setReviews(rr.data || [])).catch(() => {});
 
       if (user) {
@@ -390,7 +392,9 @@ export default function ProductDetail() {
 
   const toggleWishlist = async () => {
     if (!user) { toast.error('Please log in'); return; }
+    const adding = !wishlist.includes(product._id);
     await API.post(`/auth/wishlist/${product._id}`);
+    if (adding) trackMarketingEvent('wishlist_added', { productId: product._id });
     setWishlist(p => p.includes(product._id) ? p.filter(id => id !== product._id) : [...p, product._id]);
     toast.success(wishlist.includes(product._id) ? 'Removed from wishlist' : '❤️ Added to wishlist!');
   };

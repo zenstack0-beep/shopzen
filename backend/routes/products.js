@@ -728,6 +728,10 @@ router.put('/:id', adminAuth, async (req, res) => {
       req.params.id, { $set: { ...req.body, updatedAt: new Date() } }, { new: true, runValidators: false }
     );
     res.json(product);
+    if (product && (product.isActive === false || Number(product.stock) <= 0)) {
+      const { MarketingRecommendation } = require('../models/Marketing');
+      MarketingRecommendation.updateMany({ productId: product._id, status: { $in: ['pending_approval','approved','scheduled'] } }, { status: 'cancelled', cancelledAt: new Date(), cancellationReason: 'Product became unavailable' }).catch(err => console.error('[Marketing product sync]', err.message));
+    }
   } catch (err) {
     return res.status(500).json({ message: err.message });
   }
@@ -806,6 +810,8 @@ router.delete('/:id', adminAuth, async (req, res) => {
     const deleted = await Product.findByIdAndDelete(req.params.id);
     if (!deleted) return res.status(404).json({ message: 'Product not found' });
     res.json({ message: 'Product deleted' });
+    const { MarketingRecommendation } = require('../models/Marketing');
+    MarketingRecommendation.updateMany({ productId: deleted._id, status: { $in: ['pending_approval','approved','scheduled'] } }, { status: 'cancelled', cancelledAt: new Date(), cancellationReason: 'Product was deleted' }).catch(err => console.error('[Marketing product sync]', err.message));
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 

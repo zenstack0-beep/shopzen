@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { effectivePrice, computeSubtotal } from '../utils/discountEngine';
+import { trackMarketingEvent } from '../utils/marketingTracking';
 
 const CartContext = createContext();
 
@@ -13,6 +14,7 @@ export const CartProvider = ({ children }) => {
   useEffect(() => { localStorage.setItem('cart', JSON.stringify(items)); }, [items]);
 
   const addItem = (product, quantity = 1) => {
+    trackMarketingEvent('added_to_cart', { productId: product._id, metadata: { quantity } });
     setItems(prev => {
       const variantKey = product.selectedVariants && Object.keys(product.selectedVariants).length > 0
         ? JSON.stringify(product.selectedVariants)
@@ -45,7 +47,11 @@ export const CartProvider = ({ children }) => {
     setIsOpen(true);
   };
 
-  const removeItem    = (cartKey) => setItems(prev => prev.filter(i => (i.cartKey || i._id) !== cartKey));
+  const removeItem = (cartKey) => setItems(prev => {
+    const removed = prev.find(i => (i.cartKey || i._id) === cartKey);
+    if (removed) trackMarketingEvent('removed_from_cart', { productId: removed._id });
+    return prev.filter(i => (i.cartKey || i._id) !== cartKey);
+  });
   const updateQuantity = (cartKey, quantity) => {
     if (quantity < 1) { removeItem(cartKey); return; }
     setItems(prev => prev.map(i => (i.cartKey || i._id) === cartKey ? { ...i, quantity } : i));
