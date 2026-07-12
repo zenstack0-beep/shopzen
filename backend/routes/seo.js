@@ -21,6 +21,7 @@ const fs       = require('fs');
 const path     = require('path');
 const Product          = require('../models/Product');
 const { Category, Settings, Review } = require('../models/index');
+const { buildGoogleMerchantFeed } = require('../services/googleMerchantFeed');
 
 // ── XML helpers ───────────────────────────────────────────────────────────────
 function xe(str) {
@@ -36,10 +37,6 @@ function productConditionUrl(condition) {
   if (condition === 'used') return 'https://schema.org/UsedCondition';
   if (condition === 'refurbished') return 'https://schema.org/RefurbishedCondition';
   return 'https://schema.org/NewCondition';
-}
-
-function googleCondition(condition) {
-  return ['used', 'refurbished'].includes(condition) ? condition : 'new';
 }
 
 // ── Logo constant ─────────────────────────────────────────────────────────────
@@ -191,35 +188,16 @@ router.get('/google-merchant-feed.xml', async (_req, res) => {
       getSiteUrl(),
       Product.find({ isActive: true }).populate('category', 'name').lean(),
     ]);
-    const items = products.map(product => {
-      const url = `${siteUrl}/product/${product.slug}`;
-      const images = [...new Set([product.thumbnail, ...(product.images || [])].filter(Boolean))];
-      const description = String(product.shortDescription || product.description || product.name)
-        .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 5000);
-      const additionalImages = images.slice(1, 11)
-        .map(image => `    <g:additional_image_link>${xe(image)}</g:additional_image_link>`).join('\n');
-      return `  <item>
-    <g:id>${xe(product.sku || product._id)}</g:id>
-    <title>${xe(product.name)}</title>
-    <description>${xe(description)}</description>
-    <link>${xe(url)}</link>
-    <g:image_link>${xe(images[0] || `${siteUrl}/og-default.png`)}</g:image_link>
-${additionalImages ? additionalImages + '\n' : ''}    <g:availability>${product.stock > 0 ? 'in_stock' : 'out_of_stock'}</g:availability>
-    <g:condition>${googleCondition(product.condition)}</g:condition>
-    <g:price>${Number(product.price).toFixed(2)} LKR</g:price>
-${product.salePrice ? `    <g:sale_price>${Number(product.salePrice).toFixed(2)} LKR</g:sale_price>\n` : ''}    <g:brand>${xe(product.brand || 'ShopZen')}</g:brand>
-${product.gtin ? `    <g:gtin>${xe(product.gtin)}</g:gtin>\n` : ''}${product.mpn ? `    <g:mpn>${xe(product.mpn)}</g:mpn>\n` : ''}    <g:identifier_exists>${product.gtin || product.mpn || product.brand ? 'yes' : 'no'}</g:identifier_exists>
-${product.category?.name ? `    <g:product_type>${xe(product.category.name)}</g:product_type>\n` : ''}    <g:shipping><g:country>LK</g:country><g:service>Standard</g:service><g:price>0.00 LKR</g:price></g:shipping>
-  </item>`;
-    }).join('\n');
-    const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<rss xmlns:g="http://base.google.com/ns/1.0" version="2.0"><channel>
-  <title>ShopZen Products</title><link>${xe(siteUrl)}</link>
-  <description>Automatically synchronized ShopZen product feed</description>
-${items}
-</channel></rss>`;
-    res.setHeader('Content-Type', 'application/rss+xml; charset=utf-8');
+    const { xml, etag, diagnostics } = buildGoogleMerchantFeed(products, siteUrl);
+
+    if (process.env.NODE_ENV !== 'production') {
+      console.info('[Merchant Feed diagnostics]', diagnostics);
+    }
+
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
     res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=300, stale-while-revalidate=60');
+    res.setHeader('ETag', etag);
+    if (_req.headers['if-none-match'] === etag) return res.status(304).end();
     res.send(xml);
   } catch (err) {
     console.error('Google Merchant feed error:', err.message);
