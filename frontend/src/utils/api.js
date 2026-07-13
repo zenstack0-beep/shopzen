@@ -254,8 +254,14 @@ API.interceptors.response.use(
       const method = (err.config?.method || 'get').toLowerCase();
       const isPublicGet = method === 'get' && isPublicGetPath(path);
       const isAuthPage = hasWindow && (window.location.pathname === '/login' || window.location.pathname === '/register');
+      const hadAuthorization = Boolean(
+        err.config?.headers?.Authorization || err.config?.headers?.authorization
+      );
 
-      if (!isPublicGet && !isAuthPage && hasLocalStorage()) {
+      // Only expire the session when this request actually used a JWT.
+      // Guest pages can make optional authenticated requests; a 401 from one
+      // of those must not force an anonymous shopper onto the login screen.
+      if (hadAuthorization && !isPublicGet && !isAuthPage && hasLocalStorage()) {
         window.localStorage.removeItem('token');
         window.localStorage.removeItem('user');
         window.location.href = '/login';

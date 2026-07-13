@@ -5,7 +5,25 @@ const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('user')); } catch { return null; }
+    try {
+      const token = localStorage.getItem('token');
+      const storedUser = localStorage.getItem('user');
+
+      // Never restore a customer session without its matching token. This can
+      // happen after an expired/cleared session and makes public pages perform
+      // private requests as if the visitor were still signed in.
+      if (!token || !storedUser) {
+        localStorage.removeItem('user');
+        if (!storedUser) localStorage.removeItem('token');
+        return null;
+      }
+
+      return JSON.parse(storedUser);
+    } catch {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      return null;
+    }
   });
 
   const login = async (email, password) => {
