@@ -197,6 +197,7 @@ app.use('/api/social-media',  require('./routes/socialMedia'));
 app.use('/api/ai-post-creator', require('./routes/aiPostCreator'));
 app.use('/api/automation',    require('./routes/automation'));
 app.use('/api/deals',         require('./routes/deals'));
+app.use('/api/offers',        require('./routes/offers'));
 app.use('/api/ai',            require('./routes/ai'));
 app.use('/api/monitoring',    require('./routes/monitoring'));
 app.use('/api/backup',        require('./routes/backup'));

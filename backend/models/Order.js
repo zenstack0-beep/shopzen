@@ -13,7 +13,10 @@ const orderSchema = new mongoose.Schema({
     image: String,
     price: Number,
     quantity: Number,
-    subtotal: Number
+    subtotal: Number,
+    isFree: { type: Boolean, default: false },
+    originalPrice: { type: Number, default: 0 },
+    offer: { type: mongoose.Schema.Types.ObjectId, ref: 'Offer' }
   }],
   billing: {
     firstName: String, lastName: String,
@@ -41,6 +44,11 @@ const orderSchema = new mongoose.Schema({
   }],
   couponCode: { type: String },
   couponDiscount: { type: Number, default: 0 },
+  offer: {
+    offerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Offer' },
+    title: String,
+    freeItemValue: { type: Number, default: 0 }
+  },
   subtotal: { type: Number, required: true },
   shippingCost: { type: Number, default: 0 },
   tax: { type: Number, default: 0 },

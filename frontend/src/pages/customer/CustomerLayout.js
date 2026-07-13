@@ -11,6 +11,7 @@ import RunningBanner from '../../components/RunningBanner';
 import PopupBanner from '../../components/PopupBanner';
 import FlashSaleBanner from '../../components/FlashSaleBanner';
 import CouponBanner from '../../components/CouponBanner';
+import FreeGiftOfferPopup from '../../components/FreeGiftOfferPopup';
 
 /* ─────────────────────────────────────────────────────────────────
    RESPONSIVE LAYOUT FIXES — v2
@@ -966,6 +967,7 @@ export default function CustomerLayout() {
       <MobileBottomNav settings={settings}/>
       <WhatsAppWidget />
       <PopupBanner />
+      <FreeGiftOfferPopup />
       <CouponBanner />
     </div>
   );

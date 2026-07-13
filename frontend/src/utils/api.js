@@ -93,6 +93,8 @@ const isPublicGetPath = (url = '') => {
     path.startsWith('/products/') ||
     path.startsWith('/banners') ||
     path.startsWith('/deals') ||
+    path.startsWith('/offers/eligible') ||
+    path.startsWith('/offers/active') ||
     path.startsWith('/seasonal/active') ||
     path.startsWith('/seasonal/page/') ||
     path.startsWith('/social-media/public') ||

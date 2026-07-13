@@ -136,9 +136,9 @@ export default function AdminOrderDetail() {
                   <img src={item.image || 'https://via.placeholder.com/50'} alt={item.name} className="w-12 h-12 rounded-lg object-cover bg-white" />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-800">{item.name}</p>
-                    <p className="text-xs text-gray-500">Rs. {item.price?.toLocaleString()} × {item.quantity}</p>
+                    <p className="text-xs text-gray-500">{item.isFree ? <><span className="line-through">Rs. {item.originalPrice?.toLocaleString()}</span> × {item.quantity} <strong className="text-green-600">FREE GIFT</strong></> : <>Rs. {item.price?.toLocaleString()} × {item.quantity}</>}</p>
                   </div>
-                  <p className="font-bold text-gray-800 text-sm">Rs. {item.subtotal?.toLocaleString()}</p>
+                  <p className={`font-bold text-sm ${item.isFree ? 'text-green-600' : 'text-gray-800'}`}>{item.isFree ? 'FREE' : `Rs. ${item.subtotal?.toLocaleString()}`}</p>
                 </div>
               ))}
             </div>

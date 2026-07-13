@@ -35,6 +35,9 @@ export default function PopupBanner() {
         setBanner(b);
         const delay = (b.popupDelay || 3) * 1000;
         const timer = setTimeout(() => {
+          // A published free-gift campaign has its own richer product-image
+          // popup. Avoid stacking two promotional modals over each other.
+          if (sessionStorage.getItem('sz_free_gift_campaign_available')) return;
           setShow(true);
           if (freq === 'once_per_session') sessionStorage.setItem(key, '1');
           if (freq === 'once_per_day')     localStorage.setItem(key, Date.now());

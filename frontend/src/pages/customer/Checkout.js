@@ -489,6 +489,8 @@ export default function Checkout() {
   const [giftCardCode,     setGiftCardCode]     = useState('');
   const [giftCardData,     setGiftCardData]     = useState(null);
   const [giftCardLoading,  setGiftCardLoading]  = useState(false);
+  const [freeOffer,        setFreeOffer]        = useState(null);
+  const [freeSelections,   setFreeSelections]   = useState({});
   const [shipDiff,         setShipDiff]         = useState(false);
   const [paymentMethod,    setPaymentMethod]    = useState('');
   const [agreedTerms,      setAgreedTerms]      = useState(false);
@@ -564,6 +566,33 @@ export default function Checkout() {
       if (svcs.length > 0) setSelectedDelivery(svcs[0].code);
     }).catch(() => {});
   }, []);
+
+  // Re-evaluate free-item promotions whenever paid cart contents change.
+  // The order endpoint performs the same calculation again before saving.
+  useEffect(() => {
+    if (!items.length) { setFreeOffer(null); setFreeSelections({}); return; }
+    const timer = setTimeout(() => {
+      API.post('/offers/eligible', { items: items.map(item => ({ productId: item._id, quantity: item.quantity })) })
+        .then(({ data }) => {
+          setFreeOffer(data.eligible ? data.offer : null);
+          setFreeSelections({});
+        })
+        .catch(() => { setFreeOffer(null); setFreeSelections({}); });
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [items]);
+
+  const selectedFreeCount = Object.values(freeSelections).reduce((sum, quantity) => sum + quantity, 0);
+  const changeFreeQuantity = (productId, delta) => {
+    setFreeSelections(prev => {
+      const current = prev[productId] || 0;
+      const remaining = (freeOffer?.freeItemCount || 0) - Object.values(prev).reduce((sum, quantity) => sum + quantity, 0);
+      const next = delta > 0 ? current + Math.min(delta, remaining) : Math.max(0, current + delta);
+      const result = { ...prev, [productId]: next };
+      if (!next) delete result[productId];
+      return result;
+    });
+  };
 
   // Some delivery services (e.g. PickMe Flash) don't support Cash on Delivery.
   // Admin can configure this per-service in 🚚 Delivery settings.
@@ -693,6 +722,7 @@ export default function Checkout() {
     submitting.current = true;
     if (!agreedTerms)                    { submitting.current = false; toast.error('Please agree to terms and conditions'); return; }
     if (total > 0 && !paymentMethod)     { submitting.current = false; toast.error('Please select a payment method'); return; }
+    if (freeOffer && selectedFreeCount !== freeOffer.freeItemCount) { submitting.current = false; toast.error(`Please select exactly ${freeOffer.freeItemCount} free item${freeOffer.freeItemCount === 1 ? '' : 's'}`); return; }
 
     if (!user) {
       try {
@@ -727,6 +757,8 @@ export default function Checkout() {
         giftCard:    giftCardData ? giftCardCode : undefined,
         notes,
         deliveryService: selectedDelivery || undefined,
+        selectedOfferId: freeOffer?._id,
+        selectedFreeItems: Object.entries(freeSelections).map(([productId, quantity]) => ({ productId, quantity })),
       };
 
       // ── Handle PayHere — get hash from backend WITHOUT creating the order yet ──
@@ -1221,7 +1253,28 @@ export default function Checkout() {
                     <p className="text-sm font-bold text-gray-900">{sym} {(effectivePrice(item) * item.quantity).toLocaleString()}</p>
                   </div>
                 ))}
+                {freeOffer && Object.entries(freeSelections).map(([productId, quantity]) => {
+                  const gift = freeOffer.freeProducts.find(product => product._id === productId);
+                  if (!gift) return null;
+                  const original = gift.salePrice > 0 && gift.salePrice < gift.price ? gift.salePrice : gift.price;
+                  return <div key={`free-${productId}`} className="flex items-center gap-3 rounded-lg bg-green-50 p-2"><img src={gift.thumbnail || gift.images?.[0]} alt={gift.name} className="w-9 h-9 rounded object-cover"/><div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{gift.name} × {quantity}</p><p className="text-xs"><span className="line-through text-gray-400">{sym} {(original * quantity).toLocaleString()}</span> <span className="font-bold text-green-600">FREE</span></p></div></div>;
+                })}
               </div>
+
+              {freeOffer && (
+                <div className="mb-4 rounded-xl border-2 border-green-300 bg-green-50 p-3">
+                  <h3 className="font-bold text-green-800">🎁 {freeOffer.title}</h3>
+                  {freeOffer.description && <p className="text-xs text-green-700 mt-1">{freeOffer.description}</p>}
+                  <p className="text-xs font-semibold text-green-800 mt-1">Choose {freeOffer.freeItemCount} item{freeOffer.freeItemCount === 1 ? '' : 's'} — {selectedFreeCount}/{freeOffer.freeItemCount} selected</p>
+                  <div className="space-y-2 mt-3">
+                    {freeOffer.freeProducts.map(gift => {
+                      const quantity = freeSelections[gift._id] || 0;
+                      const original = gift.salePrice > 0 && gift.salePrice < gift.price ? gift.salePrice : gift.price;
+                      return <div key={gift._id} className={`flex items-center gap-2 rounded-lg border p-2 ${quantity ? 'border-green-500 bg-white' : 'border-green-200'}`}><img src={gift.thumbnail || gift.images?.[0]} alt={gift.name} className="w-10 h-10 rounded object-cover"/><div className="flex-1 min-w-0"><p className="text-xs font-semibold truncate">{gift.name}</p><p className="text-xs text-gray-500"><span className="line-through">{sym} {Number(original).toLocaleString()}</span> <strong className="text-green-600">FREE</strong></p></div><div className="flex items-center gap-2"><button type="button" disabled={!quantity} onClick={() => changeFreeQuantity(gift._id, -1)} className="w-7 h-7 rounded bg-gray-100 disabled:opacity-40">−</button><strong>{quantity}</strong><button type="button" disabled={selectedFreeCount >= freeOffer.freeItemCount || quantity >= gift.stock} onClick={() => changeFreeQuantity(gift._id, 1)} className="w-7 h-7 rounded bg-green-600 text-white disabled:opacity-40">+</button></div></div>;
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Price breakdown */}
               <div className="space-y-2 text-sm">

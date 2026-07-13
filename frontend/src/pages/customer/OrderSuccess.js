@@ -363,7 +363,7 @@ export function OrderSuccess() {
                     <p className="text-sm font-medium text-gray-800 truncate">{item.name}</p>
                     <p className="text-xs text-gray-400">× {item.quantity}</p>
                   </div>
-                  <p className="text-sm font-bold">{sym} {item.subtotal?.toLocaleString()}</p>
+                  <p className={`text-sm font-bold ${item.isFree ? 'text-green-600' : ''}`}>{item.isFree ? <><span className="line-through text-gray-400 text-xs">{sym} {(item.originalPrice * item.quantity)?.toLocaleString()}</span> FREE</> : <>{sym} {item.subtotal?.toLocaleString()}</>}</p>
                 </div>
               ))}
               {order.items?.length > 4 && <p className="text-xs text-gray-400 text-center">+ {order.items.length - 4} more items</p>}
@@ -603,7 +603,7 @@ export function OrderTracking() {
             <div key={i} className="flex items-center gap-3">
               <img src={item.image||'https://via.placeholder.com/48'} alt={item.name} className="w-12 h-12 rounded-lg object-cover bg-gray-50"/>
               <div className="flex-1"><p className="text-sm font-medium text-gray-800">{item.name}</p><p className="text-xs text-gray-500">× {item.quantity}</p></div>
-              <p className="text-sm font-bold">{sym} {item.subtotal?.toLocaleString()}</p>
+              <p className={`text-sm font-bold ${item.isFree ? 'text-green-600' : ''}`}>{item.isFree ? <><span className="line-through text-gray-400 text-xs">{sym} {(item.originalPrice * item.quantity)?.toLocaleString()}</span> FREE</> : <>{sym} {item.subtotal?.toLocaleString()}</>}</p>
             </div>
           ))}
         </div>

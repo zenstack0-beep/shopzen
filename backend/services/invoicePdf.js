@@ -61,9 +61,21 @@ async function buildInvoicePdf(order, settings = {}) {
     for (const item of order.items || []) {
       if (y > 610) { doc.addPage({ margin:0 }); y=55; header(); }
       const qty=Number(item.quantity||1); const amount=Number(item.subtotal ?? Number(item.price||0)*qty);
-      doc.fillColor(navy).font('Helvetica-Bold').fontSize(8).text(clean(item.name), 58, y, { width:295 });
+      const product = item.product && typeof item.product === 'object' ? item.product : {};
+      const liveProductPrice = Number(product.salePrice) > 0 && Number(product.salePrice) < Number(product.price)
+        ? Number(product.salePrice) : Number(product.price || 0);
+      const displayedUnitPrice = item.isFree
+        ? (Number(item.originalPrice) > 0 ? Number(item.originalPrice) : liveProductPrice)
+        : Number(item.price || 0);
+      doc.fillColor(navy).font('Helvetica-Bold').fontSize(8).text(`${clean(item.name)}${item.isFree ? '  [FREE GIFT]' : ''}`, 58, y, { width:295 });
       if (item.sku) doc.fillColor(muted).font('Helvetica').fontSize(7).text(`SKU: ${clean(item.sku)}`,58,y+13,{width:295});
-      doc.fillColor(navy).font('Helvetica').fontSize(8).text(String(qty),370,y,{width:35,align:'center'}).text(money(item.price),410,y,{width:55,align:'right'}).font('Helvetica-Bold').text(money(amount),480,y,{width:58,align:'right'});
+      // A free gift keeps its normal unit value for transparency, while the
+      // charged line amount is zero. The description already labels it FREE.
+      doc.fillColor(navy).font('Helvetica').fontSize(8)
+        .text(String(qty),370,y,{width:35,align:'center'})
+        .text(money(displayedUnitPrice),410,y,{width:55,align:'right'})
+        .font('Helvetica-Bold').fillColor(item.isFree ? green : navy)
+        .text(money(item.isFree ? 0 : amount),480,y,{width:58,align:'right'});
       y += Math.max(35, doc.heightOfString(clean(item.name),{width:295})+19); doc.moveTo(52,y-7).lineTo(543,y-7).strokeColor('#e2e8f0').lineWidth(.6).stroke();
     }
 

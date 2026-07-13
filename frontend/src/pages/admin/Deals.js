@@ -164,6 +164,105 @@ const emptyForm = {
   bgGradient: '', accentColor: '#dc2626',
 };
 
+const emptyOffer = () => ({
+  title: '', description: '', brands: [], categories: [], products: [],
+  minimumAmount: 0, startsAt: new Date().toISOString(),
+  endsAt: new Date(Date.now() + 7 * 86400000).toISOString(),
+  freeProducts: [], freeItemCount: 1, isActive: false, sortOrder: 0,
+  popupDelaySeconds: 1,
+});
+
+function OfferManager() {
+  const [offers, setOffers] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [brands, setBrands] = useState([]);
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState(emptyOffer());
+  const [saving, setSaving] = useState(false);
+  const upd = (key, value) => setForm(prev => ({ ...prev, [key]: value }));
+  const id = value => typeof value === 'object' ? value._id : value;
+
+  const load = useCallback(() => {
+    API.get('/offers/admin/all').then(r => setOffers(r.data || [])).catch(() => toast.error('Failed to load offers'));
+  }, []);
+  useEffect(() => {
+    load();
+    API.get('/categories/all').then(r => setCategories(r.data || [])).catch(() => {});
+    API.get('/products/admin/brands').then(r => setBrands(r.data || [])).catch(() => {});
+  }, [load]);
+
+  const edit = offer => {
+    setEditing(offer._id);
+    setForm({
+      ...emptyOffer(), ...offer,
+      categories: (offer.categories || []).map(id),
+      brands: offer.brands || [], products: offer.products || [], freeProducts: offer.freeProducts || [],
+    });
+  };
+  const save = async () => {
+    if (!form.title.trim()) return toast.error('Offer title is required');
+    if (!form.brands.length && !form.categories.length && !form.products.length) return toast.error('Select a qualifying brand, category, or product');
+    if (!form.freeProducts.length) return toast.error('Select at least one free item');
+    if (Number(form.freeItemCount) < 1) return toast.error('Free item count must be at least 1');
+    if (new Date(form.endsAt) <= new Date(form.startsAt)) return toast.error('End date must be after start date');
+    setSaving(true);
+    const payload = {
+      ...form, categories: form.categories.map(id), products: form.products.map(id),
+      freeProducts: form.freeProducts.map(id), minimumAmount: Number(form.minimumAmount),
+      freeItemCount: Number(form.freeItemCount), sortOrder: Number(form.sortOrder),
+    };
+    try {
+      if (editing) await API.put(`/offers/${editing}`, payload); else await API.post('/offers', payload);
+      toast.success(editing ? 'Offer updated' : 'Offer created');
+      setEditing(null); setForm(emptyOffer()); load();
+    } catch (error) { toast.error(error.response?.data?.message || 'Failed to save offer'); }
+    finally { setSaving(false); }
+  };
+  const remove = async offerId => {
+    if (!window.confirm('Delete this free-item offer?')) return;
+    await API.delete(`/offers/${offerId}`); load();
+  };
+  const toggleArray = (key, value) => upd(key, form[key].includes(value) ? form[key].filter(v => v !== value) : [...form[key], value]);
+
+  return (
+    <section className="mb-10 rounded-2xl border border-purple-100 bg-purple-50/40 p-5">
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <div><h2 className="font-display text-xl font-bold text-gray-900">🎁 Free Item Offers</h2><p className="text-sm text-gray-500">Reward qualifying carts with customer-selected free products.</p></div>
+        <button onClick={() => { setEditing(null); setForm(emptyOffer()); }} className="btn-outline text-sm">+ New Offer</button>
+      </div>
+      <div className="grid xl:grid-cols-2 gap-5">
+        <div className="bg-white rounded-2xl border border-gray-100 p-4 space-y-4">
+          <h3 className="font-bold text-gray-800">{editing ? 'Edit Offer' : 'Configure Offer'}</h3>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <div><label className="form-label">Offer title *</label><input className="form-input" value={form.title} onChange={e => upd('title', e.target.value)} placeholder="Choose a free gift" /></div>
+            <div><label className="form-label">Minimum bill amount *</label><input type="number" min="0" className="form-input" value={form.minimumAmount} onChange={e => upd('minimumAmount', e.target.value)} /></div>
+          </div>
+          <div><label className="form-label">Customer message</label><input className="form-input" value={form.description} onChange={e => upd('description', e.target.value)} placeholder="Spend the required amount and choose your gift" /></div>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <div><label className="form-label">Starts *</label><input type="datetime-local" className="form-input" value={toLocalInput(form.startsAt)} onChange={e => upd('startsAt', new Date(e.target.value).toISOString())} /></div>
+            <div><label className="form-label">Ends *</label><input type="datetime-local" className="form-input" value={toLocalInput(form.endsAt)} onChange={e => upd('endsAt', new Date(e.target.value).toISOString())} /></div>
+          </div>
+          <div><label className="form-label">Qualifying brands <span className="font-normal text-gray-400">(optional)</span></label><div className="flex flex-wrap gap-2 max-h-28 overflow-y-auto">{brands.map(brand => <button type="button" key={brand} onClick={() => toggleArray('brands', brand)} className={`text-xs px-2.5 py-1.5 rounded-lg border ${form.brands.includes(brand) ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-gray-600 border-gray-200'}`}>{brand}</button>)}</div></div>
+          <div><label className="form-label">Qualifying categories <span className="font-normal text-gray-400">(optional)</span></label><div className="flex flex-wrap gap-2 max-h-28 overflow-y-auto">{categories.map(cat => <button type="button" key={cat._id} onClick={() => toggleArray('categories', cat._id)} className={`text-xs px-2.5 py-1.5 rounded-lg border ${form.categories.includes(cat._id) ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-gray-600 border-gray-200'}`}>{cat.name}</button>)}</div></div>
+          <div><label className="form-label">Qualifying products <span className="font-normal text-gray-400">(optional)</span></label><ProductPicker selected={form.products} onChange={value => upd('products', value)} /></div>
+          <div className="border-t pt-4"><label className="form-label">Free items customer can choose *</label><ProductPicker selected={form.freeProducts} onChange={value => upd('freeProducts', value)} /></div>
+          <div className="grid sm:grid-cols-3 gap-3">
+            <div><label className="form-label">Number of free items *</label><input type="number" min="1" max="20" className="form-input" value={form.freeItemCount} onChange={e => upd('freeItemCount', e.target.value)} /></div>
+            <div><label className="form-label">Popup delay (seconds)</label><input type="number" min="0" max="300" className="form-input" value={form.popupDelaySeconds} onChange={e => upd('popupDelaySeconds', e.target.value)} /><p className="mt-1 text-[11px] text-gray-400">Use 0 to show immediately.</p></div>
+            <div><label className="form-label">Priority</label><input type="number" className="form-input" value={form.sortOrder} onChange={e => upd('sortOrder', e.target.value)} /></div>
+          </div>
+          <label className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={form.isActive} onChange={e => upd('isActive', e.target.checked)} /> Publish offer immediately</label>
+          <div className="flex gap-2"><button disabled={saving} onClick={save} className="btn-primary flex-1">{saving ? 'Saving…' : editing ? 'Save Offer' : 'Publish Offer'}</button>{editing && <button onClick={() => { setEditing(null); setForm(emptyOffer()); }} className="btn-outline">Cancel</button>}</div>
+        </div>
+        <div className="space-y-3">
+          {offers.length === 0 && <div className="bg-white rounded-2xl p-10 text-center text-gray-400">No free-item offers yet.</div>}
+          {offers.map(offer => <div key={offer._id} className="bg-white rounded-2xl border border-gray-100 p-4"><div className="flex justify-between gap-3"><div><div className="flex gap-2 items-center"><h3 className="font-bold text-gray-900">{offer.title}</h3><span className={`text-xs px-2 py-0.5 rounded-full ${offer.isActive && new Date(offer.startsAt) <= new Date() && new Date(offer.endsAt) >= new Date() ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{offer.isActive ? 'Published' : 'Draft'}</span></div><p className="text-sm text-gray-500 mt-1">Bill ≥ Rs. {Number(offer.minimumAmount).toLocaleString()} · Choose {offer.freeItemCount} free · Popup after {offer.popupDelaySeconds ?? 1}s</p><p className="text-xs text-gray-400 mt-1">{new Date(offer.startsAt).toLocaleString()} → {new Date(offer.endsAt).toLocaleString()}</p><div className="flex gap-1 mt-2">{(offer.freeProducts || []).map(p => <span key={p._id} title={`${p.name} — Rs. ${p.salePrice || p.price}`} className="text-xs bg-purple-50 text-purple-700 px-2 py-1 rounded">{p.name}</span>)}</div></div><div className="flex"><button onClick={() => edit(offer)} className="p-2">✏️</button><button onClick={() => remove(offer._id)} className="p-2">🗑️</button></div></div></div>)}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /* ─── Main component ────────────────────────────────────────────────────── */
 export default function AdminDeals() {
   const [deals,   setDeals]   = useState([]);
@@ -266,6 +365,7 @@ export default function AdminDeals() {
 
   return (
     <div>
+      <OfferManager />
       {/* Header */}
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>

@@ -4,6 +4,7 @@ const crypto    = require('crypto');
 const router = express.Router();
 const Order = require('../models/Order');
 const Product = require('../models/Product');
+const { findEligibleOffer } = require('../services/offerEngine');
 const { DiscountEngine } = require('../services/discountEngine');
 const { Coupon, GiftCard, Notification, Settings, DeliveryService } = require('../models/index');
 const { auth, adminAuth } = require('../middleware/auth');
@@ -266,7 +267,7 @@ router.put('/admin/:id/status', adminAuth, async (req, res) => {
         },
       },
       { new: true }
-    ).populate('items.product', 'name slug');
+    ).populate('items.product', 'name slug price salePrice');
 
     if (!order) return res.status(404).json({ message: 'Order not found' });
 
@@ -326,7 +327,7 @@ router.put('/admin/:id/status', adminAuth, async (req, res) => {
 router.post('/admin/:id/resend-delivered-bill', adminAuth, async (req, res) => {
   try {
     const order = await Order.findOne({ _id: req.params.id, orderStatus: 'delivered' })
-      .populate('items.product', 'name slug');
+      .populate('items.product', 'name slug price salePrice');
     if (!order) return res.status(404).json({ message: 'Delivered order not found' });
     if (!order.billing?.email) return res.status(400).json({ message: 'Customer email is missing' });
 
@@ -495,7 +496,7 @@ router.get('/my-orders', auth, async (req, res) => {
   try {
     const orders = await Order.find({ customer: req.user._id })
       .sort({ createdAt: -1 })
-      .populate('items.product', 'name thumbnail slug');
+      .populate('items.product', 'name thumbnail slug price salePrice');
     res.json(orders);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -522,6 +523,7 @@ router.post('/', orderRateLimiter, async (req, res) => {
     const {
       items, billing, shipping, shipToDifferentAddress,
       paymentMethod, couponCode, giftCard, notes, deliveryService,
+      selectedOfferId, selectedFreeItems,
       paymentReference,   // provided by frontend after gateway payment succeeds
       metaEventId,        // browser pixel eventId for CAPI deduplication
       fbp,                // _fbp cookie for Meta audience tracking
@@ -590,6 +592,48 @@ router.post('/', orderRateLimiter, async (req, res) => {
     }
 
     const subtotal = DiscountEngine.computeSubtotal(orderItems);
+
+    // ── Free-item offer (authoritative server validation) ───────────────────
+    const eligibleOffer = await findEligibleOffer(orderItems, subtotal);
+    let appliedOffer = null;
+    if (eligibleOffer) {
+      const selections = Array.isArray(selectedFreeItems) ? selectedFreeItems : [];
+      const selectedCount = selections.reduce((sum, item) => sum + Number.parseInt(item.quantity || 0, 10), 0);
+      const allowedIds = new Set(eligibleOffer.freeProducts.map(product => String(product._id)));
+      const selectionIsValid = String(selectedOfferId || '') === String(eligibleOffer._id)
+        && selections.length > 0
+        && selectedCount === eligibleOffer.freeItemCount
+        && selections.every(item => allowedIds.has(String(item.productId)) && Number.isInteger(Number(item.quantity)) && Number(item.quantity) > 0);
+
+      if (!selectionIsValid) {
+        for (const item of orderItems) await Product.findByIdAndUpdate(item.product, { $inc: { stock: item.quantity, soldCount: -item.quantity } });
+        return res.status(400).json({ message: `Select exactly ${eligibleOffer.freeItemCount} free item${eligibleOffer.freeItemCount === 1 ? '' : 's'} for “${eligibleOffer.title}”` });
+      }
+
+      let freeItemValue = 0;
+      for (const selection of selections) {
+        const product = await Product.findOne({ _id: selection.productId, isActive: true });
+        const quantity = Number(selection.quantity);
+        if (!product || product.stock < quantity) {
+          for (const item of orderItems) await Product.findByIdAndUpdate(item.product, { $inc: { stock: item.quantity, soldCount: -item.quantity } });
+          return res.status(400).json({ message: `${product?.name || 'Selected free item'} is no longer available in the requested quantity` });
+        }
+        const originalPrice = DiscountEngine.effectivePrice(product);
+        freeItemValue += originalPrice * quantity;
+        orderItems.push({
+          product: product._id, name: product.name,
+          image: product.thumbnail || product.images?.[0] || '',
+          price: 0, quantity, subtotal: 0, originalPrice,
+          isFree: true, offer: eligibleOffer._id,
+          category: product.category, subCategory: product.subCategory, brand: product.brand,
+        });
+        await Product.findByIdAndUpdate(product._id, { $inc: { stock: -quantity, soldCount: quantity } });
+      }
+      appliedOffer = { offerId: eligibleOffer._id, title: eligibleOffer.title, freeItemValue };
+    } else if (selectedOfferId || (selectedFreeItems || []).length) {
+      for (const item of orderItems) await Product.findByIdAndUpdate(item.product, { $inc: { stock: item.quantity, soldCount: -item.quantity } });
+      return res.status(400).json({ message: 'This free-item offer is no longer eligible' });
+    }
 
     // ── 2. Resolve delivery fee ───────────────────────────────────────────────
     const { fee: shippingCost, serviceName: deliveryServiceName } =
@@ -702,6 +746,7 @@ router.post('/', orderRateLimiter, async (req, res) => {
       giftCardDeduction: hasGiftCard ? totals.giftCardDeduction : 0,
       // Legacy field kept for backward compat (coupon portion only)
       giftCardDiscount: hasGiftCard ? totals.giftCardDeduction : 0,
+      offer: appliedOffer || undefined,
       subtotal:      totals.subtotal,
       shippingCost:  totals.deliveryFee,
       discount:      totals.couponDiscount,    // legacy: coupon discount only
@@ -1096,7 +1141,7 @@ router.put('/admin/:id/cancel-decision', adminAuth, async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
-      .populate('items.product', 'name thumbnail slug')
+      .populate('items.product', 'name thumbnail slug price salePrice')
       .populate('customer', 'firstName lastName email');
     if (!order) return res.status(404).json({ message: 'Order not found' });
     res.json(order);

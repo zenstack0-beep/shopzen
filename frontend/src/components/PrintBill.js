@@ -35,15 +35,25 @@ export default function PrintBill({ order, trigger }) {
     const shippingPhone = sh.phone || '';
 
     const itemRows = (order.items || []).map(function(item) {
+      const product = item.product && typeof item.product === 'object' ? item.product : {};
+      const liveProductPrice = product.salePrice > 0 && product.salePrice < product.price
+        ? product.salePrice
+        : product.price;
+      // Older free-gift orders may have originalPrice saved as 0. Use the
+      // populated product price so their invoices are corrected as well.
+      const unitPrice = item.isFree
+        ? (Number(item.originalPrice) > 0 ? item.originalPrice : liveProductPrice)
+        : item.price;
+      const lineAmount = item.isFree ? 0 : (item.subtotal ?? (item.price * item.quantity));
       return '<tr>'
         + '<td class="td-item">'
-        + '<div class="item-name">' + (item.name || '') + '</div>'
+        + '<div class="item-name">' + (item.name || '') + (item.isFree ? ' <span class="free-label">FREE GIFT</span>' : '') + '</div>'
         + (item.sku ? '<div class="item-sub">SKU: ' + item.sku + '</div>' : '')
         + (item.variant ? '<div class="item-sub">Variant: ' + item.variant + '</div>' : '')
         + '</td>'
         + '<td class="td-center">' + (item.quantity || 1) + '</td>'
-        + '<td class="td-right">' + fmtCurrency(item.price) + '</td>'
-        + '<td class="td-right td-bold">' + fmtCurrency(item.subtotal || (item.price * item.quantity)) + '</td>'
+        + '<td class="td-right">' + fmtCurrency(unitPrice) + '</td>'
+        + '<td class="td-right td-bold' + (item.isFree ? ' free-amount' : '') + '">' + fmtCurrency(lineAmount) + '</td>'
         + '</tr>';
     }).join('');
 
@@ -118,6 +128,8 @@ export default function PrintBill({ order, trigger }) {
       + '.td-item{padding:13px 10px;}'
       + '.item-name{font-size:13px;font-weight:600;color:#0f172a;}'
       + '.item-sub{font-size:11px;color:#94a3b8;margin-top:2px;}'
+      + '.free-label{display:inline-block;margin-left:6px;padding:2px 6px;border-radius:10px;background:#dcfce7;color:#15803d;font-size:8px;font-weight:800;vertical-align:middle;}'
+      + '.free-amount{color:#15803d;}'
       + '.td-center{padding:13px 10px;text-align:center;font-size:13px;color:#475569;}'
       + '.td-right{padding:13px 10px;text-align:right;font-size:13px;color:#475569;}'
       + '.td-bold{font-weight:700;color:#0f172a;}'
