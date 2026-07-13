@@ -593,48 +593,6 @@ router.post('/', orderRateLimiter, async (req, res) => {
 
     const subtotal = DiscountEngine.computeSubtotal(orderItems);
 
-    // ── Free-item offer (authoritative server validation) ───────────────────
-    const eligibleOffer = await findEligibleOffer(orderItems, subtotal);
-    let appliedOffer = null;
-    if (eligibleOffer) {
-      const selections = Array.isArray(selectedFreeItems) ? selectedFreeItems : [];
-      const selectedCount = selections.reduce((sum, item) => sum + Number.parseInt(item.quantity || 0, 10), 0);
-      const allowedIds = new Set(eligibleOffer.freeProducts.map(product => String(product._id)));
-      const selectionIsValid = String(selectedOfferId || '') === String(eligibleOffer._id)
-        && selections.length > 0
-        && selectedCount === eligibleOffer.freeItemCount
-        && selections.every(item => allowedIds.has(String(item.productId)) && Number.isInteger(Number(item.quantity)) && Number(item.quantity) > 0);
-
-      if (!selectionIsValid) {
-        for (const item of orderItems) await Product.findByIdAndUpdate(item.product, { $inc: { stock: item.quantity, soldCount: -item.quantity } });
-        return res.status(400).json({ message: `Select exactly ${eligibleOffer.freeItemCount} free item${eligibleOffer.freeItemCount === 1 ? '' : 's'} for “${eligibleOffer.title}”` });
-      }
-
-      let freeItemValue = 0;
-      for (const selection of selections) {
-        const product = await Product.findOne({ _id: selection.productId, isActive: true });
-        const quantity = Number(selection.quantity);
-        if (!product || product.stock < quantity) {
-          for (const item of orderItems) await Product.findByIdAndUpdate(item.product, { $inc: { stock: item.quantity, soldCount: -item.quantity } });
-          return res.status(400).json({ message: `${product?.name || 'Selected free item'} is no longer available in the requested quantity` });
-        }
-        const originalPrice = DiscountEngine.effectivePrice(product);
-        freeItemValue += originalPrice * quantity;
-        orderItems.push({
-          product: product._id, name: product.name,
-          image: product.thumbnail || product.images?.[0] || '',
-          price: 0, quantity, subtotal: 0, originalPrice,
-          isFree: true, offer: eligibleOffer._id,
-          category: product.category, subCategory: product.subCategory, brand: product.brand,
-        });
-        await Product.findByIdAndUpdate(product._id, { $inc: { stock: -quantity, soldCount: quantity } });
-      }
-      appliedOffer = { offerId: eligibleOffer._id, title: eligibleOffer.title, freeItemValue };
-    } else if (selectedOfferId || (selectedFreeItems || []).length) {
-      for (const item of orderItems) await Product.findByIdAndUpdate(item.product, { $inc: { stock: item.quantity, soldCount: -item.quantity } });
-      return res.status(400).json({ message: 'This free-item offer is no longer eligible' });
-    }
-
     // ── 2. Resolve delivery fee ───────────────────────────────────────────────
     const { fee: shippingCost, serviceName: deliveryServiceName } =
       await DiscountEngine.resolveDeliveryFee(
@@ -699,6 +657,52 @@ router.post('/', orderRateLimiter, async (req, res) => {
         });
       }
       return res.status(400).json({ message: benefit.errorCoupon });
+    }
+
+    // ── Free-item levels (validated against merchandise spend AFTER coupon) ─
+    // Gift cards are payment, not a merchandise discount, so they do not lower
+    // the spend used for gift thresholds.
+    const eligibleGiftSpend = Math.max(0, subtotal - Number(benefit.couponDiscount || 0));
+    const offerMatch = await findEligibleOffer(orderItems, eligibleGiftSpend);
+    let appliedOffer = null;
+    if (offerMatch) {
+      const { offer: eligibleOffer, reward } = offerMatch;
+      const selections = Array.isArray(selectedFreeItems) ? selectedFreeItems : [];
+      const selectedCount = selections.reduce((sum, item) => sum + Number.parseInt(item.quantity || 0, 10), 0);
+      const allowedIds = new Set(reward.freeProducts.map(product => String(product._id)));
+      const selectionIsValid = String(selectedOfferId || '') === String(eligibleOffer._id)
+        && selections.length > 0
+        && selectedCount === reward.freeItemCount
+        && selections.every(item => allowedIds.has(String(item.productId)) && Number.isInteger(Number(item.quantity)) && Number(item.quantity) > 0);
+
+      if (!selectionIsValid) {
+        for (const item of orderItems) await Product.findByIdAndUpdate(item.product, { $inc: { stock: item.quantity, soldCount: -item.quantity } });
+        return res.status(400).json({ message: `Select exactly ${reward.freeItemCount} free item${reward.freeItemCount === 1 ? '' : 's'} for “${eligibleOffer.title}”` });
+      }
+
+      let freeItemValue = 0;
+      for (const selection of selections) {
+        const product = await Product.findOne({ _id: selection.productId, isActive: true });
+        const quantity = Number(selection.quantity);
+        if (!product || product.stock < quantity) {
+          for (const item of orderItems) await Product.findByIdAndUpdate(item.product, { $inc: { stock: item.quantity, soldCount: -item.quantity } });
+          return res.status(400).json({ message: `${product?.name || 'Selected free item'} is no longer available in the requested quantity` });
+        }
+        const originalPrice = DiscountEngine.effectivePrice(product);
+        freeItemValue += originalPrice * quantity;
+        orderItems.push({
+          product: product._id, name: product.name,
+          image: product.thumbnail || product.images?.[0] || '',
+          price: 0, quantity, subtotal: 0, originalPrice,
+          isFree: true, offer: eligibleOffer._id,
+          category: product.category, subCategory: product.subCategory, brand: product.brand,
+        });
+        await Product.findByIdAndUpdate(product._id, { $inc: { stock: -quantity, soldCount: quantity } });
+      }
+      appliedOffer = { offerId: eligibleOffer._id, title: eligibleOffer.title, freeItemValue };
+    } else if (selectedOfferId || (selectedFreeItems || []).length) {
+      for (const item of orderItems) await Product.findByIdAndUpdate(item.product, { $inc: { stock: item.quantity, soldCount: -item.quantity } });
+      return res.status(400).json({ message: 'This free-item offer is no longer eligible after discounts' });
     }
 
     // ── 4. Compute canonical totals ───────────────────────────────────────────

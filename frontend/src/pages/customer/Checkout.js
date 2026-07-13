@@ -508,6 +508,7 @@ export default function Checkout() {
   const [stripeModal,   setStripeModal]   = useState(null); // { clientSecret, publicKey, amount, currency, orderId }
   const [paypalModal,   setPaypalModal]   = useState(null); // { clientId, amount, currency, orderId }
   // ────────────────────────────────────────────────────────────────────────────
+  const offerEligibleAmount = Math.max(0, subtotal - Number(couponData?.discount || 0));
 
   const [billing, setBilling] = useState(() => {
     try {
@@ -572,7 +573,10 @@ export default function Checkout() {
   useEffect(() => {
     if (!items.length) { setFreeOffer(null); setFreeSelections({}); return; }
     const timer = setTimeout(() => {
-      API.post('/offers/eligible', { items: items.map(item => ({ productId: item._id, quantity: item.quantity })) })
+      API.post('/offers/eligible', {
+        items: items.map(item => ({ productId: item._id, quantity: item.quantity })),
+        eligibleAmount: offerEligibleAmount,
+      })
         .then(({ data }) => {
           setFreeOffer(data.eligible ? data.offer : null);
           setFreeSelections({});
@@ -580,7 +584,7 @@ export default function Checkout() {
         .catch(() => { setFreeOffer(null); setFreeSelections({}); });
     }, 200);
     return () => clearTimeout(timer);
-  }, [items]);
+  }, [items, offerEligibleAmount]);
 
   const selectedFreeCount = Object.values(freeSelections).reduce((sum, quantity) => sum + quantity, 0);
   const changeFreeQuantity = (productId, delta) => {
@@ -1265,6 +1269,8 @@ export default function Checkout() {
                 <div className="mb-4 rounded-xl border-2 border-green-300 bg-green-50 p-3">
                   <h3 className="font-bold text-green-800">🎁 {freeOffer.title}</h3>
                   {freeOffer.description && <p className="text-xs text-green-700 mt-1">{freeOffer.description}</p>}
+                  <p className="text-xs text-green-700 mt-1">Eligible spend after discounts: <strong>{sym} {offerEligibleAmount.toLocaleString()}</strong></p>
+                  {freeOffer.unlockedTiers?.length > 0 && <p className="text-xs text-green-700 mt-1">Unlocked levels: {freeOffer.unlockedTiers.map(tier => `${sym} ${Number(tier.minimumAmount).toLocaleString()}+`).join(' · ')}</p>}
                   <p className="text-xs font-semibold text-green-800 mt-1">Choose {freeOffer.freeItemCount} item{freeOffer.freeItemCount === 1 ? '' : 's'} — {selectedFreeCount}/{freeOffer.freeItemCount} selected</p>
                   <div className="space-y-2 mt-3">
                     {freeOffer.freeProducts.map(gift => {
