@@ -18,6 +18,38 @@ const { dispatchForTrigger, manualPublish } = require('../services/publisherServ
 // ─── IMAGE URL NORMALIZATION MIDDLEWARE ─────────────────────────────────────
 const { normalizeImagesMiddleware } = require('../utils/imageUrlHelper');
 
+const escapeSearchRegex = value => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const searchTokens = value => [...new Set(String(value || '')
+  .trim().toLowerCase().split(/[^\p{L}\p{N}]+/u).map(token => token.trim()).filter(Boolean))].slice(0, 10);
+
+function productSearchScore(product, phrase, tokens) {
+  const category = String(product.category?.name || '').toLowerCase();
+  const name = String(product.name || '').toLowerCase();
+  const brand = String(product.brand || '').toLowerCase();
+  const sku = String(product.sku || '').toLowerCase();
+  const tags = (product.tags || []).join(' ').toLowerCase();
+  const specs = (product.specifications || []).map(spec => `${spec.key || ''} ${spec.value || ''}`).join(' ').toLowerCase();
+  let score = 0;
+  if (name === phrase) score += 1000;
+  else if (name.startsWith(phrase)) score += 600;
+  else if (name.includes(phrase)) score += 400;
+  if (brand === phrase) score += 350;
+  else if (brand.startsWith(phrase)) score += 220;
+  if (sku === phrase) score += 350;
+  if (category === phrase) score += 250;
+  tokens.forEach(token => {
+    if (name.split(/[^a-z0-9]+/).includes(token)) score += 90;
+    else if (name.includes(token)) score += 55;
+    if (brand.includes(token)) score += 45;
+    if (sku.includes(token)) score += 45;
+    if (category.includes(token)) score += 35;
+    if (tags.includes(token)) score += 30;
+    if (specs.includes(token)) score += 15;
+  });
+  score += Math.min(Number(product.soldCount || 0), 100) / 100;
+  return score;
+}
+
 // In-memory upload for bulk-import excel files (not saved to disk)
 const bulkUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
@@ -825,11 +857,27 @@ router.get('/', normalizeImagesMiddleware(), async (req, res) => {
     if (featured) filter.isFeatured = true;
     if (onSale)   filter.isOnSale   = true;
     if (brand)    filter.brand       = new RegExp(brand, 'i');
-    if (search)   filter.$or = [
-      { name: new RegExp(search, 'i') },
-      { description: new RegExp(search, 'i') },
-      { tags: new RegExp(search, 'i') },
-    ];
+    const phrase = String(search || '').trim().toLowerCase();
+    const tokens = searchTokens(phrase);
+    if (tokens.length) {
+      const categoryRegexes = tokens.map(token => new RegExp(escapeSearchRegex(token), 'i'));
+      const matchingCategories = await Category.find({
+        isActive: true,
+        $and: categoryRegexes.map(regex => ({ $or: [{ name: regex }, { description: regex }] })),
+      }).select('_id').lean();
+      const categoryIds = matchingCategories.map(item => item._id);
+      filter.$and = filter.$and || [];
+      filter.$and.push(...tokens.map(token => {
+        const regex = new RegExp(escapeSearchRegex(token), 'i');
+        return { $or: [
+          { name: regex }, { shortDescription: regex }, { description: regex },
+          { brand: regex }, { sku: regex }, { mpn: regex }, { gtin: regex },
+          { tags: regex }, { subCategory: regex },
+          { 'specifications.key': regex }, { 'specifications.value': regex },
+          ...(categoryIds.length ? [{ category: { $in: categoryIds } }] : []),
+        ] };
+      }));
+    }
     if (minPrice || maxPrice) {
       const min = minPrice ? Number(minPrice) : null;
       const max = maxPrice ? Number(maxPrice) : null;
@@ -854,12 +902,26 @@ router.get('/', normalizeImagesMiddleware(), async (req, res) => {
     if (sort === 'price_desc') sortObj = { price: -1 };
     if (sort === 'popular')    sortObj = { soldCount: -1 };
     if (sort === 'rating')     sortObj = { 'ratings.average': -1 };
-    const total    = await Product.countDocuments(filter);
-    const products = await Product.find(filter)
-      .populate('category', 'name slug')
-      .sort(sortObj)
-      .skip((page - 1) * limit)
-      .limit(Number(limit));
+    if (tokens.length) {
+      const matched = await Product.find(filter).populate('category', 'name slug').lean();
+      if (!sort || sort === 'newest') {
+        matched.sort((a, b) => productSearchScore(b, phrase, tokens) - productSearchScore(a, phrase, tokens)
+          || new Date(b.createdAt) - new Date(a.createdAt));
+      } else {
+        const direction = sort === 'price_asc' ? 1 : -1;
+        if (sort === 'price_asc' || sort === 'price_desc') matched.sort((a, b) => direction * (Number(a.price) - Number(b.price)));
+        if (sort === 'popular') matched.sort((a, b) => Number(b.soldCount || 0) - Number(a.soldCount || 0));
+        if (sort === 'rating') matched.sort((a, b) => Number(b.ratings?.average || 0) - Number(a.ratings?.average || 0));
+      }
+      const total = matched.length;
+      const start = (Number(page) - 1) * Number(limit);
+      const products = matched.slice(start, start + Number(limit));
+      return res.json({ products, total, pages: Math.max(1, Math.ceil(total / Number(limit))), page: Number(page), query: phrase });
+    }
+
+    const total = await Product.countDocuments(filter);
+    const products = await Product.find(filter).populate('category', 'name slug')
+      .sort(sortObj).skip((page - 1) * limit).limit(Number(limit));
     res.json({ products, total, pages: Math.ceil(total / limit), page: Number(page) });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });

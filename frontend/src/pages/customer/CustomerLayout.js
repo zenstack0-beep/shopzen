@@ -318,6 +318,7 @@ const NavLink3D = ({ to, label, isActive, emoji }) => (
 const SearchOverlay = ({ onClose, categories }) => {
   const [query, setQuery] = useState('');
   const [suggestions, setSuggestions] = useState([]);
+  const [suggestionTotal, setSuggestionTotal] = useState(0);
   const [loadingSugg, setLoadingSugg] = useState(false);
   const inputRef = useRef(null);
   const debounceRef = useRef(null);
@@ -327,15 +328,16 @@ const SearchOverlay = ({ onClose, categories }) => {
 
   useEffect(() => {
     clearTimeout(debounceRef.current);
-    if (!query.trim() || query.length < 2) { setSuggestions([]); return; }
+    if (!query.trim()) { setSuggestions([]); setSuggestionTotal(0); return; }
     debounceRef.current = setTimeout(async () => {
       setLoadingSugg(true);
       try {
-        const { data } = await API.get(`/products?search=${encodeURIComponent(query)}&limit=6&fields=name,slug,thumbnail,salePrice,price,category`);
+        const { data } = await API.get(`/products?search=${encodeURIComponent(query.trim())}&limit=12`);
         setSuggestions(data.products || data || []);
-      } catch { setSuggestions([]); }
+        setSuggestionTotal(data.total ?? (data.products || data || []).length);
+      } catch { setSuggestions([]); setSuggestionTotal(0); }
       finally { setLoadingSugg(false); }
-    }, 280);
+    }, 220);
     return () => clearTimeout(debounceRef.current);
   }, [query]);
 
@@ -348,6 +350,11 @@ const SearchOverlay = ({ onClose, categories }) => {
 
   const goToProduct = (slug) => { navigate(`/product/${slug}`); onClose(); };
   const goToCategory = (slug) => { navigate(`/shop/${slug}`); onClose(); };
+  const relatedCategories = [...new Map([
+    ...categories.filter(category => category.name?.toLowerCase().includes(query.trim().toLowerCase())),
+    ...suggestions.map(product => product.category).filter(Boolean),
+  ].map(category => [category._id || category.slug, category])).values()].slice(0, 6);
+  const relatedBrands = [...new Set(suggestions.map(product => product.brand).filter(Boolean))].slice(0, 6);
 
   return (
     /* FIX: use sz-search-overlay class for responsive top padding */
@@ -381,7 +388,7 @@ const SearchOverlay = ({ onClose, categories }) => {
               style={{ fontSize: '16px' }}
             />
             {query && (
-              <button type="button" onClick={() => { setQuery(''); setSuggestions([]); inputRef.current?.focus(); }} className="text-gray-300 hover:text-gray-500 text-lg transition-colors flex-shrink-0">✕</button>
+              <button type="button" onClick={() => { setQuery(''); setSuggestions([]); setSuggestionTotal(0); inputRef.current?.focus(); }} className="text-gray-300 hover:text-gray-500 text-lg transition-colors flex-shrink-0">✕</button>
             )}
             <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600 text-sm font-medium px-2 border-l border-gray-100 ml-1 pl-3 transition-colors flex-shrink-0">Close</button>
           </div>
@@ -389,7 +396,11 @@ const SearchOverlay = ({ onClose, categories }) => {
 
         {suggestions.length > 0 && (
           <div className="overflow-y-auto">
-            <p className="px-4 pt-3 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">Products</p>
+            {(relatedCategories.length > 0 || relatedBrands.length > 0) && <div className="px-4 pt-3 pb-2 border-b border-gray-50 space-y-2">
+              {relatedCategories.length > 0 && <div className="flex items-center gap-1.5 flex-wrap"><span className="text-[10px] font-bold text-gray-400 uppercase mr-1">Categories</span>{relatedCategories.map(category => <button key={category._id || category.slug} type="button" onClick={() => goToCategory(category.slug)} className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded-full hover:bg-blue-100">{category.name}</button>)}</div>}
+              {relatedBrands.length > 0 && <div className="flex items-center gap-1.5 flex-wrap"><span className="text-[10px] font-bold text-gray-400 uppercase mr-1">Brands</span>{relatedBrands.map(brand => <button key={brand} type="button" onClick={() => { navigate(`/shop?search=${encodeURIComponent(brand)}`); onClose(); }} className="text-xs bg-purple-50 text-purple-700 px-2 py-1 rounded-full hover:bg-purple-100">{brand}</button>)}</div>}
+            </div>}
+            <p className="px-4 pt-3 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">Best product matches</p>
             {suggestions.map(p => (
               <button
                 key={p._id || p.slug}
@@ -415,12 +426,12 @@ const SearchOverlay = ({ onClose, categories }) => {
               className="flex items-center justify-center gap-2 w-full px-4 py-3 border-t border-gray-100 text-sm font-semibold hover:bg-gray-50 transition-colors"
               style={{ color: 'var(--color-primary)' }}
             >
-              See all results for "{query}" →
+              See all {suggestionTotal} result{suggestionTotal === 1 ? '' : 's'} for "{query}" →
             </button>
           </div>
         )}
 
-        {query.length >= 2 && suggestions.length === 0 && !loadingSugg && (
+        {query.length >= 1 && suggestions.length === 0 && !loadingSugg && (
           <div className="px-4 py-6 text-center text-sm text-gray-400">No products found for "{query}"</div>
         )}
 
