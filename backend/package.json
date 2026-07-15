@@ -5,6 +5,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
+    "staging": "ENV_FILE=.env.staging node server.js",
+    "seed:staging": "ENV_FILE=.env.staging node seed.js",
     "seed": "node seed.js",
     "validate:merchant-feed": "node scripts/validateGoogleMerchantFeed.js",
     "test:marketing": "node tests/marketing.test.js",

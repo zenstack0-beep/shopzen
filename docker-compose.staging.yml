@@ -1,0 +1,12 @@
+services:
+  mongodb-staging:
+    image: mongo:7
+    container_name: shopzen-mongodb-staging
+    restart: unless-stopped
+    ports:
+      - "27018:27017"
+    volumes:
+      - shopzen_staging_data:/data/db
+
+volumes:
+  shopzen_staging_data:

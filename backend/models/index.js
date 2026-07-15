@@ -320,6 +320,9 @@ const deliveryServiceSchema = new mongoose.Schema({
   areas: [String],
   apiKey: String,
   apiSecret: String,
+  // Provider-specific server-side configuration (e.g. Curfox tenant,
+  // merchant business, origin and default parcel settings).
+  config: { type: mongoose.Schema.Types.Mixed, default: {} },
   updatedAt: Date,
   createdAt: { type: Date, default: Date.now }
 });

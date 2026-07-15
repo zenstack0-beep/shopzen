@@ -155,6 +155,8 @@ export default function AdminSettings() {
   const [pageForm, setPageForm] = useState({ slug:'', title:'', content:'', showInFooter:true, showInNav:false, sortOrder:0 });
   const [editingDelivery, setEditingDelivery] = useState(null);
   const [deliveryForm, setDeliveryForm] = useState({ name:'', code:'', description:'', estimatedDays:'', trackingUrl:'', rates:[{ name:'Standard', price:600, freeAbove:0, estimatedDays:'' }] });
+  const [curfoxTesting, setCurfoxTesting] = useState(false);
+  const [curfoxBusinesses, setCurfoxBusinesses] = useState([]);
   const [gwConfigs, setGwConfigs] = useState({});
   const [whatsappConfig, setWhatsappConfig] = useState({
     whatsappEnabled: false,
@@ -256,6 +258,12 @@ export default function AdminSettings() {
 
   const saveDelivery = async () => {
     try {
+      if (deliveryForm.code === 'curfox') {
+        const config = deliveryForm.config || {};
+        if (!config.tenant || !config.businessId || !config.originCity || !config.originState) {
+          return toast.error('Select a Curfox business and enter the origin city and state');
+        }
+      }
       await API.put(`/delivery/admin/${deliveryForm.code}`, deliveryForm);
       const { data } = await API.get('/delivery/admin/all');
       setDeliveryServices(data); setEditingDelivery(null);
@@ -264,6 +272,17 @@ export default function AdminSettings() {
       console.error('Save delivery error:', err);
       toast.error(err?.response?.data?.message || 'Failed to save delivery service');
     }
+  };
+
+  const testCurfox = async () => {
+    setCurfoxTesting(true);
+    try {
+      const { data } = await API.post('/delivery/admin/curfox/test', { apiKey: deliveryForm.apiKey, apiSecret: deliveryForm.apiSecret, config: deliveryForm.config });
+      setCurfoxBusinesses(data.businesses || []);
+      toast.success(`Connected to Curfox${data.merchant ? ` — ${data.merchant}` : ''}`);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Curfox connection failed');
+    } finally { setCurfoxTesting(false); }
   };
 
   const toggleDelivery = async (code) => {
@@ -467,7 +486,7 @@ export default function AdminSettings() {
               <div>
                 <div className="flex items-center justify-between mb-5">
                   <div><h3 className="font-semibold text-gray-900">Delivery Services</h3><p className="text-xs text-gray-400">Configure shipping options for customers</p></div>
-                  <button onClick={() => { setDeliveryForm({ name:'', code:'', description:'', estimatedDays:'', trackingUrl:'', coverageAreas:'', deliveryNote:'', codAllowed:true, rates:[{ name:'Standard', price:600, freeAbove:0, estimatedDays:'' }], zoneRates:[], shippingRules:[] }); setEditingDelivery('new'); }} className="btn-primary text-sm">+ Add Service</button>
+                  <div className="flex gap-2"><button onClick={() => { setDeliveryForm({ name:'Curfox', code:'curfox', description:'Curfox courier delivery', estimatedDays:'', trackingUrl:'', coverageAreas:'Island-wide', deliveryNote:'', codAllowed:true, apiKey:'', apiSecret:'', config:{tenant:'',businessId:'',originCity:'',originState:'',defaultWeight:1,initialStatusKey:'key_1'}, rates:[{ name:'Standard', price:600, freeAbove:0, estimatedDays:'' }], zoneRates:[], shippingRules:[] }); setCurfoxBusinesses([]); setEditingDelivery('new'); }} className="text-sm font-semibold px-3 py-2 rounded-xl bg-orange-50 text-orange-700 hover:bg-orange-100">Connect Curfox</button><button onClick={() => { setDeliveryForm({ name:'', code:'', description:'', estimatedDays:'', trackingUrl:'', coverageAreas:'', deliveryNote:'', codAllowed:true, rates:[{ name:'Standard', price:600, freeAbove:0, estimatedDays:'' }], zoneRates:[], shippingRules:[] }); setEditingDelivery('new'); }} className="btn-primary text-sm">+ Add Service</button></div>
                 </div>
                 <div className="space-y-3">
                   {deliveryServices.map(svc => (
@@ -530,6 +549,23 @@ export default function AdminSettings() {
                         </div>
                         <div><label className="form-label">Coverage Areas</label><input value={deliveryForm.coverageAreas||''} onChange={e=>setDeliveryForm(p=>({...p,coverageAreas:e.target.value}))} className="form-input" placeholder="Island-wide delivery"/></div>
                         <div><label className="form-label">Checkout Note</label><input value={deliveryForm.deliveryNote||''} onChange={e=>setDeliveryForm(p=>({...p,deliveryNote:e.target.value}))} className="form-input" placeholder="Orders placed before 2pm ship same day"/></div>
+
+                        {deliveryForm.code === 'curfox' && <div className="border-2 border-orange-100 bg-orange-50/40 rounded-2xl p-4 space-y-3">
+                          <div><p className="font-semibold text-sm text-gray-800">Curfox API Connection</p><p className="text-xs text-gray-500">Credentials are sent only to your server. The bearer token is generated when needed and is never stored in the browser.</p></div>
+                          <div className="grid sm:grid-cols-2 gap-3">
+                            <div><label className="form-label">Tenant *</label><input value={deliveryForm.config?.tenant||''} onChange={e=>setDeliveryForm(p=>({...p,config:{...(p.config||{}),tenant:e.target.value.trim()}}))} className="form-input" placeholder="Your X-tenant value"/></div>
+                            <div><label className="form-label">Curfox Login Email *</label><input type="email" value={deliveryForm.apiKey||''} onChange={e=>setDeliveryForm(p=>({...p,apiKey:e.target.value}))} className="form-input"/></div>
+                            <div className="sm:col-span-2"><label className="form-label">Curfox Password {deliveryForm.hasCredentials?'(leave blank to keep saved password)':'*'}</label><input type="password" value={deliveryForm.apiSecret||''} onChange={e=>setDeliveryForm(p=>({...p,apiSecret:e.target.value}))} className="form-input" autoComplete="new-password"/></div>
+                          </div>
+                          <div className="flex items-center gap-2"><button type="button" onClick={testCurfox} disabled={curfoxTesting} className="px-3 py-2 rounded-xl bg-orange-600 text-white text-sm font-semibold disabled:opacity-50">{curfoxTesting?'Testing…':'Test Connection & Load Businesses'}</button>{deliveryForm.hasCredentials&&<span className="text-xs text-green-600">Saved credentials available</span>}</div>
+                          <div className="grid sm:grid-cols-2 gap-3">
+                            <div><label className="form-label">Merchant Business *</label>{curfoxBusinesses.length?<select value={deliveryForm.config?.businessId||''} onChange={e=>setDeliveryForm(p=>({...p,config:{...(p.config||{}),businessId:e.target.value}}))} className="form-input"><option value="">Select business</option>{curfoxBusinesses.map(b=><option key={b.id} value={b.id}>{b.business_name} ({b.ref_no})</option>)}</select>:<input value={deliveryForm.config?.businessId||''} onChange={e=>setDeliveryForm(p=>({...p,config:{...(p.config||{}),businessId:e.target.value}}))} className="form-input" placeholder="Business ID"/>}</div>
+                            <div><label className="form-label">Default Package Weight (kg)</label><input type="number" min="0.01" step="0.01" value={deliveryForm.config?.defaultWeight||1} onChange={e=>setDeliveryForm(p=>({...p,config:{...(p.config||{}),defaultWeight:Number(e.target.value)}}))} className="form-input"/></div>
+                            <div><label className="form-label">Origin City *</label><input value={deliveryForm.config?.originCity||''} onChange={e=>setDeliveryForm(p=>({...p,config:{...(p.config||{}),originCity:e.target.value}}))} className="form-input" placeholder="Exact Curfox city name"/></div>
+                            <div><label className="form-label">Origin State *</label><input value={deliveryForm.config?.originState||''} onChange={e=>setDeliveryForm(p=>({...p,config:{...(p.config||{}),originState:e.target.value}}))} className="form-input" placeholder="Exact Curfox state name"/></div>
+                            <div><label className="form-label">Initial Curfox Status</label><select value={deliveryForm.config?.initialStatusKey||'key_1'} onChange={e=>setDeliveryForm(p=>({...p,config:{...(p.config||{}),initialStatusKey:e.target.value}}))} className="form-input"><option value="key_1">Draft</option><option value="key_2">Confirmed</option></select></div>
+                          </div>
+                        </div>}
 
                         <div className="flex items-center justify-between border border-gray-100 rounded-2xl p-4">
                           <div>

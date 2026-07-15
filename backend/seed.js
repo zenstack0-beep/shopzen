@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
-require('dotenv').config();
+require('dotenv').config({ path: process.env.ENV_FILE || '.env' });
+require('./utils/environmentSafety').assertSafeEnvironment();
 
 async function seed() {
   await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/ecommerce');

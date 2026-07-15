@@ -24,7 +24,8 @@ const express    = require('express');
 const mongoose   = require('mongoose');
 const cors       = require('cors');
 const path       = require('path');
-require('dotenv').config();
+require('dotenv').config({ path: process.env.ENV_FILE || '.env' });
+const { assertSafeEnvironment } = require('./utils/environmentSafety');
 
 const app = express();
 
@@ -36,6 +37,7 @@ if (!process.env.MONGODB_URI) {
   console.error('❌ MONGODB_URI not defined');
   process.exit(1);
 }
+assertSafeEnvironment();
 
 // SECURITY: Mask credentials in the log so the connection string is never
 //           printed to stdout in plaintext (original behaviour preserved).
@@ -247,6 +249,9 @@ async function startServer() {
 
     const { startMarketingScheduler } = require('./services/marketingScheduler');
     startMarketingScheduler();
+
+    const { startCurfoxScheduler } = require('./services/curfoxScheduler');
+    startCurfoxScheduler();
 
     const PORT = process.env.PORT || 5001;
     app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));

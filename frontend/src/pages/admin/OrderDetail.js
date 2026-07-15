@@ -9,6 +9,17 @@ const STATUSES = ['pending','confirmed','processing','shipped','out_for_delivery
 const STATUS_LABELS = { pending:'Pending', confirmed:'Confirmed', processing:'Processing', shipped:'Shipped', out_for_delivery:'Out for Delivery', delivered:'Delivered', cancelled:'Cancelled', refunded:'Refunded' };
 const STATUS_COLORS = { pending:'status-pending', confirmed:'status-confirmed', processing:'status-processing', shipped:'status-shipped', out_for_delivery:'status-out_for_delivery', delivered:'status-delivered', cancelled:'status-cancelled', refunded:'status-refunded' };
 
+const compactStatusHistory = history => (history || []).reduce((entries, item) => {
+  const previous = entries[entries.length - 1];
+  if (previous?.status === item.status) {
+    const notes = [previous.note, item.note].filter(Boolean);
+    previous.note = [...new Set(notes)].join(' • ');
+    previous.updatedAt = item.updatedAt || previous.updatedAt;
+    previous.updatedBy = item.updatedBy || previous.updatedBy;
+  } else entries.push({ ...item });
+  return entries;
+}, []);
+
 export default function AdminOrderDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -18,6 +29,9 @@ export default function AdminOrderDetail() {
   const [saving, setSaving] = useState(false);
   const [resendingInvoice, setResendingInvoice] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState('');
+  const [curfoxForm, setCurfoxForm] = useState({ destinationCity:'', destinationState:'', weight:'', remark:'', waybillNumber:'' });
+  const [curfoxBusy, setCurfoxBusy] = useState(false);
+  const [curfoxCityLoading, setCurfoxCityLoading] = useState(false);
   // ── Internal admin notes state ──
   const [newNote, setNewNote]         = useState('');
   const [addingNote, setAddingNote]   = useState(false);
@@ -27,6 +41,15 @@ export default function AdminOrderDetail() {
       setOrder(r.data);
       setStatusUpdate(p => ({ ...p, status: r.data.orderStatus }));
       setPaymentStatus(r.data.paymentStatus);
+      const address = r.data.shipToDifferentAddress ? r.data.shipping : r.data.billing;
+      setCurfoxForm(p => ({ ...p, destinationCity: address?.city || '', remark: r.data.notes || '' }));
+      if (!r.data.courierIntegration?.provider) {
+        setCurfoxCityLoading(true);
+        API.get(`/delivery/admin/curfox/orders/${id}/destination`)
+          .then(({ data }) => setCurfoxForm(p => ({ ...p, destinationCity: data.cityName || p.destinationCity, destinationState: data.stateName || '' })))
+          .catch(() => {})
+          .finally(() => setCurfoxCityLoading(false));
+      }
       API.put(`/orders/admin/${id}/read`, {}).catch(() => {});
     }).finally(() => setLoading(false));
   }, [id]);
@@ -37,7 +60,7 @@ export default function AdminOrderDetail() {
     try {
       const { data } = await API.put(`/orders/admin/${id}/status`, statusUpdate);
       setOrder(data);
-      toast.success('Order status updated!');
+      toast.success(data.courierIntegration?.provider === 'curfox' && statusUpdate.status === 'shipped' ? 'Order marked Shipped — automatic Curfox tracking is now active!' : 'Order status updated!');
     } catch { toast.error('Update failed'); }
     finally { setSaving(false); }
   };
@@ -60,6 +83,30 @@ export default function AdminOrderDetail() {
     } catch (error) {
       toast.error(error.response?.data?.message || 'Invoice email could not be resent');
     } finally { setResendingInvoice(false); }
+  };
+
+  const submitToCurfox = async () => {
+    if (!['confirmed','processing'].includes(order.orderStatus)) return toast.error('Confirm the order and move it to Processing before sending it to Curfox');
+    if (!curfoxForm.destinationCity.trim()) return toast.error('Enter the exact Curfox destination city');
+    if (!window.confirm(`Send order ${order.orderNumber} to Curfox?`)) return;
+    setCurfoxBusy(true);
+    try {
+      const { data } = await API.post(`/delivery/admin/curfox/orders/${id}`, curfoxForm);
+      setOrder(data);
+      toast.success(data.courierIntegration?.dryRun ? 'Curfox dry run completed — no live courier order created' : `Sent to Curfox — waybill ${data.trackingNumber}`);
+    } catch (error) { toast.error(error.response?.data?.message || 'Could not send order to Curfox'); }
+    finally { setCurfoxBusy(false); }
+  };
+
+  const syncCurfox = async () => {
+    setCurfoxBusy(true);
+    try {
+      const { data } = await API.post(`/delivery/admin/curfox/orders/${id}/sync`);
+      setOrder(data);
+      setStatusUpdate(p => ({ ...p, status: data.orderStatus }));
+      toast.success(`Curfox status: ${data.courierIntegration?.externalStatus || 'Updated'}`);
+    } catch (error) { toast.error(error.response?.data?.message || 'Could not refresh Curfox tracking'); }
+    finally { setCurfoxBusy(false); }
   };
 
 
@@ -159,6 +206,21 @@ export default function AdminOrderDetail() {
           </div>
 
           {/* Update Status */}
+          <div className="bg-white rounded-2xl border border-orange-100 p-5">
+            <div className="flex items-start justify-between gap-3 mb-4"><div><h2 className="font-semibold text-gray-900">Curfox Delivery</h2><p className="text-xs text-gray-500">Create the courier order and synchronize its tracking status.</p></div>{order.courierIntegration?.provider==='curfox'&&<span className={`text-xs px-2 py-1 rounded-full font-semibold ${order.courierIntegration?.dryRun?'bg-amber-50 text-amber-700':'bg-green-50 text-green-700'}`}>{order.courierIntegration?.dryRun?'Dry Run':'Connected'}</span>}</div>
+            {order.courierIntegration?.provider === 'curfox' ? <div className="space-y-3">
+              <div className="grid sm:grid-cols-2 gap-3 text-sm"><div className="rounded-xl bg-gray-50 p-3"><p className="text-xs text-gray-400">Waybill</p><p className="font-mono font-bold">{order.trackingNumber}</p></div><div className="rounded-xl bg-gray-50 p-3"><p className="text-xs text-gray-400">Curfox status</p><p className="font-bold">{order.courierIntegration.externalStatus||'Submitted'}</p></div></div>
+              {!order.courierIntegration?.dryRun&&['shipped','out_for_delivery'].includes(order.orderStatus)&&<button onClick={syncCurfox} disabled={curfoxBusy} className="px-4 py-2 rounded-xl bg-orange-600 text-white text-sm font-semibold disabled:opacity-50">{curfoxBusy?'Refreshing…':'Refresh Curfox Tracking'}</button>}
+              {!order.courierIntegration?.dryRun&&!['shipped','out_for_delivery','delivered','cancelled'].includes(order.orderStatus)&&<p className="text-xs text-amber-600">After the courier collects the parcel, mark this order Shipped to activate automatic tracking.</p>}
+              {!!order.courierIntegration?.trackingEvents?.length&&<div className="border-t pt-3 space-y-2">{order.courierIntegration.trackingEvents.slice(0,6).map((event,index)=><div key={index} className="flex justify-between gap-3 text-xs"><span className="font-medium">{event.status?.name}</span><span className="text-gray-400 whitespace-nowrap">{event.date_time_ago||new Date(event.date_time).toLocaleString()}</span></div>)}</div>}
+            </div> : <div className="space-y-3">
+              {!['confirmed','processing'].includes(order.orderStatus)&&<div className="rounded-xl bg-amber-50 text-amber-700 p-3 text-xs">Confirm this order and move it to Processing before sending the details to Curfox.</div>}
+              <div className="grid sm:grid-cols-2 gap-3"><div><label className="form-label">Destination City *</label><input value={curfoxForm.destinationCity} onChange={e=>setCurfoxForm(p=>({...p,destinationCity:e.target.value,destinationState:''}))} className="form-input bg-gray-50" placeholder={curfoxCityLoading?'Fetching from Curfox…':'Could not match automatically'}/><p className="text-xs text-gray-400 mt-1">{curfoxCityLoading?'Matching the customer address with Curfox…':curfoxForm.destinationState?`Automatically matched — ${curfoxForm.destinationState}`:'Automatically filled when Curfox finds the city; you can correct it if needed.'}</p></div><div><label className="form-label">Package Weight (kg)</label><input type="number" min="0.01" step="0.01" value={curfoxForm.weight} onChange={e=>setCurfoxForm(p=>({...p,weight:e.target.value}))} className="form-input" placeholder="Automatic from products/default"/></div><div><label className="form-label">Royal Express Waybill</label><input value={curfoxForm.waybillNumber} onChange={e=>setCurfoxForm(p=>({...p,waybillNumber:e.target.value.trim().toUpperCase()}))} className="form-input font-mono" placeholder="Only if manual waybills are enabled"/><p className="text-xs text-gray-400 mt-1">Use an unused waybill supplied by Royal Express.</p></div><div><label className="form-label">Courier Remark</label><input value={curfoxForm.remark} onChange={e=>setCurfoxForm(p=>({...p,remark:e.target.value}))} className="form-input" placeholder="Handle carefully"/></div></div>
+              <button onClick={submitToCurfox} disabled={curfoxBusy||!['confirmed','processing'].includes(order.orderStatus)} className="px-4 py-2 rounded-xl bg-orange-600 text-white text-sm font-semibold disabled:opacity-50">{curfoxBusy?'Sending…':'Send Order to Curfox'}</button>
+            </div>}
+          </div>
+
+          {/* Update Status */}
           <div className="bg-white rounded-2xl border border-gray-100 p-5">
             <h2 className="font-semibold text-gray-900 mb-4">Update Order</h2>
             <div className="grid sm:grid-cols-2 gap-3 mb-3">
@@ -199,7 +261,7 @@ export default function AdminOrderDetail() {
             <div className="bg-white rounded-2xl border border-gray-100 p-5">
               <h2 className="font-semibold text-gray-900 mb-4">Status History</h2>
               <div className="space-y-3">
-                {[...order.statusHistory].reverse().map((h, i) => (
+                {compactStatusHistory(order.statusHistory).reverse().map((h, i) => (
                   <div key={i} className="flex gap-3">
                     <div className="w-2 h-2 rounded-full bg-primary mt-2 flex-shrink-0" />
                     <div>

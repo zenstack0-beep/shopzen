@@ -21,6 +21,7 @@
   },
   "scripts": {
     "start": "react-scripts start",
+    "start:staging": "REACT_APP_API_URL=http://localhost:5002 react-scripts start",
     "build": "react-scripts build"
   },
   "proxy": "http://localhost:5001",

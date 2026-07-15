@@ -6,6 +6,8 @@ backend/node_modules/
 # Environment
 .env
 backend/.env
+backend/.env.staging
+backend/.mongodb-staging/
 frontend/.env
 
 # Uploads (local dev only — use Cloudinary in prod)
