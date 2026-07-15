@@ -17,6 +17,29 @@ router.get('/dashboard', async (_req, res) => {
   const settings = await getSettings();
   res.json({ stats, revenue: grouped.reduce((n,x)=>n+x.revenue,0), conversionRate: sent ? converted / sent * 100 : 0, unsubscribes, autoApprovalEnabled: settings.autoApprovalEnabled });
 });
+router.get('/behavior', async (_req, res) => {
+  try {
+    const since24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const [totalEvents, eventsLast24Hours, customerGroups, eventGroups, recentEvents, consentedCustomers] = await Promise.all([
+      CustomerBehaviorEvent.countDocuments(),
+      CustomerBehaviorEvent.countDocuments({ createdAt: { $gte: since24Hours } }),
+      CustomerBehaviorEvent.aggregate([{ $match: { customerId: { $ne: null } } }, { $group: { _id: '$customerId' } }, { $count: 'count' }]),
+      CustomerBehaviorEvent.aggregate([{ $group: { _id: '$eventType', count: { $sum: 1 } } }, { $sort: { count: -1 } }]),
+      CustomerBehaviorEvent.find().populate('customerId', 'firstName lastName email').populate('productId', 'name slug thumbnail').sort({ createdAt: -1 }).limit(30).lean(),
+      CustomerMarketingPreference.countDocuments({ marketingConsent: true, unsubscribedAt: null, suppressionReason: { $in: [null, ''] } }),
+    ]);
+    res.json({
+      totalEvents,
+      eventsLast24Hours,
+      trackedCustomers: customerGroups[0]?.count || 0,
+      consentedCustomers,
+      byType: Object.fromEntries(eventGroups.map(group => [group._id, group.count])),
+      recentEvents,
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Customer behavior data could not be loaded' });
+  }
+});
 router.get('/recommendations', async (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1); const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
   const filter = {}; if (req.query.status) filter.status = req.query.status; if (req.query.customer) filter.customerEmail = new RegExp(clean(req.query.customer,100).replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'i');
