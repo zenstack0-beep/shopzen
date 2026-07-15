@@ -747,6 +747,18 @@ export default function AdminProducts() {
     } catch { toast.error('Failed'); }
   };
 
+  const toggleProductFlag = async (id, field, current, label) => {
+    try {
+      await API.put(`/products/${id}`, { [field]: !current });
+      setProducts(items => items.map(product =>
+        product._id === id ? { ...product, [field]: !current } : product
+      ));
+      toast.success(`${label} ${!current ? 'enabled' : 'disabled'}`);
+    } catch (err) {
+      toast.error(err.response?.data?.message || `Failed to update ${label.toLowerCase()}`);
+    }
+  };
+
   /* ── Bulk Import: Download Template ── */
   const handleDownloadTemplate = async () => {
     setBulkDownloading(true);
@@ -1100,6 +1112,7 @@ export default function AdminProducts() {
             <option value="hidden">🙈 Hidden</option>
             <option value="featured">⭐ Featured</option>
             <option value="sale">🏷️ On Sale</option>
+            <option value="duplicates">👯 Duplicates</option>
           </select>
 
           {/* Stock */}
@@ -1131,7 +1144,7 @@ export default function AdminProducts() {
         ) : (
           <div className="overflow-x-auto">
             <table className="data-table">
-              <thead><tr><th>Product</th><th>Price</th><th>Stock</th><th>Status</th><th>Variants</th><th className="text-right">Actions</th></tr></thead>
+              <thead><tr><th>Product</th><th>Price</th><th>Stock</th><th>Status</th><th>Quick Actions</th><th>Variants</th><th className="text-right">Actions</th></tr></thead>
               <tbody>
                 {products.map(p => (
                   <tr key={p._id}>
@@ -1140,7 +1153,14 @@ export default function AdminProducts() {
                         <img src={p.thumbnail||'https://via.placeholder.com/40'} alt={p.name} className="w-10 h-10 rounded-lg object-cover bg-gray-50 flex-shrink-0"/>
                         <div className="min-w-0">
                           <p className="font-semibold text-sm text-gray-800 truncate max-w-xs">{p.name}</p>
-                          <p className="text-xs text-gray-400">{p.category?.name}</p>
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-xs text-gray-400">{p.category?.name}</p>
+                            {p.isDuplicate && (
+                              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-red-50 text-red-600">
+                                Duplicate ({p.duplicateCount})
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </td>
@@ -1152,6 +1172,20 @@ export default function AdminProducts() {
                     <td>
                       <span className={`badge text-xs ${p.isActive?'badge-new':'bg-gray-100 text-gray-500'}`}>{p.isActive?'Active':'Hidden'}</span>
                       {p.isFeatured && <span className="badge badge-featured text-xs ml-1">Featured</span>}
+                    </td>
+                    <td>
+                      <div className="flex flex-wrap gap-1.5">
+                        <button
+                          onClick={()=>toggleProductFlag(p._id, 'isFeatured', p.isFeatured, 'Featured')}
+                          className={`text-xs font-semibold px-2 py-1 rounded-lg border transition-colors ${p.isFeatured ? 'border-purple-300 bg-purple-50 text-purple-700' : 'border-gray-200 bg-white text-gray-500 hover:bg-purple-50 hover:text-purple-600'}`}
+                          title={p.isFeatured ? 'Remove from featured products' : 'Mark as featured'}
+                        >⭐ Featured</button>
+                        <button
+                          onClick={()=>toggleProductFlag(p._id, 'isOnSale', p.isOnSale, 'On Sale')}
+                          className={`text-xs font-semibold px-2 py-1 rounded-lg border transition-colors ${p.isOnSale ? 'border-green-300 bg-green-50 text-green-700' : 'border-gray-200 bg-white text-gray-500 hover:bg-green-50 hover:text-green-600'}`}
+                          title={p.isOnSale ? 'Remove from sale products' : 'Mark as on sale'}
+                        >🏷️ On Sale</button>
+                      </div>
                     </td>
                     <td>
                       {p.variants?.length > 0 ? (

@@ -612,6 +612,10 @@ router.post('/admin/import/excel', adminAuth, bulkUpload.single('file'), async (
           isOnSale: !!salePrice,
         };
 
+        const duplicate = await findDuplicateProduct(productData);
+        if (duplicate) {
+          throw new Error(`Duplicate product already exists: ${duplicate.name}${duplicate.sku ? ` (SKU: ${duplicate.sku})` : ''}`);
+        }
         const product = await Product.create(productData);
         results.created++;
 
@@ -719,6 +723,24 @@ router.get('/admin/all', normalizeImagesMiddleware(), adminAuth, async (req, res
     if (status === 'hidden')   filter.isActive = false;
     if (status === 'featured') filter.isFeatured = true;
     if (status === 'sale')     filter.isOnSale = true;
+    let duplicateCounts = new Map();
+    if (status === 'duplicates') {
+      const duplicatePipeline = field => [
+        { $project: { normalizedValue: { $toLower: { $trim: { input: { $ifNull: [`$${field}`, ''] } } } }, id: '$_id' } },
+        { $group: { _id: '$normalizedValue', ids: { $push: '$id' }, count: { $sum: 1 } } },
+        { $match: { _id: { $ne: '' }, count: { $gt: 1 } } },
+      ];
+      const groups = (await Promise.all([
+        Product.aggregate(duplicatePipeline('name')),
+        Product.aggregate(duplicatePipeline('sku')),
+      ])).flat();
+      duplicateCounts = new Map();
+      groups.forEach(group => group.ids.forEach(id => {
+        const key = id.toString();
+        duplicateCounts.set(key, Math.max(duplicateCounts.get(key) || 0, group.count));
+      }));
+      filter._id = { $in: [...duplicateCounts.keys()] };
+    }
     if (stock  === 'out')      filter.stock = 0;
     if (stock  === 'low')      { filter.stock = { $gt: 0, $lte: 5 }; }
     const total    = await Product.countDocuments(filter);
@@ -727,14 +749,41 @@ router.get('/admin/all', normalizeImagesMiddleware(), adminAuth, async (req, res
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(Number(limit));
-    res.json({ products, total, pages: Math.ceil(total / limit) });
+    const result = products.map(product => {
+      const item = product.toObject();
+      const duplicateCount = duplicateCounts.get(product._id.toString());
+      return duplicateCount ? { ...item, isDuplicate: true, duplicateCount } : item;
+    });
+    res.json({ products: result, total, pages: Math.ceil(total / limit) });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
+
+const normalizedProductName = value => String(value || '').trim().toLowerCase();
+const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+async function findDuplicateProduct(body, excludeId) {
+  const name = normalizedProductName(body.name);
+  const sku = String(body.sku || '').trim();
+  const checks = [];
+  if (name) checks.push({ name: { $regex: `^${escapeRegex(name)}$`, $options: 'i' } });
+  if (sku) checks.push({ sku: { $regex: `^${escapeRegex(sku)}$`, $options: 'i' } });
+  if (!checks.length) return null;
+  const query = { $or: checks };
+  if (excludeId) query._id = { $ne: excludeId };
+  return Product.findOne(query).select('name sku').lean();
+}
 
 // Admin — create product
 router.post('/', adminAuth, async (req, res) => {
   let product;
   try {
+    const duplicate = await findDuplicateProduct(req.body);
+    if (duplicate) {
+      return res.status(409).json({
+        message: `Duplicate product already exists: ${duplicate.name}${duplicate.sku ? ` (SKU: ${duplicate.sku})` : ''}`,
+        duplicateId: duplicate._id,
+      });
+    }
     product = await Product.create(req.body);
     res.status(201).json(product);
   } catch (err) {
@@ -756,6 +805,17 @@ router.put('/:id', adminAuth, async (req, res) => {
   let before, product;
   try {
     before  = await Product.findById(req.params.id).lean();
+    const nameChanged = req.body.name !== undefined && normalizedProductName(req.body.name) !== normalizedProductName(before?.name);
+    const skuChanged = req.body.sku !== undefined && String(req.body.sku || '').trim().toLowerCase() !== String(before?.sku || '').trim().toLowerCase();
+    if (nameChanged || skuChanged) {
+      const duplicate = await findDuplicateProduct({ ...before, ...req.body }, req.params.id);
+      if (duplicate) {
+        return res.status(409).json({
+          message: `Another product already uses this name or SKU: ${duplicate.name}${duplicate.sku ? ` (SKU: ${duplicate.sku})` : ''}`,
+          duplicateId: duplicate._id,
+        });
+      }
+    }
     product = await Product.findByIdAndUpdate(
       req.params.id, { $set: { ...req.body, updatedAt: new Date() } }, { new: true, runValidators: false }
     );
