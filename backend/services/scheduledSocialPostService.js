@@ -6,7 +6,7 @@ const Product = require('../models/Product');
 const ScheduledSocialPost = require('../models/ScheduledSocialPost');
 const { Coupon, Settings } = require('../models/index');
 const { publishNow } = require('./publisherService');
-const { getOrCreate } = require('./socialMediaService');
+const { getOrCreate, decryptPlatformFields } = require('./socialMediaService');
 
 const clean = (value, max=5000) => String(value == null ? '' : value).replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim().slice(0,max);
 const money = value => {
@@ -147,6 +147,17 @@ async function createSchedule({ productIds, platforms, startAt, gapMinutes, prod
 }
 
 let running=false;
+async function publishablePlatformsForWorker(){
+  const social=await getOrCreate();
+  const platforms=['facebook','instagram','tiktok','whatsapp','telegram'];
+  return platforms.filter(platform=>{
+    const raw=JSON.parse(JSON.stringify(social[platform]?.toObject?.({virtuals:false})??social[platform]??{}));
+    const credentials=decryptPlatformFields(raw);
+    if(!credentials.connected||!credentials.enabled||!credentials.accessToken)return false;
+    return platform==='tiktok'||Boolean(credentials.accountId);
+  });
+}
+
 async function runDueScheduledPosts(){
   if(running||mongoose.connection.readyState!==1)return; running=true;
   try{
@@ -155,8 +166,12 @@ async function runDueScheduledPosts(){
       {status:'processing',claimedAt:{$lt:new Date(Date.now()-15*60000)}},
       {$set:{status:'pending'},$unset:{claimedAt:1}}
     );
+    const publishablePlatforms=await publishablePlatformsForWorker();
+    const unavailablePlatforms=['facebook','instagram','tiktok','whatsapp','telegram'].filter(platform=>!publishablePlatforms.includes(platform));
+    if(unavailablePlatforms.length)await ScheduledSocialPost.updateMany({status:'pending',batchState:{$in:['active',null]},scheduledAt:{$lte:new Date()},platform:{$in:unavailablePlatforms}},{$set:{failureReason:'Waiting for a backend worker with valid, decryptable platform credentials. Ensure SOCIAL_MEDIA_SECRET is identical on every server instance, then restart all instances.'}});
+    if(!publishablePlatforms.length)return;
     for(let i=0;i<10;i++){
-      const job=await ScheduledSocialPost.findOneAndUpdate({status:'pending',batchState:{$in:['active',null]},scheduledAt:{$lte:new Date()}},{$set:{status:'processing',claimedAt:new Date()}},{sort:{scheduledAt:1},new:true});
+      const job=await ScheduledSocialPost.findOneAndUpdate({status:'pending',batchState:{$in:['active',null]},platform:{$in:publishablePlatforms},scheduledAt:{$lte:new Date()}},{$set:{status:'processing',claimedAt:new Date(),failureReason:''}},{sort:{scheduledAt:1},new:true});
       if(!job)break;
       if(/localhost|127\.0\.0\.1/i.test(job.caption)){
         await ScheduledSocialPost.updateOne({_id:job._id},{$set:{status:'failed',failureReason:'Caption contains a local development URL. Remove it and create a new schedule with the public store URL.'}});continue;

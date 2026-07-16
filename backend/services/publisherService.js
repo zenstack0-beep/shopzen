@@ -28,7 +28,7 @@ async function loadEntity(entityType, entityId) {
   if (!entityId) return null;
   if (entityType === 'product') {
     const Product = require('../models/Product');
-    return Product.findById(entityId).lean();
+    return Product.findById(entityId).populate('category','name').lean();
   }
   if (entityType === 'offer') {
     const { SeasonalCampaign } = require('../models/index');

@@ -205,6 +205,14 @@ router.post('/schedules/:id/cancel', async (req,res) => {
   res.json(item);
 });
 
+router.post('/schedules/:id/retry', async (req,res) => {
+  try {
+    const item=await ScheduledSocialPost.findOneAndUpdate({_id:req.params.id,status:'failed'},{$set:{status:'pending',batchState:'active',scheduledAt:new Date(Date.now()+30000),failureReason:'',platformPostId:''},$unset:{claimedAt:1,publishedAt:1,publishLogId:1}},{new:true});
+    if(!item)return res.status(409).json({message:'Only failed scheduled posts can be retried'});
+    res.json(item);
+  } catch(error){res.status(400).json({message:'Scheduled post could not be retried'});}
+});
+
 router.delete('/schedules/:id', async (req,res) => {
   try {
     const item=await ScheduledSocialPost.findById(req.params.id);

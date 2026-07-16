@@ -21,10 +21,14 @@ const KEY_LEN   = 32;
 const IV_LEN    = 16;
 const TAG_LEN   = 16;
 
+const deriveKey = raw => crypto.createHash('sha256').update(raw).digest();
 function getKey() {
   const raw = process.env.SOCIAL_MEDIA_SECRET || process.env.JWT_SECRET || 'shopzen-fallback-secret-32chars!!';
-  // Derive a 32-byte key from whatever length the env var is
-  return crypto.createHash('sha256').update(raw).digest();
+  return deriveKey(raw);
+}
+function getDecryptionKeys(){
+  const values=[process.env.SOCIAL_MEDIA_SECRET,process.env.JWT_SECRET,'shopzen-fallback-secret-32chars!!'].filter(Boolean);
+  return [...new Set(values)].map(deriveKey);
 }
 
 function encrypt(plaintext) {
@@ -39,17 +43,18 @@ function encrypt(plaintext) {
 
 function decrypt(ciphertext) {
   if (!ciphertext) return '';
-  try {
-    const [ivHex, tagHex, encHex] = ciphertext.split(':');
-    const iv         = Buffer.from(ivHex, 'hex');
-    const tag        = Buffer.from(tagHex, 'hex');
-    const encrypted  = Buffer.from(encHex, 'hex');
-    const decipher   = crypto.createDecipheriv(ALGO, getKey(), iv);
-    decipher.setAuthTag(tag);
-    return decipher.update(encrypted) + decipher.final('utf8');
-  } catch {
-    return '';
+  const [ivHex, tagHex, encHex] = ciphertext.split(':');
+  for(const key of getDecryptionKeys()){
+    try {
+      const iv=Buffer.from(ivHex,'hex');
+      const tag=Buffer.from(tagHex,'hex');
+      const encrypted=Buffer.from(encHex,'hex');
+      const decipher=crypto.createDecipheriv(ALGO,key,iv);
+      decipher.setAuthTag(tag);
+      return decipher.update(encrypted)+decipher.final('utf8');
+    } catch { /* try the migration/fallback key */ }
   }
+  return '';
 }
 
 // ─── Credential fields that must be encrypted at rest ────────────────────────

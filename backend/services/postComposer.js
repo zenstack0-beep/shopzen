@@ -34,7 +34,7 @@ function productVars(p) {
     salePrice:   p.salePrice    ? `LKR ${p.salePrice.toLocaleString()}` : '',
     discount:    disc           ? `${disc}%` : '',
     brand:       p.brand        || '',
-    category:    p.subCategory  || '',
+    category:    p.category?.name || (/^[a-f0-9]{24}$/i.test(String(p.subCategory||'')) ? '' : p.subCategory) || '',
     url:         `${STORE_URL}/product/${p.slug || p._id}`,
     offerName:   '',
   };
