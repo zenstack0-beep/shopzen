@@ -5,6 +5,7 @@ import API from '../../utils/api';
 import { useCart } from '../../context/CartContext';
 import { useTheme } from '../../context/ThemeContext';
 import useSEO, { getSeoConfig } from '../../hooks/useSEO';
+import { trackMarketingEvent } from '../../utils/marketingTracking';
 
 const Stars = ({ rating=0 }) => (
   <div className="flex gap-0.5">
@@ -94,6 +95,9 @@ export default function Shop() {
       setProducts(r.data.products||[]);
       setTotalPages(r.data.pages||1);
       setTotal(r.data.total||0);
+      if (debouncedSearch) trackMarketingEvent('product_searched', {
+        searchQuery: debouncedSearch, metadata: { resultCount: r.data.total || 0 },
+      });
       // GSAP stagger on grid
       setTimeout(()=>{
         if (gridRef.current) {

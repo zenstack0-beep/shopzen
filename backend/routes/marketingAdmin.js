@@ -40,6 +40,50 @@ router.get('/behavior', async (_req, res) => {
     res.status(500).json({ message: 'Customer behavior data could not be loaded' });
   }
 });
+router.get('/segments', async (_req, res) => {
+  try {
+    const since30Days = new Date(Date.now() - 30 * 86400000);
+    const rows = await CustomerBehaviorEvent.aggregate([
+      { $set: { effectiveAt: { $ifNull: ['$occurredAt','$createdAt'] } } },
+      { $match: { customerId: { $ne: null }, effectiveAt: { $gte: since30Days } } },
+      { $group: {
+        _id: '$customerId', lastSeenAt: { $max: '$effectiveAt' }, events: { $sum: 1 },
+        productViews: { $sum: { $cond: [{ $eq: ['$eventType','product_viewed'] },1,0] } },
+        searches: { $sum: { $cond: [{ $eq: ['$eventType','product_searched'] },1,0] } },
+        cartAdds: { $sum: { $cond: [{ $eq: ['$eventType','added_to_cart'] },1,0] } },
+        checkoutStarts: { $sum: { $cond: [{ $eq: ['$eventType','checkout_started'] },1,0] } },
+        purchases: { $sum: { $cond: [{ $eq: ['$eventType','purchase_completed'] },1,0] } },
+        emailClicks: { $sum: { $cond: [{ $eq: ['$eventType','email_clicked'] },1,0] } },
+      } },
+      { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'customer' } },
+      { $unwind: { path: '$customer', preserveNullAndEmptyArrays: true } },
+      { $sort: { lastSeenAt: -1 } }, { $limit: 250 },
+    ]);
+    const classify = row => {
+      if (row.purchases > 0) return 'recent_customer';
+      if (row.checkoutStarts > 0) return 'checkout_abandoner';
+      if (row.cartAdds > 0) return 'cart_abandoner';
+      if (row.emailClicks > 0) return 'email_engaged';
+      if (row.productViews >= 3 || row.searches >= 2) return 'high_intent_browser';
+      return 'browser';
+    };
+    const items = rows.map(row => ({
+      customerId: row._id, customerName: [row.customer?.firstName,row.customer?.lastName].filter(Boolean).join(' '),
+      email: row.customer?.email, segment: classify(row), lastSeenAt: row.lastSeenAt, events: row.events,
+      productViews: row.productViews, searches: row.searches, cartAdds: row.cartAdds,
+      checkoutStarts: row.checkoutStarts, purchases: row.purchases, emailClicks: row.emailClicks,
+    }));
+    const counts = items.reduce((out,item) => { out[item.segment] = (out[item.segment] || 0) + 1; return out; }, {});
+    res.json({ generatedAt: new Date(), windowDays: 30, counts, items });
+  } catch (error) { res.status(500).json({ message: 'Behavior segments could not be generated' }); }
+});
+router.post('/analyze', async (req, res) => {
+  try {
+    const result = await require('../services/marketingService').generateRecommendations();
+    await MarketingAuditLog.create({ adminId:req.user._id, action:'manual_analysis_run', metadata:result });
+    res.json(result);
+  } catch (error) { res.status(500).json({ message:'Marketing analysis failed' }); }
+});
 router.get('/recommendations', async (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1); const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
   const filter = {}; if (req.query.status) filter.status = req.query.status; if (req.query.customer) filter.customerEmail = new RegExp(clean(req.query.customer,100).replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'i');

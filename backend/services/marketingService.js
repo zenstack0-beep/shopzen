@@ -125,16 +125,17 @@ function verifyToken(token) {
   return payload;
 }
 
-function renderEmail(rec, product, preference) {
+function renderEmail(rec, product, preference, settings = {}) {
   const base = (process.env.MARKETING_BASE_URL || process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
   const token = signToken({ recommendationId: rec._id, customerId: rec.customerId, emailHash: hashEmail(preference.email) });
   const click = `${base}/api/marketing/click/${encodeURIComponent(token)}`;
   const unsubscribe = `${base}/api/marketing/unsubscribe?token=${encodeURIComponent(token)}`;
   const preferences = `${base}/api/marketing/preferences?token=${encodeURIComponent(token)}`;
+  const openPixel = `${base}/api/marketing/open/${encodeURIComponent(token)}.gif`;
   const image = clean(product.thumbnail || product.images?.[0], 1000);
   const price = effectivePrice(product).toLocaleString('en-LK');
   const esc = v => clean(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  return `<!doctype html><html><body style="margin:0;background:#f8fafc;font-family:Arial,sans-serif;color:#0f172a"><div style="max-width:600px;margin:auto;padding:24px"><div style="background:white;border-radius:16px;padding:28px"><p style="font-weight:800;color:#15803d">ShopZen</p><h1 style="font-size:24px">${esc(rec.headline)}</h1><p>${esc(rec.emailBody)}</p>${image ? `<img src="${esc(image)}" alt="${esc(product.name)}" style="width:100%;max-height:360px;object-fit:contain">` : ''}<h2>${esc(product.name)}</h2><p style="font-size:20px;font-weight:700">Rs. ${price}</p><a href="${click}" style="display:inline-block;background:#15803d;color:white;padding:12px 20px;border-radius:10px;text-decoration:none">${esc(rec.ctaText)}</a><p style="margin-top:28px;font-size:12px;color:#64748b">You receive this because you opted in to ShopZen marketing. ShopZen, Sri Lanka. Reply to ${esc(process.env.MARKETING_REPLY_TO || process.env.ADMIN_EMAIL || 'support@shopzen.lk')} for help.</p><p style="font-size:12px"><a href="${unsubscribe}">Unsubscribe</a> · <a href="${preferences}">Marketing preferences</a></p></div></div></body></html>`;
+  return `<!doctype html><html><body style="margin:0;background:#f8fafc;font-family:Arial,sans-serif;color:#0f172a"><div style="max-width:600px;margin:auto;padding:24px"><div style="background:white;border-radius:16px;padding:28px"><p style="font-weight:800;color:#15803d">ShopZen</p><h1 style="font-size:24px">${esc(rec.headline)}</h1><p>${esc(rec.emailBody)}</p>${image ? `<img src="${esc(image)}" alt="${esc(product.name)}" style="width:100%;max-height:360px;object-fit:contain">` : ''}<h2>${esc(product.name)}</h2><p style="font-size:20px;font-weight:700">Rs. ${price}</p><a href="${click}" style="display:inline-block;background:#15803d;color:white;padding:12px 20px;border-radius:10px;text-decoration:none">${esc(rec.ctaText)}</a><p style="margin-top:28px;font-size:12px;color:#64748b">You receive this because you opted in to ShopZen marketing. ShopZen, Sri Lanka. Reply to ${esc(process.env.MARKETING_REPLY_TO || process.env.ADMIN_EMAIL || 'support@shopzen.lk')} for help.</p><p style="font-size:12px"><a href="${unsubscribe}">Unsubscribe</a> · <a href="${preferences}">Marketing preferences</a></p></div></div>${settings.emailOpenTrackingEnabled ? `<img src="${openPixel}" width="1" height="1" alt="" style="display:none">` : ''}</body></html>`;
 }
 
 async function sendRecommendation(id) {
@@ -154,7 +155,7 @@ async function sendRecommendation(id) {
     const data = await sendMail({
       to: validation.preference.email,
       subject: rec.subject,
-      html: renderEmail(rec, validation.product, validation.preference),
+      html: renderEmail(rec, validation.product, validation.preference, settings),
       text: `${rec.headline}\n\n${rec.emailBody}\n\n${validation.product.name} — Rs. ${effectivePrice(validation.product).toLocaleString('en-LK')}\n${base}/product/${validation.product.slug}\n\nShopZen, Sri Lanka. You opted in to ShopZen marketing; use the unsubscribe or preference link in the HTML email to change your choices.`,
     });
     rec.status = 'sent'; rec.sentAt = new Date(); rec.emailProviderMessageId = data?.id; await rec.save();

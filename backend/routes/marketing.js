@@ -18,6 +18,14 @@ function safeMetadata(input) {
   return output;
 }
 
+function safeOccurredAt(value) {
+  const parsed = new Date(value);
+  const now = Date.now();
+  // Accept delayed browser delivery, but reject fabricated/faulty timestamps.
+  return !Number.isNaN(parsed.getTime()) && parsed.getTime() >= now - 24 * 60 * 60 * 1000 && parsed.getTime() <= now + 5 * 60 * 1000
+    ? parsed : new Date();
+}
+
 router.post('/events', limiter, auth, async (req, res) => {
   try {
     const settings = await require('../services/marketingService').getSettings();
@@ -26,14 +34,24 @@ router.post('/events', limiter, auth, async (req, res) => {
     if (!preference || !allowedEvents.has(req.body.eventType)) return res.status(202).json({ accepted: false });
     const productId = req.body.productId;
     if (productId && !(await Product.exists({ _id: productId }))) return res.status(400).json({ message: 'Invalid product' });
-    await CustomerBehaviorEvent.create({
+    const eventId = clean(req.body.eventId, 120);
+    const event = {
       customerId: req.user._id, emailHash: hashEmail(preference.email), sessionId: clean(req.body.sessionId, 120),
       productId: productId || undefined, categoryId: req.body.categoryId || undefined,
       eventType: req.body.eventType, searchQuery: clean(req.body.searchQuery, 200), source: clean(req.body.source || 'storefront', 80),
       deviceType: ['desktop','mobile','tablet'].includes(req.body.deviceType) ? req.body.deviceType : 'unknown',
-      referrer: clean(req.body.referrer, 500), metadata: safeMetadata(req.body.metadata),
-    });
-    res.status(202).json({ accepted: true });
+      referrer: clean(req.body.referrer, 500), pagePath: clean(req.body.pagePath, 500),
+      metadata: safeMetadata(req.body.metadata), occurredAt: safeOccurredAt(req.body.occurredAt),
+      ...(eventId ? { eventId } : {}),
+    };
+    if (eventId) {
+      const result = await CustomerBehaviorEvent.updateOne(
+        { customerId: req.user._id, eventId }, { $setOnInsert: event }, { upsert: true }
+      );
+      return res.status(202).json({ accepted: true, duplicate: result.upsertedCount === 0 });
+    }
+    await CustomerBehaviorEvent.create(event);
+    res.status(202).json({ accepted: true, duplicate: false });
   } catch (error) { res.status(400).json({ message: 'Event could not be accepted' }); }
 });
 
@@ -75,6 +93,23 @@ router.get('/click/:token', limiter, async (req, res) => {
     await CustomerBehaviorEvent.create({ customerId: rec.customerId, productId: rec.productId._id, eventType: 'email_clicked', source: 'retargeting_email' });
     res.redirect(302, `${(process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/,'')}/product/${encodeURIComponent(rec.productId.slug)}`);
   } catch { res.status(400).send('This link is invalid or expired.'); }
+});
+const transparentGif = Buffer.from('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', 'base64');
+router.get('/open/:token.gif', limiter, async (req, res) => {
+  res.setHeader('Content-Type', 'image/gif');
+  res.setHeader('Cache-Control', 'no-store, private, max-age=0');
+  try {
+    const settings = await require('../services/marketingService').getSettings();
+    if (settings.emailOpenTrackingEnabled) {
+      const payload = tokenPayload(req);
+      const rec = await MarketingRecommendation.findOneAndUpdate(
+        { _id: payload.recommendationId, customerId: payload.customerId, openAt: null },
+        { $set: { openAt: new Date() } }, { new: true }
+      );
+      if (rec) await CustomerBehaviorEvent.create({ customerId:rec.customerId, productId:rec.productId, eventType:'email_opened', source:'retargeting_email' });
+    }
+  } catch (_) { /* A tracking pixel must never break email rendering. */ }
+  res.status(200).end(transparentGif);
 });
 
 module.exports = router;

@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const { Schema } = mongoose;
 
 const behaviorSchema = new Schema({
+  eventId: { type: String, trim: true, maxlength: 120 },
   customerId: { type: Schema.Types.ObjectId, ref: 'User', index: true },
   emailHash: { type: String, index: true },
   sessionId: { type: String, trim: true, maxlength: 120 },
@@ -14,11 +15,17 @@ const behaviorSchema = new Schema({
   source: { type: String, trim: true, maxlength: 80, default: 'storefront' },
   deviceType: { type: String, enum: ['desktop','mobile','tablet','unknown'], default: 'unknown' },
   referrer: { type: String, trim: true, maxlength: 500 },
+  pagePath: { type: String, trim: true, maxlength: 500 },
   metadata: { type: Schema.Types.Mixed, default: {} },
+  occurredAt: { type: Date, default: Date.now, index: true },
   createdAt: { type: Date, default: Date.now, index: true },
   expiresAt: { type: Date, default: () => new Date(Date.now() + 90 * 86400000), index: { expires: 0 } },
 });
 behaviorSchema.index({ customerId: 1, productId: 1, createdAt: -1 });
+behaviorSchema.index(
+  { customerId: 1, eventId: 1 },
+  { unique: true, partialFilterExpression: { eventId: { $type: 'string' } } }
+);
 
 const preferenceSchema = new Schema({
   customerId: { type: Schema.Types.ObjectId, ref: 'User', index: true, sparse: true },
@@ -69,7 +76,7 @@ const recommendationSchema = new Schema({
   emailProviderMessageId: String,
   contentSource: { type: String, enum: ['ai','fallback','admin'], default: 'fallback' },
   failureReason: String,
-  clickAt: Date, convertedAt: Date,
+  openAt: Date, clickAt: Date, convertedAt: Date,
   attribution: { orderId: Schema.Types.ObjectId, revenue: Number, method: String, purchaseTimestamp: Date },
 }, { timestamps: true });
 recommendationSchema.index({ customerId: 1, productId: 1, createdAt: -1 });

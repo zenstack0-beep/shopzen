@@ -799,14 +799,23 @@ router.post('/', orderRateLimiter, async (req, res) => {
     // Marketing conversion/purchase exclusion runs only after the order and
     // benefit transaction are authoritative. It never delays checkout.
     Promise.resolve().then(async () => {
-      const { CustomerBehaviorEvent, MarketingRecommendation } = require('../models/Marketing');
+      const { CustomerBehaviorEvent, CustomerMarketingPreference, MarketingRecommendation } = require('../models/Marketing');
+      const { getSettings } = require('../services/marketingService');
       const purchasedIds = orderItems.map(item => item.product);
       if (!userId) return;
-      await CustomerBehaviorEvent.insertMany(purchasedIds.map(productId => ({ customerId: userId, productId, eventType: 'purchase_completed', source: 'checkout', metadata: { orderId: order._id } })), { ordered: false });
+      const [marketingSettings, marketingPreference] = await Promise.all([
+        getSettings(),
+        CustomerMarketingPreference.findOne({ customerId:userId, marketingConsent:true, unsubscribedAt:null, suppressionReason:{ $in:[null,''] } }).lean(),
+      ]);
+      if (marketingSettings.trackingEnabled && marketingPreference) {
+        await CustomerBehaviorEvent.insertMany(purchasedIds.map(productId => ({ customerId: userId, emailHash:require('../services/marketingService').hashEmail(marketingPreference.email), productId, eventType: 'purchase_completed', source: 'checkout', metadata: { orderId: order._id } })), { ordered: false });
+      }
       await MarketingRecommendation.updateMany({ customerId: userId, productId: { $in: purchasedIds }, status: { $in: ['pending_approval','approved','scheduled'] } }, { status: 'cancelled', cancelledAt: new Date(), cancellationReason: 'Customer purchased product before send' });
-      const candidates = await MarketingRecommendation.find({ customerId: userId, productId: { $in: purchasedIds }, status: 'sent', sentAt: { $gte: new Date(Date.now() - 7 * 86400000) } });
+      // Revenue attribution is click-through only. Email opens are unreliable
+      // because privacy proxies and image blocking can create false signals.
+      const candidates = await MarketingRecommendation.find({ customerId: userId, productId: { $in: purchasedIds }, status: 'sent', clickAt: { $ne:null }, sentAt: { $gte: new Date(Date.now() - marketingSettings.attributionWindowDays * 86400000) } });
       for (const rec of candidates) {
-        rec.status = 'converted'; rec.convertedAt = new Date(); rec.attribution = { orderId: order._id, revenue: orderItems.filter(i => String(i.product) === String(rec.productId)).reduce((n,i)=>n+i.subtotal,0), method: rec.clickAt ? 'click' : 'view_through', purchaseTimestamp: new Date() }; await rec.save();
+        rec.status = 'converted'; rec.convertedAt = new Date(); rec.attribution = { orderId: order._id, revenue: orderItems.filter(i => String(i.product) === String(rec.productId)).reduce((n,i)=>n+i.subtotal,0), method: 'click', purchaseTimestamp: new Date() }; await rec.save();
       }
     }).catch(error => console.error('[Marketing attribution]', error.message));
 

@@ -16,7 +16,9 @@ export function trackMarketingEvent(eventType, data = {}) {
     sessionStorage.setItem(sessionKey, sessionId);
   }
   API.post('/marketing/events', {
+    eventId: window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
     eventType, sessionId, deviceType: deviceType(), source: 'storefront',
+    occurredAt: new Date().toISOString(), pagePath: `${window.location.pathname}${window.location.search}`,
     referrer: document.referrer ? document.referrer.slice(0, 500) : '', ...data,
   }).catch(() => {});
 }
