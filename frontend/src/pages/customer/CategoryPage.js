@@ -496,22 +496,6 @@ export default function CategoryPage() {
               style={{ color: 'var(--color-primary)', borderColor: 'var(--color-primary)', background: 'transparent' }}>
               Featured
             </Link>
-            {slug !== 'audio'       && <Link to="/category/audio"       className="text-xs px-3 py-1.5 rounded-full font-medium border transition-colors" style={{ color: 'var(--color-primary)', borderColor: 'var(--color-primary)', background: 'transparent' }}>Audio</Link>}
-            {slug !== 'electronics' && <Link to="/category/electronics" className="text-xs px-3 py-1.5 rounded-full font-medium border transition-colors" style={{ color: 'var(--color-primary)', borderColor: 'var(--color-primary)', background: 'transparent' }}>Electronics</Link>}
-            {slug !== 'appliances'  && <Link to="/category/appliances"  className="text-xs px-3 py-1.5 rounded-full font-medium border transition-colors" style={{ color: 'var(--color-primary)', borderColor: 'var(--color-primary)', background: 'transparent' }}>Appliances</Link>}
-          </div>
-          {/* Popular brand links — boosts brand page crawling & internal link equity */}
-          <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 mt-4 mb-3">
-            Shop by brand
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {['sony', 'philips', 'samsung', 'jbl'].map(brand => (
-              <Link key={brand} to={`/brand/${brand}`}
-                className="text-xs px-3 py-1.5 rounded-full font-medium border transition-colors capitalize"
-                style={{ color: 'var(--color-primary)', borderColor: 'var(--color-primary)', background: 'transparent' }}>
-                {brand.charAt(0).toUpperCase() + brand.slice(1)}
-              </Link>
-            ))}
           </div>
         </div>
       </div>

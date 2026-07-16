@@ -420,29 +420,7 @@ export default function BrandPage() {
         {/* Internal linking — related brands and categories */}
         <div className="mt-6 rounded-2xl p-5"
           style={{ background: 'var(--card-bg)', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-          <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 mb-3">
-            Shop other brands
-          </p>
-          <div className="flex flex-wrap gap-2 mb-4">
-            {['sony', 'philips', 'samsung', 'jbl'].filter(b => b !== slug.toLowerCase()).map(b => (
-              <Link key={b} to={`/brand/${b}`}
-                className="text-xs px-3 py-1.5 rounded-full font-medium border transition-colors capitalize"
-                style={{ color: 'var(--color-primary)', borderColor: 'var(--color-primary)', background: 'transparent' }}>
-                {b.charAt(0).toUpperCase() + b.slice(1)}
-              </Link>
-            ))}
-          </div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 mb-3">
-            Shop by category
-          </p>
           <div className="flex flex-wrap gap-2">
-            {[['audio', 'Audio'], ['electronics', 'Electronics'], ['appliances', 'Appliances']].map(([s, label]) => (
-              <Link key={s} to={`/category/${s}`}
-                className="text-xs px-3 py-1.5 rounded-full font-medium border transition-colors"
-                style={{ color: 'var(--color-primary)', borderColor: 'var(--color-primary)', background: 'transparent' }}>
-                {label}
-              </Link>
-            ))}
             <Link to="/shop" className="text-xs px-3 py-1.5 rounded-full font-medium border transition-colors"
               style={{ color: 'var(--color-primary)', borderColor: 'var(--color-primary)', background: 'transparent' }}>
               All Products

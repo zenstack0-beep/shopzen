@@ -84,6 +84,13 @@ async function getSiteUrl() {
   return (s?.value?.siteUrl || process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
 }
 
+// A category is public SEO inventory only when at least one active product is
+// assigned to it. This prevents old/imported empty categories from becoming
+// generated landing pages in Google.
+async function getInventoryCategoryIds() {
+  return Product.distinct('category', { isActive: true });
+}
+
 // Sub-sitemap <loc> tags must be directly reachable by Google without going
 // through Vercel rewrites. Point them straight at the Railway backend.
 function getBackendUrl() {
@@ -215,10 +222,14 @@ router.get('/categories-sitemap.xml', async (req, res) => {
       return res.send(cache.categoriesSitemap.data);
     }
 
-    const [siteUrl, categories] = await Promise.all([
+    const [siteUrl, inventoryCategoryIds] = await Promise.all([
       getSiteUrl(),
-      Category.find({ isActive: true }, 'slug name updatedAt').lean(),
+      getInventoryCategoryIds(),
     ]);
+    const categories = await Category.find(
+      { _id: { $in: inventoryCategoryIds }, isActive: true },
+      'slug name updatedAt'
+    ).lean();
 
     const today = new Date().toISOString().split('T')[0];
 
@@ -1179,6 +1190,10 @@ async function renderShopPage(req, html, siteUrl, storeName, defaultOgImage, log
         const featuredProduct = await Product.findOne({ category: cat._id, isActive: true, thumbnail: { $exists: true, $ne: '' } }).lean();
         const ogImage = featuredProduct?.thumbnail || defaultOgImage;
 
+        // An active category record with no active inventory is obsolete, not
+        // an SEO landing page. Continue to the 410 response below.
+        if (!catProducts.length) throw Object.assign(new Error('EMPTY_CATEGORY'), { code: 'EMPTY_CATEGORY' });
+
         const breadcrumb = {
           '@context': 'https://schema.org', '@type': 'BreadcrumbList',
           itemListElement: [
@@ -1406,8 +1421,21 @@ const seoRenderMiddleware = async (req, res) => {
         return res.status(200).send(injectSeoWindowConfig(out, _topMeta));
       }
     } catch (err) {
-      console.error('[SSR category]', err.message);
+      if (err.code !== 'EMPTY_CATEGORY') console.error('[SSR category]', err.message);
     }
+
+    const removed = injectMeta(html, {
+      title: `Category No Longer Available | ${storeName}`,
+      desc: 'This category is no longer part of the current ShopZen catalogue.',
+      canonical: `${siteUrl}${req.path}`,
+      ogImage: defaultOgImage,
+      ogType: 'website',
+      robots: 'noindex,follow',
+      schemas: [orgSchema],
+    });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(410).send(injectSeoWindowConfig(removed, _topMeta));
   }
 
   // ── /brand/:slug ─────────────────────────────────────────────────────────────
@@ -1502,8 +1530,9 @@ const seoRenderMiddleware = async (req, res) => {
           logo: { '@type': 'ImageObject', url: meta.logoUrl || SHOPZEN_LOGO_URL, width: 512, height: 512 },
         };
         // Fetch categories + best sellers for static, crawlable homepage content
+        const inventoryCategoryIds = await getInventoryCategoryIds();
         const [homeCategories, bestSellers] = await Promise.all([
-          Category.find({ isActive: true }, 'name slug').limit(12).lean(),
+          Category.find({ _id: { $in: inventoryCategoryIds }, isActive: true }, 'name slug').limit(12).lean(),
           Product.find({ isActive: true }, 'name slug thumbnail images brand price salePrice stock ratings')
             .sort({ isFeatured: -1, 'ratings.count': -1, createdAt: -1 })
             .limit(12)
