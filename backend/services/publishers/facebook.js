@@ -23,9 +23,10 @@
  *      → ✅ Appears in ALL Posts feed, Photos tab, and followers' News Feed.
  *      → ✅ Product URL is a real clickable link, not plain text.
  *
- * STRATEGY (fixed):
- *   Single image  → stage image + /feed with attached_media, product URL
- *                    appended as plain text to `message` (NOT `link`)
+ * STRATEGY:
+ *   Single image  → publish a native Page photo with `published:true` and
+ *                    `no_story:false`, using the caption for text + product URL.
+ *                    This creates the Page feed story and Photos entry together.
  *   Multi-image   → stage all images + /feed with attached_media[], product
  *                    URL appended as plain text to `message` (NOT `link`)
  *   No image      → plain /feed with product URL appended to `message`
@@ -106,51 +107,31 @@ async function postSingleImage(pageId, accessToken, payload, imageUrl) {
   const productUrl = getProductUrl(payload);
 
   if (isPublicUrl) {
-    // Step 1: Stage image as unpublished photo
-    console.log(`[Facebook] Staging image for feed post…`);
-    const stageRes  = await fetch(`${GRAPH}/${pageId}/photos`, {
+    // A directly published Page photo is the canonical single-image Page post.
+    // no_story:false is explicit so Facebook cannot retain only the photo object
+    // without also creating its public Page feed story.
+    let caption = payload.text || '';
+    if (productUrl && !caption.includes(productUrl)) {
+      caption = caption ? `${caption}\n\n${productUrl}` : productUrl;
+    }
+    const photoRes = await fetch(`${GRAPH}/${pageId}/photos`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({
         url:          imageUrl,
-        published:    false,
+        caption,
+        published:    true,
+        no_story:     false,
         access_token: accessToken,
       }),
     });
-    const stageJson = await stageRes.json();
-
-    if (stageJson.id) {
-      // Step 2: Publish feed post with image attached.
-      // NOTE: Facebook mishandles `attached_media` combined with `link` —
-      // the resulting post often only appears in the Photos tab, not in
-      // "All Posts". FIX: do NOT set `link`. Instead append the product
-      // URL as plain text to `message` (Facebook auto-links URLs in text).
-      let message = payload.text || '';
-      if (productUrl && !message.includes(productUrl)) {
-        message = message ? `${message}\n\n${productUrl}` : productUrl;
-      }
-
-      const feedBody = {
-        message:        message,
-        attached_media: [{ media_fbid: stageJson.id }],
-        access_token:   accessToken,
-      };
-
-      const feedRes  = await fetch(`${GRAPH}/${pageId}/feed`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(feedBody),
-      });
-      const feedJson = await feedRes.json();
-
-      if (!feedJson.error) {
-        console.log(`[Facebook] ✅ Feed post with image + product link: ${feedJson.id}`);
-        return { platformPostId: feedJson.id || '' };
-      }
-      console.warn(`[Facebook] Feed post with attached_media failed: ${feedJson.error.message}`);
-    } else {
-      console.warn(`[Facebook] Image staging failed: ${stageJson.error?.message || 'no id returned'} — falling back to link-only post`);
+    const photoJson = await photoRes.json();
+    if (!photoJson.error && (photoJson.post_id || photoJson.id)) {
+      const postId = photoJson.post_id || photoJson.id;
+      console.log(`[Facebook] ✅ Native published Page photo story: ${postId}`);
+      return { platformPostId: postId, platformPhotoId: photoJson.id || '' };
     }
+    console.warn(`[Facebook] Native Page photo story failed: ${photoJson.error?.message || 'no post id returned'} — falling back to feed post`);
   }
 
   // Fallback: text post with product URL as link (image won't show inline)
@@ -200,6 +181,7 @@ async function postMultipleImages(pageId, accessToken, payload, images) {
     const feedBody = {
       message:        message,
       attached_media: [{ media_fbid: photoIds[0] }],
+      published:      true,
       access_token:   accessToken,
     };
 
@@ -220,6 +202,7 @@ async function postMultipleImages(pageId, accessToken, payload, images) {
   const feedBody = {
     message:        message,
     attached_media: photoIds.map(id => ({ media_fbid: id })),
+    published:      true,
     access_token:   accessToken,
   };
 
