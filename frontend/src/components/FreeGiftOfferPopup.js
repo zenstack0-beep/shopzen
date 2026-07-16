@@ -12,6 +12,7 @@ export default function FreeGiftOfferPopup() {
 
   useEffect(() => {
     let timer;
+    let waitingForRelease = null;
     API.get('/offers/active').then(({ data }) => {
       const active = (data || [])[0];
       if (!active) return;
@@ -19,16 +20,27 @@ export default function FreeGiftOfferPopup() {
       if (sessionStorage.getItem(`free_gift_offer_${active._id}`)) return;
       setOffer(active);
       // Give the storefront time to render before presenting the campaign.
-      timer = setTimeout(() => {
+      const showWhenAvailable = () => {
+        if (window.__shopzenPopupBusy) {
+          waitingForRelease = showWhenAvailable;
+          window.addEventListener('shopzen:popup-released', waitingForRelease, { once:true });
+          return;
+        }
+        window.__shopzenPopupBusy = `free-gift:${active._id}`;
         setVisible(true);
         sessionStorage.setItem(`free_gift_offer_${active._id}`, '1');
-      }, Math.min(300, Math.max(0, Number(active.popupDelaySeconds ?? 1))) * 1000);
+      };
+      timer = setTimeout(showWhenAvailable, Math.min(300, Math.max(0, Number(active.popupDelaySeconds ?? 1))) * 1000);
     }).catch(() => {});
-    return () => clearTimeout(timer);
+    return () => { clearTimeout(timer); if (waitingForRelease) window.removeEventListener('shopzen:popup-released', waitingForRelease); };
   }, []);
 
   if (!visible || !offer) return null;
-  const close = () => setVisible(false);
+  const close = () => {
+    setVisible(false);
+    if (window.__shopzenPopupBusy === `free-gift:${offer._id}`) window.__shopzenPopupBusy = null;
+    setTimeout(() => window.dispatchEvent(new Event('shopzen:popup-released')), 300);
+  };
   const shop = () => { close(); navigate('/shop'); };
   const levels = offer.tiers?.length
     ? offer.tiers

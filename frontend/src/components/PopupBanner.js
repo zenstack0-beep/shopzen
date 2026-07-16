@@ -8,12 +8,17 @@ import API from '../utils/api';
  */
 export default function PopupBanner() {
   const navigate = useNavigate();
+  const [banners, setBanners] = useState([]);
+  const [dueIds, setDueIds] = useState([]);
   const [banner, setBanner] = useState(null);
   const [show,   setShow]   = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
+    const timers = [];
     API.get('/banners?position=popup')
       .then(r => {
+        if (cancelled) return;
         const active = (r.data || []).filter(b => {
           if (!b.isActive) return false;
           const now = Date.now();
@@ -21,31 +26,43 @@ export default function PopupBanner() {
           if (b.endDate   && new Date(b.endDate)   < now) return false;
           return true;
         });
-        if (active.length === 0) return;
-        const b = active[0];
-
-        const freq = b.popupFrequency || 'once_per_session';
-        const key  = `popup_${b._id}`;
-        if (freq === 'once_per_session' && sessionStorage.getItem(key)) return;
-        if (freq === 'once_per_day') {
-          const last = localStorage.getItem(key);
-          if (last && Date.now() - Number(last) < 86400000) return;
-        }
-
-        setBanner(b);
-        const delay = (b.popupDelay || 3) * 1000;
-        const timer = setTimeout(() => {
-          // A published free-gift campaign has its own richer product-image
-          // popup. Avoid stacking two promotional modals over each other.
-          if (sessionStorage.getItem('sz_free_gift_campaign_available')) return;
-          setShow(true);
-          if (freq === 'once_per_session') sessionStorage.setItem(key, '1');
-          if (freq === 'once_per_day')     localStorage.setItem(key, Date.now());
-        }, delay);
-        return () => clearTimeout(timer);
+        const eligible = active.filter(b => {
+          const freq = b.popupFrequency || 'once_per_session';
+          const key = `popup_${b._id}`;
+          if (freq === 'once_per_session' && sessionStorage.getItem(key)) return false;
+          if (freq === 'once_per_day') {
+            const last = localStorage.getItem(key);
+            if (last && Date.now() - Number(last) < 86400000) return false;
+          }
+          return true;
+        });
+        setBanners(eligible);
+        timers.push(...eligible.map(b => setTimeout(() => {
+          setDueIds(ids => ids.includes(b._id) ? ids : [...ids, b._id]);
+        }, Math.max(0, Number(b.popupDelay ?? 3)) * 1000)));
       })
       .catch(() => {});
+    return () => { cancelled = true; timers.forEach(clearTimeout); };
   }, []);
+
+  // All promotional overlays share one lightweight browser-side lock. Due
+  // popups queue instead of stacking or being permanently skipped.
+  useEffect(() => {
+    const tryShowNext = () => {
+      if (show || window.__shopzenPopupBusy || !dueIds.length) return;
+      const next = banners.find(item => item._id === dueIds[0]);
+      if (!next) { setDueIds(ids => ids.slice(1)); return; }
+      window.__shopzenPopupBusy = `banner:${next._id}`;
+      setBanner(next); setShow(true);
+      const freq = next.popupFrequency || 'once_per_session';
+      const key = `popup_${next._id}`;
+      if (freq === 'once_per_session') sessionStorage.setItem(key, '1');
+      if (freq === 'once_per_day') localStorage.setItem(key, Date.now());
+    };
+    tryShowNext();
+    window.addEventListener('shopzen:popup-released', tryShowNext);
+    return () => window.removeEventListener('shopzen:popup-released', tryShowNext);
+  }, [banners, dueIds, show]);
 
   if (!show || !banner) return null;
 
@@ -53,7 +70,13 @@ export default function PopupBanner() {
   const maxW = widthMap[banner.popupWidth || 'md'];
   const btnBg  = banner.buttonBgColor || 'var(--color-primary, #6366f1)';
   const btnCol = banner.buttonColor   || '#fff';
-  const close  = () => setShow(false);
+  const close  = () => {
+    const currentId = banner?._id;
+    setShow(false); setBanner(null);
+    setDueIds(ids => ids.filter(id => id !== currentId));
+    if (window.__shopzenPopupBusy === `banner:${currentId}`) window.__shopzenPopupBusy = null;
+    setTimeout(() => window.dispatchEvent(new Event('shopzen:popup-released')), 300);
+  };
   const hasImg = !!banner.image;
 
   return (
