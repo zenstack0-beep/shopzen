@@ -137,11 +137,12 @@ export const applyTheme = (settings) => {
   style.textContent = settings?.customCSS || '';
 
   // Apply favicon from settings
-  if (settings?.faviconUrl) {
+  const faviconUrl = settings?.faviconUrl || settings?.logoUrl;
+  if (faviconUrl) {
     ['icon', 'shortcut icon', 'apple-touch-icon'].forEach(rel => {
       let fav = document.querySelector(`link[rel="${rel}"]`);
       if (!fav) { fav = document.createElement('link'); fav.rel = rel; document.head.appendChild(fav); }
-      fav.href = settings.faviconUrl;
+      fav.href = faviconUrl;
     });
   }
 

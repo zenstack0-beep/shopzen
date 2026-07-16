@@ -33,6 +33,38 @@
       "destination": "https://shopzen-production.up.railway.app/api/seo/robots.txt"
     },
     {
+      "source": "/favicon.ico",
+      "destination": "https://shopzen-production.up.railway.app/api/settings/favicon.ico"
+    },
+    {
+      "source": "/favicon.png",
+      "destination": "https://shopzen-production.up.railway.app/api/settings/favicon.png"
+    },
+    {
+      "source": "/favicon-16x16.png",
+      "destination": "https://shopzen-production.up.railway.app/api/settings/favicon-16x16.png"
+    },
+    {
+      "source": "/favicon-32x32.png",
+      "destination": "https://shopzen-production.up.railway.app/api/settings/favicon-32x32.png"
+    },
+    {
+      "source": "/favicon-96x96.png",
+      "destination": "https://shopzen-production.up.railway.app/api/settings/favicon-96x96.png"
+    },
+    {
+      "source": "/apple-touch-icon.png",
+      "destination": "https://shopzen-production.up.railway.app/api/settings/apple-touch-icon.png"
+    },
+    {
+      "source": "/android-chrome-192x192.png",
+      "destination": "https://shopzen-production.up.railway.app/api/settings/android-chrome-192x192.png"
+    },
+    {
+      "source": "/android-chrome-512x512.png",
+      "destination": "https://shopzen-production.up.railway.app/api/settings/android-chrome-512x512.png"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
@@ -91,7 +123,7 @@
       "headers": [
         {
           "key": "Cache-Control",
-          "value": "public, max-age=2592000, immutable"
+          "value": "public, max-age=3600, must-revalidate"
         },
         {
           "key": "Content-Type",
@@ -104,7 +136,7 @@
       "headers": [
         {
           "key": "Cache-Control",
-          "value": "public, max-age=2592000, immutable"
+          "value": "public, max-age=3600, must-revalidate"
         },
         {
           "key": "Content-Type",
@@ -117,7 +149,7 @@
       "headers": [
         {
           "key": "Cache-Control",
-          "value": "public, max-age=2592000, immutable"
+          "value": "public, max-age=3600, must-revalidate"
         },
         {
           "key": "Content-Type",
@@ -130,7 +162,7 @@
       "headers": [
         {
           "key": "Cache-Control",
-          "value": "public, max-age=2592000, immutable"
+          "value": "public, max-age=3600, must-revalidate"
         },
         {
           "key": "Content-Type",
@@ -143,12 +175,33 @@
       "headers": [
         {
           "key": "Cache-Control",
-          "value": "public, max-age=2592000, immutable"
+          "value": "public, max-age=3600, must-revalidate"
         },
         {
           "key": "Content-Type",
           "value": "image/png"
         }
+      ]
+    },
+    {
+      "source": "/favicon-16x16.png",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=3600, must-revalidate" },
+        { "key": "Content-Type", "value": "image/png" }
+      ]
+    },
+    {
+      "source": "/android-chrome-192x192.png",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=3600, must-revalidate" },
+        { "key": "Content-Type", "value": "image/png" }
+      ]
+    },
+    {
+      "source": "/android-chrome-512x512.png",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=3600, must-revalidate" },
+        { "key": "Content-Type", "value": "image/png" }
       ]
     },
     {

@@ -58,6 +58,19 @@ async function getLogoUrl() {
   return row?.value || null;
 }
 
+function resizedPngUrl(logoUrl, size) {
+  return logoUrl.includes('/upload/')
+    ? logoUrl.replace('/upload/', `/upload/w_${size},h_${size},c_pad,b_white,f_png/`)
+    : logoUrl;
+}
+
+async function sendDynamicIcon(res, size) {
+  const logoUrl = await getLogoUrl();
+  if (!logoUrl) return res.status(404).send('No favicon configured');
+  res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
+  return res.redirect(302, resizedPngUrl(logoUrl, size));
+}
+
 // ── Helper: redirect directly to Cloudinary (avoids Railway proxying overhead)
 // When ?redirect=1 is passed, we send a 302 to the Cloudinary URL directly.
 // Vercel uses this so Google/browsers fetch the image straight from Cloudinary
@@ -106,6 +119,21 @@ router.get('/apple-touch-icon.png', async (req, res) => {
     const url = logoUrl.replace('/upload/', '/upload/w_180,h_180,c_pad,b_white,f_png/');
     redirectOrProxy(logoUrl, url, res, 'image/png');
   } catch (err) { res.status(500).send(err.message); }
+});
+
+router.get('/favicon-16x16.png', async (req, res) => {
+  try { await sendDynamicIcon(res, 16); }
+  catch (err) { res.status(500).send(err.message); }
+});
+
+router.get('/android-chrome-192x192.png', async (req, res) => {
+  try { await sendDynamicIcon(res, 192); }
+  catch (err) { res.status(500).send(err.message); }
+});
+
+router.get('/android-chrome-512x512.png', async (req, res) => {
+  try { await sendDynamicIcon(res, 512); }
+  catch (err) { res.status(500).send(err.message); }
 });
 
 // ── In-memory settings cache (10 min TTL) ───────────────────────────────────────
