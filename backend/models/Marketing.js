@@ -33,6 +33,8 @@ const preferenceSchema = new Schema({
   marketingConsent: { type: Boolean, default: false, index: true },
   consentSource: { type: String, trim: true, maxlength: 80 },
   consentTimestamp: Date,
+  consentVersion: { type: String, trim: true, maxlength: 40 },
+  consentText: { type: String, trim: true, maxlength: 500 },
   unsubscribedAt: Date,
   suppressionReason: { type: String, trim: true, maxlength: 240 },
   complaintAt: Date,

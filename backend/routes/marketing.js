@@ -67,7 +67,7 @@ router.post('/unsubscribe', limiter, express.urlencoded({ extended: false }), as
     const pref = await CustomerMarketingPreference.findOne({ customerId: payload.customerId });
     if (!pref || hashEmail(pref.email) !== payload.emailHash) throw new Error('Invalid token');
     pref.marketingConsent = false; pref.unsubscribedAt = new Date(); pref.suppressionReason = 'unsubscribed'; pref.emailFrequencyPreference = 'none'; await pref.save();
-    await MarketingRecommendation.updateMany({ customerId: pref.customerId, status: { $in: ['pending_approval','approved','scheduled'] } }, { status: 'cancelled', cancelledAt: new Date(), cancellationReason: 'Customer unsubscribed' });
+    await MarketingRecommendation.updateMany({ customerId: pref.customerId, status: { $in: ['draft','suggested','pending_approval','approved','scheduled'] } }, { status: 'cancelled', cancelledAt: new Date(), cancellationReason: 'Customer unsubscribed' });
     await MarketingAuditLog.create({ action: 'unsubscribed', entityId: pref._id });
     res.type('html').send('<!doctype html><html><body><h1>You have been unsubscribed</h1><p>ShopZen marketing emails have been stopped.</p></body></html>');
   } catch { res.status(400).send('This link is invalid or expired.'); }

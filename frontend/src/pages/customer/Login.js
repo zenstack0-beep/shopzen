@@ -129,21 +129,21 @@ const Divider = () => (
 );
 
 // ─── Google Sign-In Button ────────────────────────────────────────────────────
-function GoogleSignInButton({ onSuccess, disabled, label = 'Continue with Google' }) {
+function GoogleSignInButton({ onSuccess, disabled, label = 'Continue with Google', marketingConsent = false }) {
   const [ready, setReady] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleCredential = useCallback(async (response) => {
     setLoading(true);
     try {
-      const { data } = await API.post('/auth/google', { credential: response.credential });
+      const { data } = await API.post('/auth/google', { credential: response.credential, marketingConsent });
       onSuccess(data.user, data.token);
     } catch (err) {
       toast.error(err.response?.data?.message || 'Google sign-in failed. Please try again.');
     } finally {
       setLoading(false);
     }
-  }, [onSuccess]);
+  }, [onSuccess, marketingConsent]);
 
   useEffect(() => {
     if (!GOOGLE_CLIENT_ID) return;
@@ -315,6 +315,7 @@ export function Register() {
     email:     prefill.email     || '',
     password:  '',
     phone:     prefill.phone     || '',
+    marketingConsent: false,
   });
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -396,7 +397,7 @@ export function Register() {
         </div>
 
         <div className="rounded-2xl border border-gray-100 shadow-xl p-8" style={{ background: 'var(--card-bg)' }}>
-          <GoogleSignInButton onSuccess={handleGoogleSuccess} disabled={loading} label="Sign up with Google" />
+          <GoogleSignInButton onSuccess={handleGoogleSuccess} disabled={loading} label="Sign up with Google" marketingConsent={form.marketingConsent} />
           <Divider />
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -449,6 +450,14 @@ export function Register() {
               {/* Live strength meter — only shows once user starts typing */}
               <PasswordStrengthMeter password={form.password} />
             </div>
+
+            <label className="flex items-start gap-3 rounded-xl border border-gray-200 bg-gray-50 p-3 cursor-pointer">
+              <input type="checkbox" className="mt-1" checked={form.marketingConsent}
+                onChange={e=>setForm(p=>({...p,marketingConsent:e.target.checked}))}/>
+              <span className="text-xs leading-5 text-gray-600">
+                Email me personalized product recommendations, offers, and cart reminders based on my ShopZen activity. I can unsubscribe at any time. <strong>This is optional.</strong>
+              </span>
+            </label>
 
             <button
               type="submit"

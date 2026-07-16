@@ -41,6 +41,26 @@ const User     = require('../models/User');
 const { auth, generateToken, recordFailedLogin, clearFailedLogin, isAccountLocked } = require('../middleware/auth');
 const { Notification, OTP, Coupon } = require('../models/index');
 const { sendMail, otpEmailHtml }    = require('../utils/mailer');
+const { CustomerMarketingPreference } = require('../models/Marketing');
+
+const REGISTRATION_MARKETING_CONSENT_VERSION = 'registration-v1-2026-07';
+const REGISTRATION_MARKETING_CONSENT_TEXT = 'Email me personalized product recommendations, offers, and cart reminders based on my ShopZen activity. I can unsubscribe at any time.';
+
+async function recordRegistrationMarketingConsent(user, accepted, source = 'registration') {
+  if (accepted !== true || user.role !== 'customer') return;
+  await CustomerMarketingPreference.findOneAndUpdate(
+    { email: String(user.email).trim().toLowerCase() },
+    {
+      $set: {
+        customerId:user._id, marketingConsent:true, consentSource:source,
+        consentTimestamp:new Date(), consentVersion:REGISTRATION_MARKETING_CONSENT_VERSION,
+        consentText:REGISTRATION_MARKETING_CONSENT_TEXT, emailFrequencyPreference:'normal',
+      },
+      $unset: { unsubscribedAt:1, suppressionReason:1 },
+    },
+    { upsert:true, setDefaultsOnInsert:true }
+  );
+}
 
 // SECURITY: Use the shared generateToken so issuer/audience are embedded
 //           when JWT_ISSUER / JWT_AUDIENCE are configured in .env.
@@ -85,6 +105,7 @@ router.post('/register', async (req, res, next) => {
     }
 
     const user = await User.create({ firstName, lastName, username, email, password, phone });
+    await recordRegistrationMarketingConsent(user, req.body.marketingConsent === true);
 
     const newUserCoupon = await Coupon.findOne({
       isNewUserOnly: true,
@@ -224,6 +245,8 @@ router.post('/google', async (req, res, next) => {
     }
 
     if (!user.isActive) return res.status(403).json({ message: 'Your account has been deactivated' });
+
+    await recordRegistrationMarketingConsent(user, req.body.marketingConsent === true, 'google_registration');
 
     let dirty = false;
     if (!user.googleId)          { user.googleId = googleId; dirty = true; }
