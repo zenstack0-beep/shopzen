@@ -250,6 +250,9 @@ async function startServer() {
     const { startMarketingScheduler } = require('./services/marketingScheduler');
     startMarketingScheduler();
 
+    const { startScheduledSocialPostScheduler } = require('./services/scheduledSocialPostService');
+    startScheduledSocialPostScheduler();
+
     const { startCurfoxScheduler } = require('./services/curfoxScheduler');
     startCurfoxScheduler();
 

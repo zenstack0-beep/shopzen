@@ -14,6 +14,8 @@ const { refreshPlatformNow } = require('../services/tokenRefreshScheduler');
 const { getOrCreate, decryptPlatformFields } = require('../services/socialMediaService');
 const { inspectToken } = require('../services/facebookTokenRefresh');
 const { manualPublish } = require('../services/publisherService');
+const ScheduledSocialPost = require('../models/ScheduledSocialPost');
+const { createSchedule } = require('../services/scheduledSocialPostService');
 
 // ─── PUBLIC: storefront footer social links (no secrets) ─────────────────────
 router.get('/public', async (req, res) => {
@@ -148,6 +150,105 @@ router.post('/bulk-post', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
+// Durable multi-product schedule. Products are spaced by gapMinutes; selected
+// platforms for the same product share its scheduled time.
+router.post('/schedules', async (req,res) => {
+  try {
+    const result=await createSchedule({...req.body,createdBy:req.user?._id||req.admin?._id});
+    res.status(201).json(result);
+  } catch(error) { res.status(400).json({message:error.message}); }
+});
+
+router.get('/schedules', async (req,res) => {
+  try {
+    const filter={}; if(req.query.status)filter.status=req.query.status;
+    const page=Math.max(1,Number(req.query.page)||1); const limit=Math.min(100,Math.max(1,Number(req.query.limit)||50));
+    const [items,total]=await Promise.all([
+      ScheduledSocialPost.find(filter).populate('productId','name slug thumbnail images').sort({scheduledAt:-1}).skip((page-1)*limit).limit(limit).lean(),
+      ScheduledSocialPost.countDocuments(filter),
+    ]);
+    res.json({items,total,page,pages:Math.ceil(total/limit)});
+  } catch(error){res.status(500).json({message:'Scheduled posts could not be loaded'});}
+});
+
+// Persistent schedule-plan activity shown after page navigation or browser restart.
+router.get('/schedule-batches', async (req,res) => {
+  try {
+    const limit=Math.min(50,Math.max(1,Number(req.query.limit)||20));
+    const never=new Date('9999-12-31T23:59:59.999Z');
+    const batches=await ScheduledSocialPost.aggregate([
+      {$group:{
+        _id:'$batchId',createdAt:{$min:'$createdAt'},updatedAt:{$max:'$updatedAt'},
+        firstPostAt:{$min:'$scheduledAt'},lastPostAt:{$max:'$scheduledAt'},
+        nextPostAt:{$min:{$cond:[{$eq:['$status','pending']},'$scheduledAt',never]}},
+        batchState:{$max:{$ifNull:['$batchState','active']}},
+        scheduleStartAt:{$max:'$scheduleStartAt'},gapMinutes:{$max:'$gapMinutes'},productsPerDay:{$max:'$productsPerDay'},configuredTotalProducts:{$max:'$totalProducts'},
+        products:{$addToSet:'$productId'},platforms:{$addToSet:'$platform'},
+        totalJobs:{$sum:1},pending:{$sum:{$cond:[{$eq:['$status','pending']},1,0]}},processing:{$sum:{$cond:[{$eq:['$status','processing']},1,0]}},published:{$sum:{$cond:[{$eq:['$status','published']},1,0]}},failed:{$sum:{$cond:[{$eq:['$status','failed']},1,0]}},cancelled:{$sum:{$cond:[{$eq:['$status','cancelled']},1,0]}},
+      }},
+      {$sort:{createdAt:-1}},{$limit:limit},
+    ]);
+    const items=batches.map(batch=>{
+      const finished=batch.published+batch.failed+batch.cancelled;
+      let activityStatus=batch.batchState;
+      if(batch.batchState==='active')activityStatus=batch.processing>0?'publishing':batch.pending>0?'active':finished>=batch.totalJobs?'completed':'active';
+      return {...batch,batchId:batch._id,_id:undefined,totalProducts:batch.configuredTotalProducts||batch.products.length,nextPostAt:batch.nextPostAt?.getUTCFullYear()===9999?null:batch.nextPostAt,activityStatus};
+    });
+    res.json({items});
+  } catch(error){console.error('[schedule-batches]',error.message);res.status(500).json({message:'Scheduling activity could not be loaded'});}
+});
+
+router.post('/schedules/:id/cancel', async (req,res) => {
+  const item=await ScheduledSocialPost.findOneAndUpdate({_id:req.params.id,status:'pending'},{$set:{status:'cancelled',cancelledAt:new Date()}},{new:true});
+  if(!item)return res.status(409).json({message:'Only pending posts can be cancelled'});
+  res.json(item);
+});
+
+router.delete('/schedules/:id', async (req,res) => {
+  try {
+    const item=await ScheduledSocialPost.findById(req.params.id);
+    if(!item)return res.status(404).json({message:'Scheduled post not found'});
+    if(item.status==='processing')return res.status(409).json({message:'This post is currently processing and cannot be removed'});
+    await item.deleteOne();
+    res.json({success:true,message:'Scheduled queue item removed'});
+  } catch(error){res.status(400).json({message:'Scheduled queue item could not be removed'});}
+});
+
+router.post('/schedules/batch/:batchId/pause', async (req,res) => {
+  try {
+    const filter={batchId:req.params.batchId,status:{$in:['pending','processing']}};
+    if(!await ScheduledSocialPost.exists(filter))return res.status(409).json({message:'This schedule has no active posts to pause'});
+    const pausedAt=new Date();
+    await ScheduledSocialPost.updateMany({batchId:req.params.batchId},{$set:{batchState:'paused'}});
+    const result=await ScheduledSocialPost.updateMany({batchId:req.params.batchId,status:'pending'},{$set:{pausedAt}});
+    res.json({success:true,paused:result.modifiedCount,pausedAt});
+  } catch(error){res.status(400).json({message:'Schedule could not be paused'});}
+});
+
+router.post('/schedules/batch/:batchId/resume', async (req,res) => {
+  try {
+    const jobs=await ScheduledSocialPost.find({batchId:req.params.batchId,status:'pending',batchState:'paused'}).sort({scheduledAt:1}).lean();
+    if(!jobs.length)return res.status(409).json({message:'This schedule has no paused posts to resume'});
+    const pausedAt=jobs.map(job=>job.pausedAt?.getTime()).filter(Number.isFinite).sort((a,b)=>a-b)[0]||Date.now();
+    const shiftMs=Math.max(0,Date.now()-pausedAt);
+    await ScheduledSocialPost.bulkWrite(jobs.map(job=>({updateOne:{filter:{_id:job._id,status:'pending',batchState:'paused'},update:{$set:{scheduledAt:new Date(job.scheduledAt.getTime()+shiftMs),batchState:'active'},$unset:{pausedAt:1}}}})));
+    await ScheduledSocialPost.updateMany({batchId:req.params.batchId},{$set:{batchState:'active'},$unset:{pausedAt:1}});
+    res.json({success:true,resumed:jobs.length,shiftedByMs:shiftMs});
+  } catch(error){res.status(400).json({message:'Schedule could not be resumed'});}
+});
+
+const stopScheduledBatch=async(req,res)=>{
+  try {
+    if(!await ScheduledSocialPost.exists({batchId:req.params.batchId}))return res.status(404).json({message:'Schedule not found'});
+    const stoppedAt=new Date();
+    await ScheduledSocialPost.updateMany({batchId:req.params.batchId},{$set:{batchState:'stopped'}});
+    const result=await ScheduledSocialPost.updateMany({batchId:req.params.batchId,status:'pending'},{$set:{status:'cancelled',cancelledAt:stoppedAt},$unset:{pausedAt:1}});
+    res.json({success:true,stopped:result.modifiedCount,message:'Unpublished scheduled posts were stopped'});
+  } catch(error){res.status(400).json({message:'Schedule could not be stopped'});}
+};
+router.post('/schedules/batch/:batchId/stop',stopScheduledBatch);
+router.post('/schedules/batch/:batchId/cancel',stopScheduledBatch);
 
 // Per-platform routes
 router.put   ('/platform/:platform',          ctrl.updatePlatform);

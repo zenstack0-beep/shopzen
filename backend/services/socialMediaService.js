@@ -360,12 +360,28 @@ async function runPlatformTest(platform, data) {
 async function testFacebook(data) {
   if (!data.accessToken) return { ok: false, message: 'No access token configured' };
   try {
+    const pageId = data.accountId || 'me';
     const res = await fetch(
-      `https://graph.facebook.com/v19.0/me?access_token=${data.accessToken}&fields=id,name`
+      `https://graph.facebook.com/v21.0/${encodeURIComponent(pageId)}?access_token=${encodeURIComponent(data.accessToken)}&fields=id,name,is_published`
     );
     const json = await res.json();
     if (json.error) return { ok: false, message: json.error.message };
-    return { ok: true, message: `Connected as: ${json.name} (${json.id})` };
+    if (data.accountId && String(json.id) !== String(data.accountId)) {
+      return { ok:false, message:`The token belongs to Page ${json.id}, not configured Page ${data.accountId}` };
+    }
+    if (json.is_published === false) {
+      return { ok:false, message:'The Facebook Page is unpublished, so ordinary Facebook users cannot see its feed posts.' };
+    }
+    if (data.appId && data.appSecret) {
+      const inspection = await inspectToken(data.accessToken, data.appId, data.appSecret);
+      if (inspection.valid === false) return { ok:false, message:`Facebook token validation failed: ${inspection.error}` };
+      const required = ['pages_manage_posts','pages_read_engagement'];
+      const missing = required.filter(scope => !(inspection.scopes || []).includes(scope));
+      if (missing.length) {
+        return { ok:false, message:`Token is missing required permission(s): ${missing.join(', ')}. Reconnect after granting Advanced Access.` };
+      }
+    }
+    return { ok:true, message:`Connected to published Page: ${json.name} (${json.id}). Confirm the Meta app is switched to Live mode for public visibility.` };
   } catch (err) {
     return { ok: false, message: `Network error: ${err.message}` };
   }
