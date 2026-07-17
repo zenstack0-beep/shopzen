@@ -235,7 +235,9 @@ async function confirmScheduleDraft(draftId,items,createdBy){
 
 async function discardScheduleDraft(draftId,createdBy){
   const filter={_id:draftId,status:'draft'};if(createdBy)filter.createdBy=createdBy;
-  const draft=await SocialScheduleDraft.findOneAndUpdate(filter,{$set:{status:'discarded'}},{new:true});if(!draft)throw new Error('Draft was not found or is no longer editable.');return {success:true};
+  const result=await SocialScheduleDraft.deleteOne(filter);
+  if(!result.deletedCount)throw new Error('Draft was not found or is no longer editable.');
+  return {success:true,deleted:result.deletedCount};
 }
 
 let running=false;

@@ -190,9 +190,9 @@ router.delete('/schedule-drafts/:id', async (req,res) => {
 router.get('/schedules', async (req,res) => {
   try {
     const filter={}; if(req.query.status)filter.status=req.query.status;
-    const page=Math.max(1,Number(req.query.page)||1); const limit=Math.min(100,Math.max(1,Number(req.query.limit)||50));
+    const page=Math.max(1,Number(req.query.page)||1); const limit=Math.min(250,Math.max(1,Number(req.query.limit)||50));
     const [items,total]=await Promise.all([
-      ScheduledSocialPost.find(filter).populate('productId','name slug thumbnail images').sort({scheduledAt:-1}).skip((page-1)*limit).limit(limit).lean(),
+      ScheduledSocialPost.find(filter).populate('productId','name slug thumbnail images').sort({scheduledAt:-1,_id:-1}).skip((page-1)*limit).limit(limit).lean(),
       ScheduledSocialPost.countDocuments(filter),
     ]);
     res.json({items,total,page,pages:Math.ceil(total/limit)});
@@ -284,6 +284,29 @@ const stopScheduledBatch=async(req,res)=>{
 };
 router.post('/schedules/batch/:batchId/stop',stopScheduledBatch);
 router.post('/schedules/batch/:batchId/cancel',stopScheduledBatch);
+
+// A scheduling activity is represented by all queue rows sharing its batchId.
+// Stop the batch first so the worker cannot claim another row while it is being
+// deleted. An already-claimed row must finish before the admin retries deletion.
+router.delete('/schedules/batch/:batchId', async (req,res) => {
+  try {
+    const batchId=String(req.params.batchId||'').trim();
+    if(!batchId||batchId.length>100)return res.status(400).json({message:'A valid scheduling activity is required'});
+    if(!await ScheduledSocialPost.exists({batchId}))return res.status(404).json({message:'Scheduling activity not found'});
+
+    await ScheduledSocialPost.updateMany({batchId},{$set:{batchState:'stopped'}});
+    const publishing=await ScheduledSocialPost.countDocuments({batchId,status:'processing'});
+    if(publishing){
+      return res.status(409).json({message:'This activity has a post publishing right now. It has been stopped so no next post can start. Wait for the current post to finish, then select Delete Activity again.'});
+    }
+
+    const result=await ScheduledSocialPost.deleteMany({batchId});
+    res.json({success:true,deleted:result.deletedCount,message:`Scheduling activity and ${result.deletedCount} related queue item${result.deletedCount===1?'':'s'} deleted`});
+  } catch(error){
+    console.error('[delete-schedule-batch]',error.message);
+    res.status(400).json({message:'Scheduling activity could not be deleted'});
+  }
+});
 
 // Per-platform routes
 router.put   ('/platform/:platform',          ctrl.updatePlatform);
