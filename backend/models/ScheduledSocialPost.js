@@ -16,6 +16,8 @@ const scheduledSocialPostSchema = new mongoose.Schema({
   totalProducts: { type:Number, min:1, max:50 },
   caption: { type:String, required:true, maxlength:5000 },
   captionSource: { type:String, enum:['template','ai','fallback','admin'], default:'template' },
+  ctaType: { type:String, enum:['none','shop_now','whatsapp'], default:'none' },
+  ctaUrl: { type:String, maxlength:2000, default:'' },
   languageMode: { type:String, enum:['mixed','english'], default:'mixed' },
   offerPercent: { type:Number, min:0, max:95, default:0 },
   regularPriceSnapshot: { type:Number, min:0 },

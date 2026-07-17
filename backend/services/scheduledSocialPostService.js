@@ -118,7 +118,7 @@ function validateEditedCaption(value,product,facts){
   return caption;
 }
 
-async function createSchedule({ productIds, platforms, startAt, gapMinutes, productsPerDay=5, offerPercent=0, voucherCode='', includeSinhala=true, createdBy },options={}) {
+async function createSchedule({ productIds, platforms, startAt, gapMinutes, productsPerDay=5, offerPercent=0, voucherCode='', includeSinhala=true, ctaType='none', createdBy },options={}) {
   const {previewOnly=false,captionOverrides={}}=options;
   const overrides=captionOverrides instanceof Map?captionOverrides:new Map(Object.entries(captionOverrides||{}));
   const ids=[...new Set((productIds||[]).map(String))];
@@ -130,6 +130,7 @@ async function createSchedule({ productIds, platforms, startAt, gapMinutes, prod
   const gap=Number(gapMinutes); if(!Number.isFinite(gap)||gap<1||gap>10080) throw new Error('Gap must be between 1 minute and 7 days.');
   const dailyLimit=Number(productsPerDay); if(!Number.isInteger(dailyLimit)||dailyLimit<1||dailyLimit>50) throw new Error('Products per day must be a whole number between 1 and 50.');
   if((dailyLimit-1)*gap>=24*60)throw new Error('The daily product limit and gap must fit within one 24-hour posting window.');
+  const selectedCta=String(ctaType||'none').toLowerCase();if(!['none','shop_now','whatsapp'].includes(selectedCta))throw new Error('Choose a valid Facebook button: None, Shop Now, or WhatsApp.');
   const percent=Number(offerPercent)||0; if(percent<0||percent>95) throw new Error('Offer percentage must be between 0 and 95.');
   const products=await Product.find({_id:{$in:ids},isActive:true}).populate('category','name').lean();
   const byId=new Map(products.map(p=>[String(p._id),p]));
@@ -158,17 +159,18 @@ async function createSchedule({ productIds, platforms, startAt, gapMinutes, prod
     const editedCaption=overrides.get(String(product._id));
     const generated=editedCaption==null?{caption:templateCaption(product,facts),source:'template'}:{caption:validateEditedCaption(editedCaption,product,facts),source:'admin'};
     const scheduledAt=scheduledTimeForIndex(start,index,gap,dailyLimit);
-    for(const platform of platformList) docs.push({batchId,batchState:'active',scheduleStartAt:start,gapMinutes:gap,productsPerDay:dailyLimit,totalProducts:ordered.length,productId:product._id,productName:product.name,platform,scheduledAt,caption:generated.caption,captionSource:generated.source,languageMode,offerPercent:effectivePercent,regularPriceSnapshot:regularPrice,sellingPriceSnapshot:price,productSalePercentSnapshot:productSalePercent,promotionalPriceSnapshot:promotionalPrice,displayPromotionalPriceSnapshot:displayPromotionalPrice,voucherCode:facts.voucherCode,couponSnapshot:coupon?{id:coupon._id,code:coupon.code,type:coupon.type,value:coupon.value,validUntil:coupon.validUntil}:null,createdBy});
+    const ctaUrl=selectedCta==='shop_now'?productUrl:selectedCta==='whatsapp'?`${facts.whatsappUrl}?text=${encodeURIComponent(`Hi ShopZen, I am interested in ${product.name}. ${productUrl}`)}`:'';
+    for(const platform of platformList) docs.push({batchId,batchState:'active',scheduleStartAt:start,gapMinutes:gap,productsPerDay:dailyLimit,totalProducts:ordered.length,productId:product._id,productName:product.name,platform,scheduledAt,caption:generated.caption,captionSource:generated.source,ctaType:selectedCta,ctaUrl,languageMode,offerPercent:effectivePercent,regularPriceSnapshot:regularPrice,sellingPriceSnapshot:price,productSalePercentSnapshot:productSalePercent,promotionalPriceSnapshot:promotionalPrice,displayPromotionalPriceSnapshot:displayPromotionalPrice,voucherCode:facts.voucherCode,couponSnapshot:coupon?{id:coupon._id,code:coupon.code,type:coupon.type,value:coupon.value,validUntil:coupon.validUntil}:null,createdBy});
   }
   if(!previewOnly)await ScheduledSocialPost.insertMany(docs,{ordered:true});
   const result={batchId,jobs:docs.length,products:ordered.length,platforms:platformList.length,productsPerDay:dailyLimit,days:Math.ceil(ordered.length/dailyLimit),firstPostAt:start,lastPostAt:docs[docs.length-1].scheduledAt};
-  if(previewOnly){result._docs=docs;result._config={productIds:ordered.map(product=>product._id),platforms:platformList,startAt:start,gapMinutes:gap,productsPerDay:dailyLimit,offerPercent:effectivePercent,voucherCode:coupon?.code||'',includeSinhala:includeSinhala!==false};}
+  if(previewOnly){result._docs=docs;result._config={productIds:ordered.map(product=>product._id),platforms:platformList,startAt:start,gapMinutes:gap,productsPerDay:dailyLimit,offerPercent:effectivePercent,voucherCode:coupon?.code||'',includeSinhala:includeSinhala!==false,ctaType:selectedCta};}
   return result;
 }
 
 function draftPayload(draft){
   const value=draft.toObject?draft.toObject():draft;
-  return {_id:value._id,status:value.status,platforms:value.platforms,startAt:value.startAt,gapMinutes:value.gapMinutes,productsPerDay:value.productsPerDay,offerPercent:value.offerPercent,voucherCode:value.voucherCode,includeSinhala:value.includeSinhala,items:value.items,expiresAt:value.expiresAt,createdAt:value.createdAt};
+  return {_id:value._id,status:value.status,platforms:value.platforms,startAt:value.startAt,gapMinutes:value.gapMinutes,productsPerDay:value.productsPerDay,offerPercent:value.offerPercent,voucherCode:value.voucherCode,includeSinhala:value.includeSinhala,ctaType:value.ctaType||'none',items:value.items,expiresAt:value.expiresAt,createdAt:value.createdAt};
 }
 
 async function createScheduleDraft(args){
@@ -205,7 +207,7 @@ async function confirmScheduleDraft(draftId,items,createdBy){
   if(!draft)throw new Error('Draft was not found, expired, or already confirmed.');
   try{
     const captions=captionMapForDraft(draft,items);
-    const result=await createSchedule({productIds:draft.productIds,platforms:draft.platforms,startAt:draft.startAt,gapMinutes:draft.gapMinutes,productsPerDay:draft.productsPerDay,offerPercent:draft.offerPercent,voucherCode:draft.voucherCode,includeSinhala:draft.includeSinhala,createdBy},{captionOverrides:captions});
+    const result=await createSchedule({productIds:draft.productIds,platforms:draft.platforms,startAt:draft.startAt,gapMinutes:draft.gapMinutes,productsPerDay:draft.productsPerDay,offerPercent:draft.offerPercent,voucherCode:draft.voucherCode,includeSinhala:draft.includeSinhala,ctaType:draft.ctaType,createdBy},{captionOverrides:captions});
     draft.items.forEach(item=>{item.caption=captions.get(String(item.productId)).trim();});draft.status='confirmed';draft.confirmedBatchId=result.batchId;draft.confirmedAt=new Date();await draft.save();
     return result;
   }catch(error){await SocialScheduleDraft.updateOne({_id:draft._id,status:'confirming'},{$set:{status:'draft'}});throw error;}
@@ -257,7 +259,7 @@ async function runDueScheduledPosts(){
           await ScheduledSocialPost.updateOne({_id:job._id},{$set:{status:'failed',failureReason:'Voucher expired, changed, became inactive, or no longer applies. Review and create a new schedule.'}});continue;
         }
       }
-      const log=await publishNow({platform:job.platform,trigger:'manual',entityType:'product',entityId:job.productId,entityName:job.productName,customMsg:job.caption,triggeredBy:`schedule:${job._id}`});
+      const log=await publishNow({platform:job.platform,trigger:'manual',entityType:'product',entityId:job.productId,entityName:job.productName,customMsg:job.caption,ctaType:job.ctaType||'none',ctaUrl:job.ctaUrl||'',triggeredBy:`schedule:${job._id}`});
       if(log?.status==='success') await ScheduledSocialPost.updateOne({_id:job._id},{$set:{status:'published',publishedAt:new Date(),publishLogId:log._id,platformPostId:log.platformPostId||'',failureReason:''}});
       else await ScheduledSocialPost.updateOne({_id:job._id},{$set:{status:'failed',publishLogId:log?._id,failureReason:clean(log?.errorMessage||'Publishing failed',1000)}});
     }

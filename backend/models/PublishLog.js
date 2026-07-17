@@ -33,6 +33,8 @@ const publishLogSchema = new mongoose.Schema(
     // ── Composed content snapshot ────────────────────────────────────────────
     postText:  { type: String, default: '' },
     imageUrl:  { type: String, default: '' },
+    ctaType:   { type: String, enum: ['none','shop_now','whatsapp'], default: 'none' },
+    ctaUrl:    { type: String, default: '' },
 
     // ── Outcome ──────────────────────────────────────────────────────────────
     status:         { type: String, enum: ['success', 'failed'], required: true },

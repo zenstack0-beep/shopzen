@@ -19,6 +19,7 @@ const socialScheduleDraftSchema=new mongoose.Schema({
   offerPercent:{type:Number,min:0,max:95,default:0},
   voucherCode:{type:String,uppercase:true,trim:true,maxlength:80,default:''},
   includeSinhala:{type:Boolean,default:true},
+  ctaType:{type:String,enum:['none','shop_now','whatsapp'],default:'shop_now'},
   items:{type:[draftItemSchema],default:[]},
   createdBy:{type:mongoose.Schema.Types.ObjectId,ref:'User'},
   confirmedBatchId:{type:String,default:''},

@@ -71,6 +71,12 @@ async function publish(creds, payload) {
     throw new Error(`Facebook pre-publish check failed: ${err.message}`);
   }
 
+  // Native CTA buttons are available on Page link posts, not /photos posts.
+  // Keep the existing native-photo strategy when no CTA was selected.
+  if (payload.ctaType==='shop_now'||payload.ctaType==='whatsapp') {
+    return postWithCallToAction(accountId,accessToken,payload);
+  }
+
   const images = payload.imageUrls?.length ? payload.imageUrls
                : payload.imageUrl          ? [payload.imageUrl]
                : [];
@@ -82,6 +88,35 @@ async function publish(creds, payload) {
   } else {
     return postTextOnly(accountId, accessToken, payload);
   }
+}
+
+function buildCallToAction(payload){
+  const ctaUrl=String(payload.ctaUrl||'');
+  if(!/^https:\/\//i.test(ctaUrl)||/localhost|127\.0\.0\.1/i.test(ctaUrl))throw new Error('Facebook CTA requires a public HTTPS destination URL');
+  if(payload.ctaType==='shop_now')return {type:'SHOP_NOW',value:{link:ctaUrl}};
+  if(payload.ctaType==='whatsapp'){
+    const whatsappNumber=ctaUrl.match(/wa\.me\/(\d+)/i)?.[1];
+    if(!whatsappNumber)throw new Error('WhatsApp CTA requires a valid wa.me destination');
+    return {type:'WHATSAPP_MESSAGE',value:{link:ctaUrl,app_destination:'WHATSAPP',whatsapp_number:whatsappNumber}};
+  }
+  return null;
+}
+
+async function postWithCallToAction(pageId,accessToken,payload){
+  const productUrl=getProductUrl(payload);
+  if(!productUrl)throw new Error('Facebook CTA post requires a public product URL');
+  const callToAction=buildCallToAction(payload);
+  const body={message:payload.text||'',link:productUrl,call_to_action:JSON.stringify(callToAction),published:true,access_token:accessToken};
+  const response=await fetch(`${GRAPH}/${pageId}/feed`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const json=await response.json();
+  if(json.error){
+    const label=payload.ctaType==='whatsapp'?'WhatsApp':'Shop Now';
+    const hint=payload.ctaType==='whatsapp'?' Ensure the Facebook Page is linked to the ShopZen WhatsApp Business account.':'';
+    const error=new Error(`Facebook ${label} button post failed: ${json.error.message} (code ${json.error.code}).${hint}`);
+    error.code=String(json.error.code||'FB_CTA_ERROR');throw error;
+  }
+  console.log(`[Facebook] ✅ Link post with ${callToAction.type} CTA: ${json.id}`);
+  return {platformPostId:json.id||''};
 }
 
 /**
@@ -276,4 +311,4 @@ function getProductUrl(payload) {
   return null;
 }
 
-module.exports = { publish };
+module.exports = { publish,buildCallToAction };

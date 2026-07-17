@@ -70,6 +70,8 @@ async function publishNow(opts = {}) {
     entityId,
     entityName    = '',
     customMsg     = '',
+    ctaType       = 'none',
+    ctaUrl        = '',
     triggeredBy   = 'system',
     originalLogId = null,
     attemptNumber = 1,
@@ -77,7 +79,7 @@ async function publishNow(opts = {}) {
 
   const t0      = Date.now();
   const isRetry = attemptNumber > 1;
-  const base    = { platform, trigger, triggeredBy, entityType, entityId, entityName, attemptNumber, isRetry, originalLogId };
+  const base    = { platform, trigger, triggeredBy, entityType, entityId, entityName,ctaType,ctaUrl,attemptNumber, isRetry, originalLogId };
 
   // ── 1. Validate platform ───────────────────────────────────────────────────
   if (!PUBLISHERS[platform]) {
@@ -156,6 +158,8 @@ async function publishNow(opts = {}) {
   let payload;
   try {
     payload = await compose(platform, trigger, entity, customMsg);
+    payload.ctaType=ctaType;
+    payload.ctaUrl=ctaUrl;
   } catch (err) {
     return writeLog({ ...base, entityName: entity.name || entity.title || entityName, postText: '', imageUrl: '', durationMs: Date.now() - t0, status: 'failed', errorMessage: `Compose error: ${err.message}`, errorCode: 'COMPOSE_ERROR' });
   }
