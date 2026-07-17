@@ -147,8 +147,8 @@ export const applyTheme = (settings) => {
       let fav = document.querySelector(`link[rel="${rel}"]`);
       if (!fav) { fav = document.createElement('link'); fav.rel = rel; document.head.appendChild(fav); }
       fav.href = rel === 'apple-touch-icon'
-        ? `/shopzen-favicon-v3-180x180.png?v=${version}`
-        : `/shopzen-favicon-v3-96x96.png?v=${version}`;
+        ? `/shopzen-favicon-v4-180x180.png?v=${version}`
+        : `/shopzen-favicon-v4-96x96.png?v=${version}`;
     });
   }
 

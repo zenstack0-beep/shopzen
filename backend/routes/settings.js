@@ -46,7 +46,7 @@ router.get('/favicon.ico', async (req, res) => {
     if (!logoUrl) return res.status(404).send('No favicon configured');
     // Redirect to a 48x48 PNG — browsers and Google accept PNG favicons.
     // Avoids Railway→Cloudinary proxy which was returning 403 errors.
-    const pngUrl = logoUrl.replace('/upload/', '/upload/w_48,h_48,c_pad,b_white,f_png/');
+    const pngUrl = resizedPngUrl(logoUrl, 48);
     res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
     return res.redirect(302, pngUrl);
   } catch (err) { return res.status(500).send(err.message); }
@@ -62,10 +62,14 @@ async function getLogoUrl() {
 }
 
 function resizedPngUrl(logoUrl, size) {
+  // Keep the mark at 75% of the canvas. A square source otherwise touches all
+  // four edges, which makes rounded browser favicons appear visibly cropped.
+  const markSize = Math.max(12, Math.round(size * 0.75));
   return logoUrl.includes('/upload/')
-    // Preserve the entire uploaded favicon. c_pad scales proportionally and
-    // adds space where necessary instead of cutting off any part of the mark.
-    ? logoUrl.replace('/upload/', `/upload/e_trim/w_${size},h_${size},c_pad,b_white,f_png,q_auto/`)
+    ? logoUrl.replace(
+        '/upload/',
+        `/upload/w_${markSize},h_${markSize},c_fit/c_pad,w_${size},h_${size},b_white/f_png,q_auto/`
+      )
     : logoUrl;
 }
 
