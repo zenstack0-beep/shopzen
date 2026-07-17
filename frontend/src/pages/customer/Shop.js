@@ -50,9 +50,9 @@ export default function Shop() {
   const [addedId,    setAddedId]    = useState(null);
 
   useEffect(() => {
-    API.get('/categories/all')
+    API.get('/categories/all?inventory=true')
       .then(r => setCategories(r.data || []))
-      .catch(() => { API.get('/categories').then(r => setCategories(r.data || [])).catch(() => {}); });
+      .catch(() => { API.get('/categories?inventory=true').then(r => setCategories(r.data || [])).catch(() => {}); });
   }, []);
 
   // Sync category state when navigating via /shop/:category route or ?category= param

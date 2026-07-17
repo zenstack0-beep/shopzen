@@ -62,7 +62,7 @@ export default function AdminSEO() {
       });
     }).catch(() => {});
     API.get('/products?limit=100').then(r => setProducts(r.data.products || [])).catch(() => {});
-    API.get('/categories').then(r => setCategories(r.data || [])).catch(() => {});
+    API.get('/categories?inventory=true').then(r => setCategories(r.data || [])).catch(() => {});
     // Load saved robots.txt
     const saved = localStorage.getItem('shopzen_robots');
     if (saved) setRobotsTxt(saved);

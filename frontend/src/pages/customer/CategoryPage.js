@@ -18,61 +18,13 @@ import { useCart } from '../../context/CartContext';
 import { useTheme } from '../../context/ThemeContext';
 import useSEO from '../../hooks/useSEO';
 
-// ── FAQ content per category ──────────────────────────────────────────────────
-const CATEGORY_FAQS = {
-  audio: [
-    { q: 'What audio brands are available in Sri Lanka at ShopZen?', a: 'ShopZen stocks top audio brands including Sony, JBL, Bose, Philips, and more — all available online in Sri Lanka with island-wide delivery.' },
-    { q: 'Can I buy wireless headphones online in Sri Lanka?', a: 'Yes! ShopZen offers a wide range of wireless Bluetooth headphones and earbuds online in Sri Lanka. Browse our audio category for the latest models with fast delivery.' },
-    { q: 'What is the return policy for audio products at ShopZen?', a: 'All audio products at ShopZen come with a 14-day hassle-free return policy. Returns are free and processed promptly.' },
-    { q: 'Are audio products sold at ShopZen covered by warranty?', a: "Yes, all audio equipment at ShopZen is sourced from authorised channels and covered by the manufacturer's warranty." },
-  ],
-  electronics: [
-    { q: 'What electronics are available online in Sri Lanka at ShopZen?', a: 'ShopZen offers smartphones, laptops, tablets, smart home devices, accessories, and more from leading global brands — all available online in Sri Lanka with fast delivery.' },
-    { q: 'Can I buy genuine electronics online in Sri Lanka?', a: 'Yes. All electronics at ShopZen are 100% genuine, sourced from authorised distributors, and covered by manufacturer warranty.' },
-    { q: 'How fast is delivery for electronics in Sri Lanka?', a: 'ShopZen delivers electronics island-wide within 1–5 business days. Express delivery is available to Colombo and major cities.' },
-    { q: 'What payment methods are accepted for electronics at ShopZen?', a: 'ShopZen accepts credit/debit cards, bank transfers, and cash on delivery for electronics purchases in Sri Lanka.' },
-  ],
-  appliances: [
-    { q: 'What home appliances can I buy online in Sri Lanka at ShopZen?', a: 'ShopZen stocks a full range of home appliances including air fryers, washing machines, refrigerators, ACs, blenders, and more from Philips, Samsung, Panasonic, and other top brands.' },
-    { q: 'Are home appliances at ShopZen covered by warranty?', a: "Yes, all home appliances at ShopZen come with the manufacturer's warranty. We also offer a 14-day return policy for peace of mind." },
-    { q: 'How are large appliances delivered in Sri Lanka?', a: 'ShopZen delivers large appliances with careful packaging island-wide. Installation support is available for select products such as air conditioners and washing machines.' },
-    { q: 'Which are the best appliance brands available in Sri Lanka?', a: 'ShopZen stocks appliances from Philips, Samsung, Panasonic, LG, Tefal, Bajaj, Midea, and more — all available online in Sri Lanka.' },
-  ],
-};
-
-function getCategoryFAQs(slug, catName) {
-  const faqs = CATEGORY_FAQS[slug] || [
-    { q: `Where can I buy ${catName} online in Sri Lanka?`, a: `ShopZen is Sri Lanka's trusted online store for ${catName}. Browse our full range, compare prices, and enjoy fast island-wide delivery.` },
-    { q: `What is the delivery time for ${catName} in Sri Lanka?`, a: `ShopZen delivers ${catName} across Sri Lanka within 1–5 business days. Same-day dispatch available for orders placed before noon.` },
-    { q: `Are ${catName} products at ShopZen genuine?`, a: `Yes, all ${catName} at ShopZen are 100% authentic, sourced from authorised channels, and covered by manufacturer warranty.` },
-    { q: `What is the return policy for ${catName} at ShopZen?`, a: `ShopZen offers a 14-day hassle-free return policy on all ${catName}. Returns are free and processed promptly.` },
-  ];
-  return faqs;
-}
-
-// Inject FAQ + ItemList JSON-LD schemas into document head
-function injectCategorySchemas(faqs, products, catName, canonicalUrl, aggregateRating) {
+// Inject ItemList JSON-LD using only live catalogue records.
+function injectCategorySchemas(products, catName, canonicalUrl, aggregateRating) {
   // Remove old schemas injected by this function
   ['cat-faq-schema', 'cat-itemlist-schema'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.remove();
   });
-
-  const faqSchema = {
-    '@context': 'https://schema.org',
-    '@type': 'FAQPage',
-    mainEntity: faqs.map(f => ({
-      '@type': 'Question',
-      name: f.q,
-      acceptedAnswer: { '@type': 'Answer', text: f.a },
-    })),
-  };
-
-  const faqEl = document.createElement('script');
-  faqEl.type = 'application/ld+json';
-  faqEl.id = 'cat-faq-schema';
-  faqEl.textContent = JSON.stringify(faqSchema);
-  document.head.appendChild(faqEl);
 
   if (products && products.length > 0) {
     const itemListSchema = {
@@ -105,7 +57,9 @@ function injectCategorySchemas(faqs, products, catName, canonicalUrl, aggregateR
             offers: {
               '@type': 'Offer',
               priceCurrency: 'LKR',
-              price: String(p.salePrice || p.price || 0),
+              price: String(Number(p.salePrice) > 0 && Number(p.salePrice) < Number(p.price)
+                ? p.salePrice
+                : p.price || 0),
               availability: (p.stock > 0) ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
             },
             ...(p.ratings?.count > 0 ? {
@@ -127,51 +81,6 @@ function injectCategorySchemas(faqs, products, catName, canonicalUrl, aggregateR
     listEl.textContent = JSON.stringify(itemListSchema);
     document.head.appendChild(listEl);
   }
-}
-
-// ── Category SEO content library ─────────────────────────────────────────────
-// 200-500 word descriptions keyed by category slug for Google ranking signals.
-const CATEGORY_DESCRIPTIONS = {
-  audio: `Discover our premium audio collection at ShopZen — your one-stop destination for high-quality sound equipment in Sri Lanka. Whether you're a music enthusiast, a professional audiophile, or simply looking for a reliable pair of headphones for daily commuting, we have exactly what you need.
-
-Our audio range includes wireless Bluetooth headphones, noise-cancelling earbuds, portable Bluetooth speakers, home theatre systems, soundbars, and professional studio monitors. Every product is sourced from trusted global brands including Sony, JBL, Bose, Philips, and more — all backed by manufacturer warranties and our 14-day return policy.
-
-Wireless audio technology has transformed how we experience music and entertainment. Our Bluetooth headphones deliver crystal-clear sound with deep bass and precise highs, while long battery life ensures your music never stops. For commuters and fitness enthusiasts, our true wireless earbuds offer a secure, tangle-free fit with active noise cancellation that blocks out the world.
-
-Home audio is equally important — our range of soundbars and speaker systems transform any living room into a cinema-like experience. With Dolby Atmos support and multi-room connectivity, you can fill every corner of your home with rich, immersive sound.
-
-Shop with confidence at ShopZen: fast delivery across Sri Lanka, secure payment options, and a dedicated customer support team ready to help you find the perfect audio product. Compare prices, read verified reviews, and enjoy the best deals on audio equipment available online in Sri Lanka today.`,
-
-  electronics: `ShopZen brings you Sri Lanka's widest selection of electronics — from the latest smartphones and laptops to smart home devices and essential accessories. Whether you need cutting-edge technology for work, entertainment, or everyday life, our electronics collection has you covered.
-
-Explore flagship smartphones from Samsung, Apple, and other leading brands, all available at competitive prices with fast delivery to your doorstep. Our laptop range covers everything from lightweight ultrabooks for professionals to powerful gaming laptops for enthusiasts.
-
-Smart home technology is reshaping how we live, and ShopZen is at the forefront. Browse smart bulbs, robot vacuums, security cameras, and Wi-Fi routers that make your home more connected and convenient. Our accessories category includes screen protectors, cases, chargers, power banks, and cables to keep your devices running and protected.
-
-All electronics at ShopZen come with official warranty coverage. Our product pages include detailed specifications, real customer reviews, and high-resolution images so you can make a fully informed purchase. We offer flexible payment options and easy returns, making online electronics shopping in Sri Lanka safe and straightforward.
-
-Whether you're upgrading your setup or searching for the perfect gift, ShopZen is the trusted choice for electronics in Sri Lanka. Fast delivery, best prices, and authentic products — every time.`,
-
-  appliances: `Transform your home with ShopZen's comprehensive range of home appliances — the best selection available online in Sri Lanka. From kitchen essentials to large household appliances, we stock everything you need to make daily life easier, more efficient, and more enjoyable.
-
-Our kitchen appliance range includes air fryers, microwave ovens, blenders, food processors, electric kettles, rice cookers, and coffee machines from globally trusted brands like Philips, Panasonic, Bajaj, and Tefal. Every appliance is designed to save you time in the kitchen without sacrificing the quality of your cooking.
-
-For the laundry room, choose from front-load and top-load washing machines, dryers, and ironing systems that handle even the heaviest loads with ease. Our refrigerators and freezers come in a range of capacities, finishes, and energy ratings to suit every household size and budget.
-
-ShopZen's air conditioner collection covers split ACs, portable ACs, and inverter models that keep your home cool efficiently — perfect for Sri Lanka's tropical climate. All major brands including Carrier, Midea, and LG are available with installation support.
-
-Shop appliances online at ShopZen with total confidence: browse detailed specifications, compare models side-by-side, read verified buyer reviews, and complete your purchase securely. We deliver across Sri Lanka with careful packaging to ensure your appliance arrives in perfect condition. Enjoy the convenience of the best home appliances at the best prices — only at ShopZen.`,
-};
-
-// Generate a default description for any category not in the library
-function getDefaultDescription(catName) {
-  return `Explore ShopZen's complete ${catName} collection — the best selection of ${catName} products available online in Sri Lanka. We bring you top brands, competitive prices, and fast island-wide delivery.
-
-Every ${catName} product in our range is carefully selected for quality and value. Browse detailed specifications, compare models, and read verified customer reviews to make a confident buying decision.
-
-At ShopZen, we believe great shopping starts with great choice. Our ${catName} range is regularly updated with the latest models and best deals, so you'll always find what you're looking for at a price that works for you.
-
-Shop ${catName} online at ShopZen with fast delivery across Sri Lanka, secure checkout, and our 14-day hassle-free return policy. Our customer support team is always on hand to help you find the perfect product.`;
 }
 
 const Stars = ({ rating = 0 }) => (
@@ -205,7 +114,7 @@ export default function CategoryPage() {
   // Load category metadata
   useEffect(() => {
     setCatLoading(true);
-    API.get('/categories/all')
+    API.get('/categories/all?inventory=true')
       .then(r => {
         const cats = r.data || [];
         const found = cats.find(c => c.slug === slug);
@@ -244,12 +153,12 @@ export default function CategoryPage() {
   const canonicalUrl = `${siteUrl}/category/${slug}`;
 
   const seoTitle = category
-    ? `${category.name} — Buy Online in Sri Lanka | ShopZen`
-    : `${catName} | ShopZen Sri Lanka`;
+    ? `${category.name} — Buy Online in Sri Lanka`
+    : catName;
 
   const seoDesc = category?.description
     ? category.description.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().slice(0, 160)
-    : `Shop the best ${catName} online in Sri Lanka. Top brands, best prices, fast delivery. Browse our full ${catName} range at ShopZen.`;
+    : `Browse ${total} currently available ${catName} product${total === 1 ? '' : 's'} at ShopZen with islandwide delivery in Sri Lanka.`;
 
   // Build aggregate rating across all loaded products for CollectionPage schema
   const categoryAggregateRating = React.useMemo(() => {
@@ -263,11 +172,10 @@ export default function CategoryPage() {
     };
   }, [products]);
 
-  // Inject FAQ + ItemList schemas when products/category loads
+  // Inject an ItemList built only from products actually returned by the API.
   useEffect(() => {
     if (!category || products.length === 0) return;
-    const faqs = getCategoryFAQs(slug, catName);
-    injectCategorySchemas(faqs, products, catName, canonicalUrl, categoryAggregateRating);
+    injectCategorySchemas(products, catName, canonicalUrl, categoryAggregateRating);
     return () => {
       ['cat-faq-schema', 'cat-itemlist-schema'].forEach(id => {
         const el = document.getElementById(id);
@@ -306,9 +214,12 @@ export default function CategoryPage() {
       { name: 'Shop', url: '/shop' },
       { name: catName, url: `/category/${slug}` },
     ],
+    noindexFollow: !catLoading && (!category || (!loading && total === 0)),
   });
 
-  const displayDescription = CATEGORY_DESCRIPTIONS[slug] || getDefaultDescription(catName);
+  const displayDescription = category?.description
+    ? category.description.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
+    : `Browse the ${total} ${catName} product${total === 1 ? '' : 's'} currently available from ShopZen. Product names, prices, stock status, specifications, and offers are loaded from the live store catalogue.`;
 
   if (catLoading) {
     return (

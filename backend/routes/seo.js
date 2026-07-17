@@ -20,7 +20,7 @@ const router   = express.Router();
 const fs       = require('fs');
 const path     = require('path');
 const Product          = require('../models/Product');
-const { Category, Settings, Review } = require('../models/index');
+const { Category, Settings, Review, BusinessPage, SeasonalCampaign } = require('../models/index');
 const { buildGoogleMerchantFeed } = require('../services/googleMerchantFeed');
 
 // ── XML helpers ───────────────────────────────────────────────────────────────
@@ -37,6 +37,25 @@ function productConditionUrl(condition) {
   if (condition === 'used') return 'https://schema.org/UsedCondition';
   if (condition === 'refurbished') return 'https://schema.org/RefurbishedCondition';
   return 'https://schema.org/NewCondition';
+}
+
+function hasValidSalePrice(product) {
+  const regular = Number(product?.price);
+  const sale = Number(product?.salePrice);
+  return Number.isFinite(regular) && regular > 0
+    && Number.isFinite(sale) && sale > 0 && sale < regular;
+}
+
+function getEffectiveProductPrice(product) {
+  return hasValidSalePrice(product) ? Number(product.salePrice) : Number(product?.price || 0);
+}
+
+function buildSquareBrandLogo(rawUrl, size = 512) {
+  if (!rawUrl || !rawUrl.includes('/upload/')) return rawUrl;
+  return rawUrl.replace(
+    '/upload/',
+    `/upload/e_trim/c_crop,g_west,ar_1/w_${size},h_${size},c_pad,b_white,f_png,q_auto/`
+  );
 }
 
 // ── Logo constant ─────────────────────────────────────────────────────────────
@@ -445,7 +464,7 @@ router.get('/meta', async (req, res) => {
     // Google requires min 112x112, max 1000x1000, preferably square PNG.
     // Update this URL after uploading your square logo to Cloudinary.
     const ogImage   = s.seo_ogImage   || DEFAULT_OG;
-    const logoUrl   = s.logoUrl || s.faviconUrl || SHOPZEN_LOGO_URL;
+    const logoUrl   = buildSquareBrandLogo(s.logoUrl || s.faviconUrl || SHOPZEN_LOGO_URL);
 
     res.json({
       siteUrl, storeName, metaTitle, metaDesc, ogTitle, ogDesc, ogImage,
@@ -465,7 +484,7 @@ router.get('/meta', async (req, res) => {
 // Generates FAQPage JSON-LD for product, category, and brand pages.
 // Google shows FAQ rich results directly in SERPs — high CTR impact.
 function buildProductFAQ(product, siteUrl, storeName) {
-  const price    = product.salePrice || product.price;
+  const price    = getEffectiveProductPrice(product);
   const priceStr = price ? `Rs.${price.toLocaleString()}` : 'competitive';
   const name     = product.name;
   const catName  = product.category?.name || 'products';
@@ -611,7 +630,7 @@ function buildItemListSchema(products, pageUrl, name, siteUrl) {
           offers: {
             '@type': 'Offer',
             priceCurrency: 'LKR',
-            price: String(p.salePrice || p.price || 0),
+            price: String(getEffectiveProductPrice(p)),
             availability: (p.stock > 0) ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
           },
           ...(p.ratings?.count > 0 ? {
@@ -673,7 +692,7 @@ router.get('/product-meta/:slug', async (req, res) => {
 
     const plainDesc  = String(product.shortDescription || product.description || '')
       .replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
-    const priceText  = product.salePrice
+    const priceText  = hasValidSalePrice(product)
       ? `Rs.${product.salePrice.toLocaleString()} (was Rs.${product.price.toLocaleString()})`
       : `Rs.${product.price.toLocaleString()}`;
     const catName    = product.category?.name || '';
@@ -701,36 +720,18 @@ router.get('/product-meta/:slug', async (req, res) => {
       '@type':           'Offer',
       url:               productUrl,
       priceCurrency:     'LKR',
-      price:             String(product.salePrice || product.price),
-      priceValidUntil:   product.saleEndsAt
-        ? new Date(product.saleEndsAt).toISOString().split('T')[0]
-        : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      price:             String(getEffectiveProductPrice(product)),
+      ...(hasValidSalePrice(product) && product.saleEndsAt ? {
+        priceValidUntil: new Date(product.saleEndsAt).toISOString().split('T')[0],
+      } : {}),
       availability,
       itemCondition: productConditionUrl(product.condition),
       availabilityStarts: product.createdAt ? new Date(product.createdAt).toISOString() : undefined,
       validFrom: product.createdAt ? new Date(product.createdAt).toISOString() : undefined,
       seller: { '@type': 'Organization', name: storeName },
-      shippingDetails: {
-        '@type': 'OfferShippingDetails',
-        shippingRate: { '@type': 'MonetaryAmount', value: '0', currency: 'LKR' },
-        deliveryTime: {
-          '@type': 'ShippingDeliveryTime',
-          handlingTime: { '@type': 'QuantitativeValue', minValue: 0, maxValue: 1, unitCode: 'DAY' },
-          transitTime:  { '@type': 'QuantitativeValue', minValue: 1, maxValue: 5, unitCode: 'DAY' },
-        },
-        shippingDestination: { '@type': 'DefinedRegion', addressCountry: 'LK' },
-      },
-      hasMerchantReturnPolicy: {
-        '@type': 'MerchantReturnPolicy',
-        applicableCountry: 'LK',
-        returnPolicyCategory: 'https://schema.org/MerchantReturnFiniteReturnWindow',
-        merchantReturnDays: 14,
-        returnMethod: 'https://schema.org/ReturnByMail',
-        returnFees: 'https://schema.org/FreeReturn',
-      },
     };
 
-    if (product.salePrice) {
+    if (hasValidSalePrice(product)) {
       offers.priceSpecification = {
         '@type': 'PriceSpecification',
         price: product.salePrice,
@@ -748,7 +749,7 @@ router.get('/product-meta/:slug', async (req, res) => {
       // ALL images included for rich results eligibility
       image:       uniqueImages.slice(0, 10),
       sku:         product.sku || product._id.toString(),
-      mpn:         product.mpn || product.sku || undefined,
+      mpn:         product.mpn || undefined,
       ...(product.gtin ? { gtin: product.gtin } : {}),
       brand:       product.brand ? { '@type': 'Brand', name: product.brand } : undefined,
       category:    catName,
@@ -767,7 +768,7 @@ router.get('/product-meta/:slug', async (req, res) => {
     };
 
     if (!product.brand) delete schema.brand;
-    if (!product.mpn && !product.sku) delete schema.mpn;
+    if (!product.mpn) delete schema.mpn;
 
     // Organization schema on every page
     const orgSchema = {
@@ -801,7 +802,7 @@ router.get('/product-meta/:slug', async (req, res) => {
       productUrl,
       schema, breadcrumbSchema, orgSchema,
       price:        product.price,
-      salePrice:    product.salePrice,
+      salePrice:    hasValidSalePrice(product) ? product.salePrice : null,
       availability: product.stock > 0 ? 'InStock' : 'OutOfStock',
       brand:        product.brand,
       category:     catName,
@@ -834,6 +835,8 @@ router.get('/category-meta/:slug', async (req, res) => {
       category: cat._id, isActive: true,
       thumbnail: { $exists: true, $ne: '' },
     }).lean();
+    const activeCount = await Product.countDocuments({ category: cat._id, isActive: true });
+    if (!activeCount) return res.status(410).json({ message: 'Category has no active products' });
     const ogImage = featuredProduct?.thumbnail || 'https://res.cloudinary.com/dn7tvazaw/image/upload/w_1200,h_630,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png';
 
     const keywords = `${cat.name}, buy ${cat.name} online sri lanka, ${cat.name} price sri lanka, online shopping sri lanka, ${storeName}`;
@@ -875,7 +878,9 @@ router.get('/brand-meta/:slug', async (req, res) => {
     const brandUrl  = `${siteUrl}/brand/${slug}`;
 
     const metaTitle = `${brandName} Products — Buy Online in Sri Lanka | ${storeName}`;
-    const metaDesc  = `Shop genuine ${brandName} products online in Sri Lanka at ${storeName}. Best prices, fast delivery, manufacturer warranty. Browse the full ${brandName} range today.`;
+    const activeCount = await Product.countDocuments({ brand: new RegExp(`^${brandName}$`, 'i'), isActive: true });
+    if (!activeCount) return res.status(410).json({ message: 'Brand has no active products' });
+    const metaDesc  = `Browse ${activeCount} ${brandName} product${activeCount === 1 ? '' : 's'} currently available at ${storeName}, with live prices and stock status for Sri Lanka.`;
     const keywords  = `${brandName}, buy ${brandName} online sri lanka, ${brandName} price sri lanka, ${brandName} products, ${storeName}`;
 
     // Grab a featured product image from this brand
@@ -915,34 +920,13 @@ router.get('/brand-meta/:slug', async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 function buildProductTitle(product, storeName) {
-  const name  = (product.name  || '').trim();
-  const brand = (product.brand || '').trim();
-  const sku   = (product.sku   || '').trim();
-
-  const modelRe = /\b([A-Z]{1,5}-?[A-Z0-9]{2,}(?:-[A-Z0-9]+)*)\b/g;
-  const nameModels = [...name.matchAll(modelRe)].map(m => m[1]);
-  let model = nameModels.length ? nameModels[0] : null;
-  if (sku && !name.includes(sku) && !nameModels.some(m => sku.includes(m) || m.includes(sku))) {
-    model = sku;
-  }
-
-  const suffix  = ' Price in Sri Lanka | ' + storeName;
-  let core = name;
-  if (brand) {
-    const eb = brand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    core = core.replace(new RegExp('\\s*-\\s*' + eb + '(\\s+\\S+)*\\s*$', 'i'), '').trim();
-  }
-  core = core.replace(/\s+-\s+\S+\s*$/, '').trim();
-  if (model && !core.includes(model)) {
-    if (brand && core.toLowerCase().startsWith(brand.toLowerCase())) {
-      core = core.slice(0, brand.length) + ' ' + model + core.slice(brand.length);
-    } else {
-      core = model + ' ' + core;
-    }
-  }
-  const maxCore = 75 - suffix.length;
-  if (core.length > maxCore) core = core.slice(0, maxCore - 1).trim();
-  return core + suffix;
+  const name = String(product.name || '').replace(/\s+/g, ' ').trim();
+  const suffix = ` | ${storeName}`;
+  if (`${name}${suffix}`.length <= 65) return `${name}${suffix}`;
+  const max = 65 - suffix.length;
+  const candidate = name.slice(0, max + 1);
+  const core = candidate.slice(0, candidate.lastIndexOf(' ')).trim() || name.slice(0, max).trim();
+  return `${core}${suffix}`;
 }
 
 function injectMeta(html, { title, desc, canonical, ogTitle, ogDesc, ogImage, ogImageWidth, ogImageHeight, ogUrl, ogType, keywords, schemas, verification, robots }) {
@@ -1070,7 +1054,7 @@ function buildHomeSeoContent({ storeName, siteUrl, categories = [], bestSellers 
   ).join('');
 
   const productCards = bestSellers.map((p, idx) => {
-    const price = p.salePrice || p.price;
+    const price = getEffectiveProductPrice(p);
     const img   = p.thumbnail || (p.images && p.images[0]) || '';
     const loadingAttr = idx === 0 ? 'eager' : 'lazy';
     const name  = String(p.name || '').trim();
@@ -1086,9 +1070,9 @@ function buildHomeSeoContent({ storeName, siteUrl, categories = [], bestSellers 
 
   return `
 <header>
-  <h1>${he(storeName)} — Shop Online in Sri Lanka | Electronics, Fashion &amp; More</h1>
-  <p>${he(storeName)} is Sri Lanka's online store for genuine electronics, fashion, home appliances and
-  more — with fast island-wide delivery, secure payments and the best prices in Colombo and beyond.</p>
+  <h1>${he(storeName)} — Shop Online in Sri Lanka</h1>
+  <p>Browse products currently available from ${he(storeName)}, with live prices, stock status and
+  product details from the store catalogue.</p>
 </header>
 <nav aria-label="Shop by category">
   <h2>Shop by Category</h2>
@@ -1098,15 +1082,7 @@ function buildHomeSeoContent({ storeName, siteUrl, categories = [], bestSellers 
   <h2>Best Selling Products in Sri Lanka</h2>
   <ul>${productCards}</ul>
 </section>
-<section>
-  <h2>Why Shop at ${he(storeName)}?</h2>
-  <h3>Island-Wide Fast Delivery</h3>
-  <p>Get your orders delivered across Sri Lanka, including Colombo, Kandy, Galle and Jaffna, within 1-5 business days.</p>
-  <h3>Genuine Products &amp; Warranty</h3>
-  <p>Every product sold at ${he(storeName)} is 100% authentic and backed by manufacturer warranty.</p>
-  <h3>Easy 14-Day Returns</h3>
-  <p>Not satisfied? Return your order within 14 days for a hassle-free refund.</p>
-</section>`;
+`;
 }
 
 async function getSeoMeta() {
@@ -1121,7 +1097,7 @@ async function getSeoMeta() {
     const ogImage   = s.seo_ogImage || 'https://res.cloudinary.com/dn7tvazaw/image/upload/w_1200,h_630,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png';
     // logoUrl / faviconUrl — set in admin Settings → General → Logo upload.
     // Matches the getLogoUrl() logic in settings.js.
-    const logoUrl   = s.logoUrl || s.faviconUrl || SHOPZEN_LOGO_URL;
+    const logoUrl   = buildSquareBrandLogo(s.logoUrl || s.faviconUrl || SHOPZEN_LOGO_URL);
     return {
       siteUrl,
       storeName,
@@ -1207,12 +1183,15 @@ async function renderShopPage(req, html, siteUrl, storeName, defaultOgImage, log
         const title    = `${cat.name} — Shop Online in Sri Lanka | ${storeName}`;
         const desc     = `Browse ${cat.name} products online in Sri Lanka. Fast delivery and best prices at ${storeName}.`;
         const keywords = `${cat.name}, buy ${cat.name} online, ${cat.name} price sri lanka, online shopping sri lanka, ${storeName}`;
-        const featuredProduct = await Product.findOne({ category: cat._id, isActive: true, thumbnail: { $exists: true, $ne: '' } }).lean();
+        const [featuredProduct, hasInventory] = await Promise.all([
+          Product.findOne({ category: cat._id, isActive: true, thumbnail: { $exists: true, $ne: '' } }).lean(),
+          Product.exists({ category: cat._id, isActive: true }),
+        ]);
         const ogImage = featuredProduct?.thumbnail || defaultOgImage;
 
         // An active category record with no active inventory is obsolete, not
         // an SEO landing page. Continue to the 410 response below.
-        if (!catProducts.length) throw Object.assign(new Error('EMPTY_CATEGORY'), { code: 'EMPTY_CATEGORY' });
+        if (!hasInventory) throw Object.assign(new Error('EMPTY_CATEGORY'), { code: 'EMPTY_CATEGORY' });
 
         const breadcrumb = {
           '@context': 'https://schema.org', '@type': 'BreadcrumbList',
@@ -1298,7 +1277,7 @@ const seoRenderMiddleware = async (req, res) => {
         const productUrl   = `${siteUrl}/product/${product.slug}`;
         const metaTitle    = buildProductTitle(product, storeName);
         const plainDesc    = String(product.shortDescription || product.description || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
-        const priceText    = product.salePrice ? `Rs.${product.salePrice.toLocaleString()} (was Rs.${product.price.toLocaleString()})` : `Rs.${product.price.toLocaleString()}`;
+        const priceText    = hasValidSalePrice(product) ? `Rs.${product.salePrice.toLocaleString()} (was Rs.${product.price.toLocaleString()})` : `Rs.${product.price.toLocaleString()}`;
         const _raw         = (plainDesc.split('.')[0] || plainDesc).trim();
         const baseDesc     = _raw.length <= 85 ? _raw : _raw.slice(0, _raw.lastIndexOf(' ', 85));
         const metaDesc     = `${baseDesc || product.name}. ${priceText}. Fast delivery across Sri Lanka. Shop at ${storeName}.`.slice(0, 165);
@@ -1316,39 +1295,22 @@ const seoRenderMiddleware = async (req, res) => {
           // ALL images for rich results
           image: uniqueImages.slice(0, 10),
           sku: product.sku || product._id.toString(),
-          mpn: product.mpn || product.sku || undefined,
+          mpn: product.mpn || undefined,
           ...(product.gtin ? { gtin: product.gtin } : {}),
           category: product.category?.name || undefined,
           url: productUrl,
           ...(product.brand ? { brand: { '@type': 'Brand', name: product.brand } } : {}),
           offers: {
             '@type': 'Offer', url: productUrl, priceCurrency: 'LKR',
-            price: String(product.salePrice || product.price),
-            priceValidUntil: product.saleEndsAt
-              ? new Date(product.saleEndsAt).toISOString().split('T')[0]
-              : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+            price: String(getEffectiveProductPrice(product)),
+            ...(hasValidSalePrice(product) && product.saleEndsAt ? {
+              priceValidUntil: new Date(product.saleEndsAt).toISOString().split('T')[0],
+            } : {}),
             availability: product.stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
             itemCondition: productConditionUrl(product.condition),
             availabilityStarts: product.createdAt ? new Date(product.createdAt).toISOString() : undefined,
             validFrom: product.createdAt ? new Date(product.createdAt).toISOString() : undefined,
             seller: { '@type': 'Organization', name: storeName },
-            shippingDetails: {
-              '@type': 'OfferShippingDetails',
-              shippingRate: { '@type': 'MonetaryAmount', value: '0', currency: 'LKR' },
-              deliveryTime: {
-                '@type': 'ShippingDeliveryTime',
-                handlingTime: { '@type': 'QuantitativeValue', minValue: 0, maxValue: 1, unitCode: 'DAY' },
-                transitTime:  { '@type': 'QuantitativeValue', minValue: 1, maxValue: 5, unitCode: 'DAY' },
-              },
-              shippingDestination: { '@type': 'DefinedRegion', addressCountry: 'LK' },
-            },
-            hasMerchantReturnPolicy: {
-              '@type': 'MerchantReturnPolicy',
-              applicableCountry: 'LK',
-              returnPolicyCategory: 'https://schema.org/MerchantReturnFiniteReturnWindow',
-              merchantReturnDays: 14, returnMethod: 'https://schema.org/ReturnByMail',
-              returnFees: 'https://schema.org/FreeReturn',
-            },
           },
           ...(product.ratings?.count > 0 ? {
             aggregateRating: {
@@ -1360,7 +1322,7 @@ const seoRenderMiddleware = async (req, res) => {
           } : {}),
           ...(reviewSchemas.length ? { review: reviewSchemas } : {}),
         };
-        if (!product.mpn && !product.sku) delete schema.mpn;
+        if (!product.mpn) delete schema.mpn;
 
         const breadcrumb = {
           '@context': 'https://schema.org', '@type': 'BreadcrumbList',
@@ -1377,11 +1339,10 @@ const seoRenderMiddleware = async (req, res) => {
           ],
         };
 
-        const faqSchema      = buildProductFAQ(product, siteUrl, storeName);
         const out = injectMeta(html, {
           title: metaTitle, desc: metaDesc, canonical: productUrl,
           ogImage, ogType: 'product', keywords,
-          schemas: [schema, breadcrumb, orgSchema, faqSchema],
+          schemas: [schema, breadcrumb, orgSchema],
         });
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.setHeader('Cache-Control', 'no-cache, must-revalidate');
@@ -1420,6 +1381,7 @@ const seoRenderMiddleware = async (req, res) => {
           Product.findOne({ category: cat._id, isActive: true, thumbnail: { $exists: true, $ne: '' } }).lean(),
           Product.find({ category: cat._id, isActive: true }, 'name slug thumbnail images brand price salePrice stock ratings').limit(20).lean(),
         ]);
+        if (!catProducts.length) throw Object.assign(new Error('EMPTY_CATEGORY'), { code: 'EMPTY_CATEGORY' });
         const ogImage = featuredProduct?.thumbnail || defaultOgImage;
 
         const breadcrumb = {
@@ -1431,9 +1393,8 @@ const seoRenderMiddleware = async (req, res) => {
           ],
         };
 
-        const faqSchema      = buildCategoryFAQ(cat.name, siteUrl);
         const itemListSchema = buildItemListSchema(catProducts, catUrl, `${cat.name} — Buy Online in Sri Lanka`);
-        const schemas = [breadcrumb, orgSchema, faqSchema, itemListSchema].filter(Boolean);
+        const schemas = [breadcrumb, orgSchema, itemListSchema].filter(Boolean);
 
         const out = injectMeta(html, { title, desc, canonical: catUrl, ogImage, ogType: 'website', keywords, schemas });
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -1466,7 +1427,7 @@ const seoRenderMiddleware = async (req, res) => {
       const brandName = slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
       const brandUrl  = `${siteUrl}/brand/${slug}`;
       const title     = `${brandName} Products — Buy Online in Sri Lanka | ${storeName}`;
-      const desc      = `Shop genuine ${brandName} products online in Sri Lanka. Best prices, fast delivery, manufacturer warranty at ${storeName}.`;
+      const desc      = `Browse ${brandName} products currently available online at ${storeName}, with live prices and stock status for Sri Lanka.`;
       const keywords  = `${brandName}, buy ${brandName} online sri lanka, ${brandName} price sri lanka, ${storeName}`;
 
       const featuredProduct = await Product.findOne({
@@ -1487,24 +1448,37 @@ const seoRenderMiddleware = async (req, res) => {
       const [brandProductsForList] = await Promise.all([
         Product.find({ brand: new RegExp(`^${brandName}$`, 'i'), isActive: true }, 'name slug thumbnail images brand price salePrice stock ratings').limit(20).lean(),
       ]);
+      if (!brandProductsForList.length) throw Object.assign(new Error('EMPTY_BRAND'), { code: 'EMPTY_BRAND' });
 
-      const faqSchema      = buildBrandFAQ(brandName, siteUrl, slug);
       const itemListSchema = buildItemListSchema(brandProductsForList, brandUrl, `${brandName} Products in Sri Lanka`);
-      const schemas = [breadcrumb, orgSchema, faqSchema, itemListSchema].filter(Boolean);
+      const schemas = [breadcrumb, orgSchema, itemListSchema].filter(Boolean);
 
       const out = injectMeta(html, { title, desc, canonical: brandUrl, ogImage, ogType: 'website', keywords, schemas });
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.setHeader('Cache-Control', 'no-cache, must-revalidate');
       return res.status(200).send(injectSeoWindowConfig(out, _topMeta));
     } catch (err) {
-      console.error('[SSR brand]', err.message);
+      if (err.code !== 'EMPTY_BRAND') console.error('[SSR brand]', err.message);
     }
+
+    const removed = injectMeta(html, {
+      title: `Brand No Longer Available | ${storeName}`,
+      desc: 'This brand does not currently have active products in the ShopZen catalogue.',
+      canonical: `${siteUrl}${req.path}`,
+      ogImage: defaultOgImage,
+      ogType: 'website',
+      robots: 'noindex,follow',
+      schemas: [orgSchema],
+    });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(410).send(injectSeoWindowConfig(removed, _topMeta));
   }
 
   // ── /shop ──────────────────────────────────────────────────────────────────
   if (req.path === '/shop' || req.path === '/shop/') {
     try {
-      const out = await renderShopPage(req, html, siteUrl, storeName, defaultOgImage);
+      const out = await renderShopPage(req, html, siteUrl, storeName, defaultOgImage, logoUrl);
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.setHeader('Cache-Control', 'no-cache, must-revalidate');
       return res.status(200).send(injectSeoWindowConfig(out, _topMeta));
@@ -1541,12 +1515,9 @@ const seoRenderMiddleware = async (req, res) => {
           name: storeName,
           url: siteUrl,
           description: meta.metaDesc,
-          priceRange: 'Rs.500 - Rs.500,000',
           currenciesAccepted: 'LKR',
-          paymentAccepted: 'Cash, Credit Card, Bank Transfer',
           areaServed: { '@type': 'Country', name: 'Sri Lanka' },
           address: { '@type': 'PostalAddress', addressCountry: 'LK' },
-          hasMap: `${siteUrl}/page/contact`,
           logo: { '@type': 'ImageObject', url: meta.logoUrl || SHOPZEN_LOGO_URL, width: 512, height: 512 },
         };
         // Fetch categories + best sellers for static, crawlable homepage content
@@ -1635,10 +1606,22 @@ const seoRenderMiddleware = async (req, res) => {
   // ── /page/:slug ────────────────────────────────────────────────────────────
   const pageMatch = req.path.match(/^\/page\/([^/]+)$/);
   if (pageMatch) {
-    const pageName = pageMatch[1].replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const page = await BusinessPage.findOne({ slug: pageMatch[1], isActive: true }).lean();
+    if (!page) {
+      const missing = injectMeta(html, {
+        title: `Page Not Found | ${storeName}`,
+        desc: 'This page is not available.', canonical: `${siteUrl}${req.path}`,
+        ogImage: defaultOgImage, ogType: 'website', robots: 'noindex,follow', schemas: [orgSchema],
+      });
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(404).send(injectSeoWindowConfig(missing, _topMeta));
+    }
+    const pageName = page.title;
+    const pageText = String(page.content || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
     const out = injectMeta(html, {
-      title: `${pageName} | ${storeName}`,
-      desc: `${pageName} — Learn more at ${storeName}.`,
+      title: page.metaTitle || `${pageName} | ${storeName}`,
+      desc: page.metaDescription || pageText.slice(0, 160) || `${pageName} at ${storeName}.`,
       canonical: `${siteUrl}/page/${pageMatch[1]}`, ogImage: defaultOgImage, ogType: 'website',
       schemas: [orgSchema],
     });
@@ -1649,39 +1632,50 @@ const seoRenderMiddleware = async (req, res) => {
   // ── /campaign/:slug ────────────────────────────────────────────────────────
   const campaignMatch = req.path.match(/^\/campaign\/([^/]+)$/);
   if (campaignMatch) {
-    const campName = campaignMatch[1].replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const now = new Date();
+    const campaign = await SeasonalCampaign.findOne({
+      pageSlug: campaignMatch[1], isActive: true,
+      $and: [
+        { $or: [{ startDate: { $exists: false } }, { startDate: null }, { startDate: { $lte: now } }] },
+        { $or: [{ endDate: { $exists: false } }, { endDate: null }, { endDate: { $gte: now } }] },
+      ],
+    }).lean();
+    if (!campaign) {
+      const missing = injectMeta(html, {
+        title: `Campaign Not Found | ${storeName}`,
+        desc: 'This campaign is no longer active.', canonical: `${siteUrl}${req.path}`,
+        ogImage: defaultOgImage, ogType: 'website', robots: 'noindex,follow', schemas: [orgSchema],
+      });
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(410).send(injectSeoWindowConfig(missing, _topMeta));
+    }
+    const campName = campaign.pageTitle || campaign.name;
     const out = injectMeta(html, {
       title: `${campName} | ${storeName}`,
-      desc: `Special campaign at ${storeName}. Best deals in Sri Lanka.`,
-      canonical: `${siteUrl}/campaign/${campaignMatch[1]}`, ogImage: defaultOgImage, ogType: 'website',
+      desc: String(campaign.pageDescription || `${campName} at ${storeName}.`).slice(0, 160),
+      canonical: `${siteUrl}/campaign/${campaignMatch[1]}`, ogImage: campaign.pageBannerImage || defaultOgImage, ogType: 'website',
       schemas: [orgSchema],
     });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     return res.status(200).send(injectSeoWindowConfig(out, _topMeta));
   }
 
-  // ── Generic fallback — always return HTTP 200 with index.html ──────────────
-  const meta = await getSeoMeta();
-  const fallbackMeta = meta || {
-    metaTitle: `${storeName} — Shop Online in Sri Lanka`,
-    metaDesc:  'Shop the best products online in Sri Lanka.',
-    ogImage:    defaultOgImage,
-  };
-
+  // Unknown paths must be real 404s. Returning the homepage shell with 200
+  // creates soft-404 pages and causes unrelated URLs to appear in Google.
   const out = injectMeta(html, {
-    title:     fallbackMeta.metaTitle,
-    desc:      fallbackMeta.metaDesc,
+    title:     `Page Not Found | ${storeName}`,
+    desc:      'The requested page does not exist. Browse current ShopZen products instead.',
     canonical: `${siteUrl}${req.path}`,
-    ogImage:   fallbackMeta.ogImage,
+    ogImage:   defaultOgImage,
     ogType:    'website',
-    verification: meta ? meta.verification : undefined,
+    robots:    'noindex,follow',
     schemas: [orgSchema],
   });
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-  // Always 200 — never 404 for valid public routes (React SPA handles routing)
-  res.status(200).send(out);
+  res.setHeader('Cache-Control', 'no-store');
+  res.status(404).send(injectSeoWindowConfig(out, _topMeta));
 };
 
 module.exports = router;

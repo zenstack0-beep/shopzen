@@ -18,7 +18,7 @@ import { useCart } from '../../context/CartContext';
 import { useTheme } from '../../context/ThemeContext';
 import useSEO from '../../hooks/useSEO';
 
-// ── Brand FAQ + ItemList schema injection ─────────────────────────────────────
+// ── Live catalogue ItemList schema injection ─────────────────────────────────
 function injectBrandSchemas(brandName, slug, products, siteUrl) {
   ['brand-faq-schema', 'brand-itemlist-schema'].forEach(id => {
     const el = document.getElementById(id);
@@ -26,39 +26,6 @@ function injectBrandSchemas(brandName, slug, products, siteUrl) {
   });
 
   const brandUrl = `${siteUrl}/brand/${slug}`;
-
-  const faqSchema = {
-    '@context': 'https://schema.org',
-    '@type': 'FAQPage',
-    mainEntity: [
-      {
-        '@type': 'Question',
-        name: `Where can I buy genuine ${brandName} products in Sri Lanka?`,
-        acceptedAnswer: { '@type': 'Answer', text: `You can buy genuine ${brandName} products in Sri Lanka at ShopZen (${brandUrl}). All ${brandName} products are authentic and backed by the manufacturer's warranty.` },
-      },
-      {
-        '@type': 'Question',
-        name: `Does ShopZen deliver ${brandName} products across Sri Lanka?`,
-        acceptedAnswer: { '@type': 'Answer', text: `Yes, ShopZen delivers ${brandName} products island-wide across Sri Lanka within 1–5 business days. Fast delivery available to Colombo, Kandy, Galle, and all major cities.` },
-      },
-      {
-        '@type': 'Question',
-        name: `Are ${brandName} products at ShopZen covered by warranty?`,
-        acceptedAnswer: { '@type': 'Answer', text: `Yes, all ${brandName} products at ShopZen are covered by the manufacturer's warranty. ShopZen also offers a 14-day hassle-free return policy.` },
-      },
-      {
-        '@type': 'Question',
-        name: `What ${brandName} products are available in Sri Lanka at ShopZen?`,
-        acceptedAnswer: { '@type': 'Answer', text: `ShopZen stocks a wide range of ${brandName} products in Sri Lanka. Visit ${brandUrl} to browse the full collection including the latest models at competitive prices.` },
-      },
-    ],
-  };
-
-  const faqEl = document.createElement('script');
-  faqEl.type = 'application/ld+json';
-  faqEl.id = 'brand-faq-schema';
-  faqEl.textContent = JSON.stringify(faqSchema);
-  document.head.appendChild(faqEl);
 
   if (products && products.length > 0) {
     const itemListSchema = {
@@ -82,7 +49,9 @@ function injectBrandSchemas(brandName, slug, products, siteUrl) {
             offers: {
               '@type': 'Offer',
               priceCurrency: 'LKR',
-              price: String(p.salePrice || p.price || 0),
+              price: String(Number(p.salePrice) > 0 && Number(p.salePrice) < Number(p.price)
+                ? p.salePrice
+                : p.price || 0),
               availability: (p.stock > 0) ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
             },
             ...(p.ratings?.count > 0 ? {
@@ -177,8 +146,8 @@ export default function BrandPage() {
   const sym = settings?.currencySymbol || 'Rs.';
   const gridRef = useRef(null);
 
-  const brandInfo = BRAND_INFO[slug.toLowerCase()] || getDefaultBrandInfo(slug);
-  const brandName = brandInfo.name;
+  const knownBrand = BRAND_INFO[slug.toLowerCase()] || getDefaultBrandInfo(slug);
+  const brandName = knownBrand.name;
 
   const [products,   setProducts]   = useState([]);
   const [loading,    setLoading]    = useState(true);
@@ -187,6 +156,11 @@ export default function BrandPage() {
   const [total,      setTotal]      = useState(0);
   const [sortBy,     setSortBy]     = useState('newest');
   const [addedId,    setAddedId]    = useState(null);
+  const brandInfo = {
+    name: brandName,
+    tagline: '',
+    description: `Browse the ${total} ${brandName} product${total === 1 ? '' : 's'} currently available from ShopZen. Product names, prices, stock status, specifications, and offers are loaded from the live store catalogue.`,
+  };
 
   const fetchProducts = useCallback(() => {
     setLoading(true);
@@ -212,7 +186,7 @@ export default function BrandPage() {
 
   const siteUrl = window.__SHOPZEN_SEO__?.siteUrl || window.location.origin;
 
-  // Inject FAQ + ItemList schemas when products load
+  // Inject an ItemList using only products currently returned by the API.
   useEffect(() => {
     if (!products.length) return;
     injectBrandSchemas(brandName, slug, products, siteUrl);
@@ -244,13 +218,14 @@ export default function BrandPage() {
   const canonicalUrl = `${siteUrl}/brand/${slug}`;
 
   useSEO({
-    title: `${brandName} Products — Buy Online in Sri Lanka | ShopZen`,
-    description: `Shop genuine ${brandName} products online in Sri Lanka at ShopZen. Best prices, fast delivery, manufacturer warranty. Browse the full ${brandName} range today.`,
+    title: `${brandName} Products — Buy Online in Sri Lanka`,
+    description: `Browse ${total} ${brandName} product${total === 1 ? '' : 's'} currently available at ShopZen, with live prices and stock status for Sri Lanka.`,
     url: canonicalUrl,
     breadcrumbs: [
       { name: 'Shop', url: '/shop' },
       { name: `${brandName} Products`, url: `/brand/${slug}` },
     ],
+    noindexFollow: !loading && total === 0,
   });
 
   return (

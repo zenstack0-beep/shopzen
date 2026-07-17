@@ -136,13 +136,17 @@ export const applyTheme = (settings) => {
   if (!style) { style = document.createElement('style'); style.id = 'theme-custom-css'; document.head.appendChild(style); }
   style.textContent = settings?.customCSS || '';
 
-  // Apply favicon from settings
-  const faviconUrl = settings?.faviconUrl || settings?.logoUrl;
-  if (faviconUrl) {
+  // Use the stable same-origin favicon endpoints. They derive a square icon
+  // from the current Store Logo and avoid restoring a stale raw favicon URL.
+  const faviconSource = settings?.logoUrl || settings?.faviconUrl;
+  if (faviconSource) {
+    const version = faviconSource.match(/\/v(\d+)\//)?.[1] || 'current';
     ['icon', 'shortcut icon', 'apple-touch-icon'].forEach(rel => {
       let fav = document.querySelector(`link[rel="${rel}"]`);
       if (!fav) { fav = document.createElement('link'); fav.rel = rel; document.head.appendChild(fav); }
-      fav.href = faviconUrl;
+      fav.href = rel === 'apple-touch-icon'
+        ? `/apple-touch-icon.png?v=${version}`
+        : `/favicon-96x96.png?v=${version}`;
     });
   }
 

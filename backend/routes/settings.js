@@ -54,13 +54,18 @@ router.get('/favicon.ico', async (req, res) => {
 
 // Helper to get logo URL from DB
 async function getLogoUrl() {
-  const row = await Settings.findOne({ key: 'faviconUrl' }) || await Settings.findOne({ key: 'logoUrl' });
-  return row?.value || null;
+  const rows = await Settings.find({ key: { $in: ['logoUrl', 'faviconUrl'] } }).lean();
+  const values = Object.fromEntries(rows.map(row => [row.key, row.value]));
+  // The Store Logo is the canonical brand asset. The old favicon setting can
+  // remain as a fallback, but must never override a newly uploaded store logo.
+  return values.logoUrl || values.faviconUrl || null;
 }
 
 function resizedPngUrl(logoUrl, size) {
   return logoUrl.includes('/upload/')
-    ? logoUrl.replace('/upload/', `/upload/w_${size},h_${size},c_pad,b_white,f_png/`)
+    // Trim surrounding whitespace, isolate the left-hand ShopZen mark from a
+    // horizontal logo, then pad it onto a genuine square image for Google.
+    ? logoUrl.replace('/upload/', `/upload/e_trim/c_crop,g_west,ar_1/w_${size},h_${size},c_pad,b_white,f_png,q_auto/`)
     : logoUrl;
 }
 
@@ -86,7 +91,7 @@ router.get('/favicon.png', async (req, res) => {
   try {
     const logoUrl = await getLogoUrl();
     if (!logoUrl) return res.status(404).send('No favicon configured');
-    const url = logoUrl.replace('/upload/', '/upload/w_192,h_192,c_pad,b_white,f_png/');
+    const url = resizedPngUrl(logoUrl, 192);
     redirectOrProxy(logoUrl, url, res, 'image/png');
   } catch (err) { res.status(500).send(err.message); }
 });
@@ -96,7 +101,7 @@ router.get('/favicon-96x96.png', async (req, res) => {
   try {
     const logoUrl = await getLogoUrl();
     if (!logoUrl) return res.status(404).send('No favicon configured');
-    const url = logoUrl.replace('/upload/', '/upload/w_96,h_96,c_pad,b_white,f_png/');
+    const url = resizedPngUrl(logoUrl, 96);
     redirectOrProxy(logoUrl, url, res, 'image/png');
   } catch (err) { res.status(500).send(err.message); }
 });
@@ -106,7 +111,7 @@ router.get('/favicon-32x32.png', async (req, res) => {
   try {
     const logoUrl = await getLogoUrl();
     if (!logoUrl) return res.status(404).send('No favicon configured');
-    const url = logoUrl.replace('/upload/', '/upload/w_32,h_32,c_pad,b_white,f_png/');
+    const url = resizedPngUrl(logoUrl, 32);
     redirectOrProxy(logoUrl, url, res, 'image/png');
   } catch (err) { res.status(500).send(err.message); }
 });
@@ -116,7 +121,7 @@ router.get('/apple-touch-icon.png', async (req, res) => {
   try {
     const logoUrl = await getLogoUrl();
     if (!logoUrl) return res.status(404).send('No favicon configured');
-    const url = logoUrl.replace('/upload/', '/upload/w_180,h_180,c_pad,b_white,f_png/');
+    const url = resizedPngUrl(logoUrl, 180);
     redirectOrProxy(logoUrl, url, res, 'image/png');
   } catch (err) { res.status(500).send(err.message); }
 });
@@ -168,6 +173,7 @@ router.get('/', async (req, res) => {
       res.setHeader('Cache-Control', 'public, max-age=600, stale-while-revalidate=3600');
       res.setHeader('ETag', _settingsCacheEtag);
       res.setHeader('Vary', 'Origin, Accept-Encoding');
+      res.setHeader('X-Robots-Tag', 'noindex, nofollow, nosnippet');
 
       if (req.headers['if-none-match'] === _settingsCacheEtag) {
         return res.status(304).end();

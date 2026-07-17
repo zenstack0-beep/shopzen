@@ -691,7 +691,7 @@ export default function Home() {
       API.get('/products?featured=true&limit=8'),
       API.get('/products?limit=8'),
       API.get('/products?onSale=true&limit=8'),
-      API.get('/categories?limit=12'),
+      API.get('/categories?limit=12&inventory=true'),
       API.get('/banners?position=hero'),
       API.get('/banners?position=promo'),
     ]).then(([feat,newest,sale,cats,hero,promo]) => {

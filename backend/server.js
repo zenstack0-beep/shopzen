@@ -157,6 +157,15 @@ app.use((req, res, next) => {
   next();
 });
 
+// API responses are data endpoints, not search landing pages. Keep XML feeds,
+// robots.txt and dynamic icon responses crawlable while excluding every other
+// API URL from search results (including direct Railway URLs).
+app.use('/api', (req, res, next) => {
+  const crawlableAsset = /(?:sitemap|merchant-feed)\.xml$|\/robots\.txt$|\/favicon(?:-[^/]+)?\.(?:png|ico)$|\/apple-touch-icon\.png$|\/android-chrome-[^/]+\.png$/i.test(req.path);
+  if (!crawlableAsset) res.setHeader('X-Robots-Tag', 'noindex, nofollow, nosnippet');
+  next();
+});
+
 // ─── Public routes ────────────────────────────────────────────────────────────
 app.use('/api/products',      require('./routes/products'));
 app.use('/api/orders',        require('./routes/orders'));

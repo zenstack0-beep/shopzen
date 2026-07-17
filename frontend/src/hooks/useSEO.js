@@ -94,6 +94,29 @@ export function getPixelCurrency() {
   return normalizeCurrencyCode(getSeoConfig().currencyCode || 'LKR');
 }
 
+function hasValidSalePrice(product) {
+  const regular = Number(product?.price);
+  const sale = Number(product?.salePrice);
+  return Number.isFinite(regular) && regular > 0
+    && Number.isFinite(sale) && sale > 0 && sale < regular;
+}
+
+function effectiveProductPrice(product) {
+  return hasValidSalePrice(product) ? Number(product.salePrice) : Number(product?.price || 0);
+}
+
+function alreadyIncludesSiteName(title, siteName) {
+  const escaped = String(siteName).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?:\\||—|-)\\s*${escaped}(?:\\s+Sri Lanka)?$`, 'i').test(String(title).trim());
+}
+
+function truncateAtWord(value, maxLength) {
+  const text = String(value || '').trim();
+  if (text.length <= maxLength) return text;
+  const shortened = text.slice(0, maxLength + 1);
+  return shortened.slice(0, shortened.lastIndexOf(' ')).trim() || text.slice(0, maxLength).trim();
+}
+
 // ─── Advanced Matching for pixel fbq('init') ──────────────────────────────────
 /**
  * Re-initialise the pixel with Advanced Matching data for a known user.
@@ -358,17 +381,19 @@ export default function useSEO({
       ? withPriceSuffix
       : withShort.length <= 65
         ? withShort
-        : title.slice(0, 50) + ' | ShopZen';
+        : truncateAtWord(title, 50) + ' | ShopZen';
   } else {
-    finalTitle = title ? `${title} | ${siteName}` : siteName;
+    finalTitle = title
+      ? (alreadyIncludesSiteName(title, siteName) ? title : `${title} | ${siteName}`)
+      : siteName;
   }
 
   let finalDesc;
   if (description) {
     finalDesc = description;
   } else if (type === 'product' && product) {
-    const price     = product.salePrice || product.price;
-    const origPrice = product.isOnSale && product.price ? product.price : null;
+    const price     = effectiveProductPrice(product);
+    const origPrice = hasValidSalePrice(product) ? Number(product.price) : null;
     const priceStr  = price ? `Rs.${price.toLocaleString()}` : '';
     const wasStr    = origPrice && origPrice !== price ? ` (was Rs.${origPrice.toLocaleString()})` : '';
     const brand     = product.brand ? `${product.brand} ` : '';
@@ -484,7 +509,7 @@ export default function useSEO({
     }
 
     if (product) {
-      const price = product.salePrice || product.price;
+      const price = effectiveProductPrice(product);
       const availability = product.stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock';
       const imageArr = (product.images?.length ? product.images : [product.thumbnail]).filter(Boolean);
 
@@ -496,7 +521,7 @@ export default function useSEO({
                        .replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() || product.name,
         image: imageArr.length > 0 ? imageArr : undefined,
         sku: product.sku || product._id,
-        mpn: product.mpn || product.sku || undefined,
+        mpn: product.mpn || undefined,
         ...(product.gtin ? { gtin: product.gtin } : {}),
         category: product.category?.name || undefined,
         url: finalUrl,
@@ -515,28 +540,10 @@ export default function useSEO({
               ? 'https://schema.org/RefurbishedCondition'
               : 'https://schema.org/NewCondition',
           validFrom: product.createdAt ? new Date(product.createdAt).toISOString() : undefined,
-          priceValidUntil: product.saleEndsAt
-            ? new Date(product.saleEndsAt).toISOString().split('T')[0]
-            : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          ...(hasValidSalePrice(product) && product.saleEndsAt ? {
+            priceValidUntil: new Date(product.saleEndsAt).toISOString().split('T')[0],
+          } : {}),
           seller: { '@type': 'Organization', name: siteName },
-          shippingDetails: {
-            '@type': 'OfferShippingDetails',
-            shippingRate: { '@type': 'MonetaryAmount', value: '0', currency: cfg.currencyCode || 'LKR' },
-            deliveryTime: {
-              '@type': 'ShippingDeliveryTime',
-              handlingTime: { '@type': 'QuantitativeValue', minValue: 0, maxValue: 1, unitCode: 'DAY' },
-              transitTime:  { '@type': 'QuantitativeValue', minValue: 1, maxValue: 5, unitCode: 'DAY' },
-            },
-            shippingDestination: { '@type': 'DefinedRegion', addressCountry: cfg.countryCode || 'LK' },
-          },
-          hasMerchantReturnPolicy: {
-            '@type': 'MerchantReturnPolicy',
-            applicableCountry: cfg.countryCode || 'LK',
-            returnPolicyCategory: 'https://schema.org/MerchantReturnFiniteReturnWindow',
-            merchantReturnDays: 14,
-            returnMethod: 'https://schema.org/ReturnByMail',
-            returnFees: 'https://schema.org/FreeReturn',
-          },
         },
       };
 

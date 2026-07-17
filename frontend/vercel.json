@@ -1,4 +1,26 @@
 {
+  "redirects": [
+    {
+      "source": "/api/settings",
+      "destination": "/",
+      "permanent": true
+    },
+    {
+      "source": "/api/settings/",
+      "destination": "/",
+      "permanent": true
+    },
+    {
+      "source": "/favicon.ico",
+      "destination": "/favicon-96x96.png",
+      "permanent": true
+    },
+    {
+      "source": "/shop/:category",
+      "destination": "/category/:category",
+      "permanent": true
+    }
+  ],
   "rewrites": [
     {
       "source": "/sitemap.xml",
@@ -33,10 +55,6 @@
       "destination": "https://shopzen-production.up.railway.app/api/seo/robots.txt"
     },
     {
-      "source": "/favicon.ico",
-      "destination": "https://shopzen-production.up.railway.app/api/settings/favicon.ico"
-    },
-    {
       "source": "/favicon.png",
       "destination": "https://shopzen-production.up.railway.app/api/settings/favicon.png"
     },
@@ -65,8 +83,92 @@
       "destination": "https://shopzen-production.up.railway.app/api/settings/android-chrome-512x512.png"
     },
     {
-      "source": "/(.*)",
+      "source": "/api/:path*",
+      "destination": "https://shopzen-production.up.railway.app/api/:path*"
+    },
+    {
+      "source": "/",
+      "destination": "https://shopzen-production.up.railway.app/"
+    },
+    {
+      "source": "/product/:slug",
+      "destination": "https://shopzen-production.up.railway.app/product/:slug"
+    },
+    {
+      "source": "/category/:slug",
+      "destination": "https://shopzen-production.up.railway.app/category/:slug"
+    },
+    {
+      "source": "/brand/:slug",
+      "destination": "https://shopzen-production.up.railway.app/brand/:slug"
+    },
+    {
+      "source": "/shop",
+      "destination": "https://shopzen-production.up.railway.app/shop"
+    },
+    {
+      "source": "/gift-cards",
+      "destination": "https://shopzen-production.up.railway.app/gift-cards"
+    },
+    {
+      "source": "/page/:slug",
+      "destination": "https://shopzen-production.up.railway.app/page/:slug"
+    },
+    {
+      "source": "/campaign/:slug",
+      "destination": "https://shopzen-production.up.railway.app/campaign/:slug"
+    },
+    {
+      "source": "/admin/:path*",
       "destination": "/index.html"
+    },
+    {
+      "source": "/login",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/register",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/forgot-password",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/cart",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/checkout",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/order-success/:id",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/track-order/:id",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/wishlist",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/returns",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/account",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/my-orders",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/:path*",
+      "destination": "https://shopzen-production.up.railway.app/:path*"
     }
   ],
   "headers": [
@@ -89,6 +191,30 @@
           "key": "Strict-Transport-Security",
           "value": "max-age=63072000"
         }
+      ]
+    },
+    {
+      "source": "/admin/:path*",
+      "headers": [
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow, nosnippet" }
+      ]
+    },
+    {
+      "source": "/:private(login|register|forgot-password|cart|checkout|wishlist|returns|account|my-orders)",
+      "headers": [
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow, nosnippet" }
+      ]
+    },
+    {
+      "source": "/order-success/:id",
+      "headers": [
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow, nosnippet" }
+      ]
+    },
+    {
+      "source": "/track-order/:id",
+      "headers": [
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow, nosnippet" }
       ]
     },
     {

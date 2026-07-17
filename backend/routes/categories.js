@@ -1,13 +1,22 @@
 const express = require('express');
 const router = express.Router();
-const { Category } = require('../models/index');
+const { Category, Product } = require('../models/index');
 const { adminAuth } = require('../middleware/auth');
+
+async function publicCategoryFilter(req, baseFilter) {
+  if (req.query.inventory !== 'true') return baseFilter;
+  const categoryIds = await Product.distinct('category', { isActive: true });
+  return { ...baseFilter, _id: { $in: categoryIds.filter(Boolean) } };
+}
 
 // ── PUBLIC: Get all active parent categories (no parent) ────────────────────
 router.get('/', async (req, res) => {
   try {
-    const cats = await Category.find({ isActive: true, parent: null })
-      .sort({ sortOrder: 1, name: 1 });
+    const filter = await publicCategoryFilter(req, { isActive: true, parent: null });
+    let query = Category.find(filter).sort({ sortOrder: 1, name: 1 });
+    const limit = Math.min(Math.max(Number(req.query.limit) || 0, 0), 100);
+    if (limit) query = query.limit(limit);
+    const cats = await query;
     res.json(cats);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -17,7 +26,8 @@ router.get('/', async (req, res) => {
 // ── PUBLIC: Get all categories flat (admin use & coupon selector) ───────────
 router.get('/all', async (req, res) => {
   try {
-    const cats = await Category.find({ isActive: true })
+    const filter = await publicCategoryFilter(req, { isActive: true });
+    const cats = await Category.find(filter)
       .sort({ sortOrder: 1, name: 1 });
     res.json(cats);
   } catch (err) {
