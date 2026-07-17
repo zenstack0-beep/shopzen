@@ -64,7 +64,10 @@ async function getLogoUrl() {
 function resizedPngUrl(logoUrl, size) {
   // Keep a small transparent safety margin for rounded browser/favicon masks.
   // PNG output is lossless; do not let automatic quality conversion soften it.
-  const markSize = Math.max(15, Math.round(size * 0.9));
+  // Small browser tabs need almost the full canvas to remain recognizable.
+  // Keep a little more breathing room only on larger touch/search icons.
+  const markRatio = size <= 48 ? 0.96 : 0.92;
+  const markSize = Math.min(size, Math.max(16, Math.ceil(size * markRatio)));
   return logoUrl.includes('/upload/')
     ? logoUrl.replace(
         '/upload/',
