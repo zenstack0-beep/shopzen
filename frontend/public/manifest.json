@@ -3,25 +3,25 @@
     "name": "ShopZen — Online Store Sri Lanka",
     "icons": [
       {
-        "src": "/shopzen-favicon-v2-32x32.png",
+        "src": "/shopzen-favicon-v3-32x32.png",
         "sizes": "32x32",
         "type": "image/png",
         "purpose": "any"
       },
       {
-        "src": "/shopzen-favicon-v2-180x180.png",
+        "src": "/shopzen-favicon-v3-180x180.png",
         "sizes": "180x180",
         "type": "image/png",
         "purpose": "any"
       },
       {
-        "src": "/shopzen-favicon-v2-192x192.png",
+        "src": "/shopzen-favicon-v3-192x192.png",
         "sizes": "192x192",
         "type": "image/png",
         "purpose": "any maskable"
       },
       {
-        "src": "/shopzen-favicon-v2-512x512.png",
+        "src": "/shopzen-favicon-v3-512x512.png",
         "sizes": "512x512",
         "type": "image/png",
         "purpose": "any maskable"

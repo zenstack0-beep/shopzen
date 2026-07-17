@@ -54,7 +54,7 @@ function buildSquareBrandLogo(rawUrl, size = 512) {
   if (!rawUrl || !rawUrl.includes('/upload/')) return rawUrl;
   return rawUrl.replace(
     '/upload/',
-    `/upload/e_trim/c_crop,g_west,ar_1/w_${size},h_${size},c_pad,b_white,f_png,q_auto/`
+    `/upload/e_trim/w_${size},h_${size},c_pad,b_white,f_png,q_auto/`
   );
 }
 
@@ -464,7 +464,7 @@ router.get('/meta', async (req, res) => {
     // Google requires min 112x112, max 1000x1000, preferably square PNG.
     // Update this URL after uploading your square logo to Cloudinary.
     const ogImage   = s.seo_ogImage   || DEFAULT_OG;
-    const logoUrl   = buildSquareBrandLogo(s.logoUrl || s.faviconUrl || SHOPZEN_LOGO_URL);
+    const logoUrl   = buildSquareBrandLogo(s.faviconUrl || s.logoUrl || SHOPZEN_LOGO_URL);
 
     res.json({
       siteUrl, storeName, metaTitle, metaDesc, ogTitle, ogDesc, ogImage,
@@ -1097,7 +1097,7 @@ async function getSeoMeta() {
     const ogImage   = s.seo_ogImage || 'https://res.cloudinary.com/dn7tvazaw/image/upload/w_1200,h_630,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png';
     // logoUrl / faviconUrl — set in admin Settings → General → Logo upload.
     // Matches the getLogoUrl() logic in settings.js.
-    const logoUrl   = buildSquareBrandLogo(s.logoUrl || s.faviconUrl || SHOPZEN_LOGO_URL);
+    const logoUrl   = buildSquareBrandLogo(s.faviconUrl || s.logoUrl || SHOPZEN_LOGO_URL);
     return {
       siteUrl,
       storeName,

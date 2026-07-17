@@ -56,16 +56,16 @@ router.get('/favicon.ico', async (req, res) => {
 async function getLogoUrl() {
   const rows = await Settings.find({ key: { $in: ['logoUrl', 'faviconUrl'] } }).lean();
   const values = Object.fromEntries(rows.map(row => [row.key, row.value]));
-  // The Store Logo is the canonical brand asset. The old favicon setting can
-  // remain as a fallback, but must never override a newly uploaded store logo.
-  return values.logoUrl || values.faviconUrl || null;
+  // Favicon is a separately managed square asset in Admin Settings. Use it
+  // exactly as uploaded; only fall back to the Store Logo when none exists.
+  return values.faviconUrl || values.logoUrl || null;
 }
 
 function resizedPngUrl(logoUrl, size) {
   return logoUrl.includes('/upload/')
-    // Trim surrounding whitespace, isolate the left-hand ShopZen mark from a
-    // horizontal logo, then pad it onto a genuine square image for Google.
-    ? logoUrl.replace('/upload/', `/upload/e_trim/c_crop,g_west,ar_1/w_${size},h_${size},c_pad,b_white,f_png,q_auto/`)
+    // Preserve the entire uploaded favicon. c_pad scales proportionally and
+    // adds space where necessary instead of cutting off any part of the mark.
+    ? logoUrl.replace('/upload/', `/upload/e_trim/w_${size},h_${size},c_pad,b_white,f_png,q_auto/`)
     : logoUrl;
 }
 

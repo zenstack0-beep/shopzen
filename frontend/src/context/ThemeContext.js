@@ -140,15 +140,15 @@ export const applyTheme = (settings) => {
 
   // Use the stable same-origin favicon endpoints. They derive a square icon
   // from the current Store Logo and avoid restoring a stale raw favicon URL.
-  const faviconSource = settings?.logoUrl || settings?.faviconUrl;
+  const faviconSource = settings?.faviconUrl || settings?.logoUrl;
   if (faviconSource) {
     const version = faviconSource.match(/\/v(\d+)\//)?.[1] || 'current';
     ['icon', 'shortcut icon', 'apple-touch-icon'].forEach(rel => {
       let fav = document.querySelector(`link[rel="${rel}"]`);
       if (!fav) { fav = document.createElement('link'); fav.rel = rel; document.head.appendChild(fav); }
       fav.href = rel === 'apple-touch-icon'
-        ? `/shopzen-favicon-v2-180x180.png?v=${version}`
-        : `/shopzen-favicon-v2-96x96.png?v=${version}`;
+        ? `/shopzen-favicon-v3-180x180.png?v=${version}`
+        : `/shopzen-favicon-v3-96x96.png?v=${version}`;
     });
   }
 
