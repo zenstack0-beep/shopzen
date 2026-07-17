@@ -64,11 +64,11 @@ async function getLogoUrl() {
 function resizedPngUrl(logoUrl, size) {
   // Keep a small transparent safety margin for rounded browser/favicon masks.
   // PNG output is lossless; do not let automatic quality conversion soften it.
-  const markSize = Math.max(14, Math.round(size * 0.84));
+  const markSize = Math.max(15, Math.round(size * 0.9));
   return logoUrl.includes('/upload/')
     ? logoUrl.replace(
         '/upload/',
-        `/upload/w_${markSize},h_${markSize},c_fit/c_pad,w_${size},h_${size},b_transparent/f_png,q_100/`
+        `/upload/w_${markSize},h_${markSize},c_fit/c_pad,w_${size},h_${size},b_transparent/e_sharpen:120/f_png,q_100/`
       )
     : logoUrl;
 }

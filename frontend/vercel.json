@@ -12,42 +12,42 @@
     },
     {
       "source": "/favicon.ico",
-      "destination": "/shopzen-favicon-v5-96x96.png",
+      "destination": "/shopzen-favicon-v6-96x96.png",
       "permanent": true
     },
     {
       "source": "/favicon.png",
-      "destination": "/shopzen-favicon-v5-192x192.png",
+      "destination": "/shopzen-favicon-v6-192x192.png",
       "permanent": true
     },
     {
       "source": "/favicon-16x16.png",
-      "destination": "/shopzen-favicon-v5-16x16.png",
+      "destination": "/shopzen-favicon-v6-16x16.png",
       "permanent": true
     },
     {
       "source": "/favicon-32x32.png",
-      "destination": "/shopzen-favicon-v5-32x32.png",
+      "destination": "/shopzen-favicon-v6-32x32.png",
       "permanent": true
     },
     {
       "source": "/favicon-96x96.png",
-      "destination": "/shopzen-favicon-v5-96x96.png",
+      "destination": "/shopzen-favicon-v6-96x96.png",
       "permanent": true
     },
     {
       "source": "/apple-touch-icon.png",
-      "destination": "/shopzen-favicon-v5-180x180.png",
+      "destination": "/shopzen-favicon-v6-180x180.png",
       "permanent": true
     },
     {
       "source": "/android-chrome-192x192.png",
-      "destination": "/shopzen-favicon-v5-192x192.png",
+      "destination": "/shopzen-favicon-v6-192x192.png",
       "permanent": true
     },
     {
       "source": "/android-chrome-512x512.png",
-      "destination": "/shopzen-favicon-v5-512x512.png",
+      "destination": "/shopzen-favicon-v6-512x512.png",
       "permanent": true
     },
     {
@@ -118,27 +118,27 @@
       "destination": "https://shopzen-production.up.railway.app/api/settings/android-chrome-512x512.png"
     },
     {
-      "source": "/shopzen-favicon-v5-16x16.png",
+      "source": "/shopzen-favicon-v6-16x16.png",
       "destination": "https://shopzen-production.up.railway.app/api/settings/favicon-16x16.png"
     },
     {
-      "source": "/shopzen-favicon-v5-32x32.png",
+      "source": "/shopzen-favicon-v6-32x32.png",
       "destination": "https://shopzen-production.up.railway.app/api/settings/favicon-32x32.png"
     },
     {
-      "source": "/shopzen-favicon-v5-96x96.png",
+      "source": "/shopzen-favicon-v6-96x96.png",
       "destination": "https://shopzen-production.up.railway.app/api/settings/favicon-96x96.png"
     },
     {
-      "source": "/shopzen-favicon-v5-180x180.png",
+      "source": "/shopzen-favicon-v6-180x180.png",
       "destination": "https://shopzen-production.up.railway.app/api/settings/apple-touch-icon.png"
     },
     {
-      "source": "/shopzen-favicon-v5-192x192.png",
+      "source": "/shopzen-favicon-v6-192x192.png",
       "destination": "https://shopzen-production.up.railway.app/api/settings/android-chrome-192x192.png"
     },
     {
-      "source": "/shopzen-favicon-v5-512x512.png",
+      "source": "/shopzen-favicon-v6-512x512.png",
       "destination": "https://shopzen-production.up.railway.app/api/settings/android-chrome-512x512.png"
     },
     {
@@ -330,7 +330,7 @@
       ]
     },
     {
-      "source": "/shopzen-favicon-v5-:size.png",
+      "source": "/shopzen-favicon-v6-:size.png",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=3600, must-revalidate" },
         { "key": "Content-Type", "value": "image/png" }
