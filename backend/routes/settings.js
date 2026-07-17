@@ -62,13 +62,13 @@ async function getLogoUrl() {
 }
 
 function resizedPngUrl(logoUrl, size) {
-  // Keep the mark at 75% of the canvas. A square source otherwise touches all
-  // four edges, which makes rounded browser favicons appear visibly cropped.
-  const markSize = Math.max(12, Math.round(size * 0.75));
+  // Keep a small transparent safety margin for rounded browser/favicon masks.
+  // PNG output is lossless; do not let automatic quality conversion soften it.
+  const markSize = Math.max(14, Math.round(size * 0.84));
   return logoUrl.includes('/upload/')
     ? logoUrl.replace(
         '/upload/',
-        `/upload/w_${markSize},h_${markSize},c_fit/c_pad,w_${size},h_${size},b_white/f_png,q_auto/`
+        `/upload/w_${markSize},h_${markSize},c_fit/c_pad,w_${size},h_${size},b_transparent/f_png,q_100/`
       )
     : logoUrl;
 }

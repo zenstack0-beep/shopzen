@@ -52,10 +52,10 @@ function getEffectiveProductPrice(product) {
 
 function buildSquareBrandLogo(rawUrl, size = 512) {
   if (!rawUrl || !rawUrl.includes('/upload/')) return rawUrl;
-  const markSize = Math.max(112, Math.round(size * 0.75));
+  const markSize = Math.max(112, Math.round(size * 0.84));
   return rawUrl.replace(
     '/upload/',
-    `/upload/w_${markSize},h_${markSize},c_fit/c_pad,w_${size},h_${size},b_white/f_png,q_auto/`
+    `/upload/w_${markSize},h_${markSize},c_fit/c_pad,w_${size},h_${size},b_transparent/f_png,q_100/`
   );
 }
 
