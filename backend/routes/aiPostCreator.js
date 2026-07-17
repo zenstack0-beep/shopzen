@@ -45,10 +45,8 @@
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * TEMPLATE MODE (generationMode: "template") — added without modifying any
- * of the above. Server-side PNG-template compositing via Sharp, fully
- * isolated in services/templateRenderer.js. Background removal happens
- * client-side (@imgly/background-removal, WASM) before the cutout reaches
- * these endpoints.
+ * of the above. Server-side background removal and PNG-template compositing
+ * via Sharp, isolated in services/templateRenderer.js and this route.
  * ─────────────────────────────────────────────────────────────────────────────
  *   GET  /api/ai-post-creator/templates           → list available PNG
  *                                                  templates (id, label,
@@ -75,9 +73,221 @@ const sharp   = require('sharp');
 const { adminAuth }  = require('../middleware/auth');
 const Product         = require('../models/Product');
 const PublishLog       = require('../models/PublishLog');
+const AIPostPreset     = require('../models/AIPostPreset');
+const { Settings, Coupon } = require('../models/index');
+const { DiscountEngine } = require('../services/discountEngine');
 const { getOrCreate, decryptPlatformFields } = require('../services/socialMediaService');
 
 router.use(adminAuth);
+
+const cleanText = (value, max=5000) => String(value == null ? '' : value)
+  .replace(/<[^>]*>/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim()
+  .slice(0, max);
+const formatLkr = value => Number(value || 0).toLocaleString('en-LK', { maximumFractionDigits: 2 });
+const hashtag = value => cleanText(value, 80).replace(/[^a-z0-9]/gi, '');
+
+function getAuthoritativeProductPricing(product) {
+  const regularPrice = Number(product?.price) || 0;
+  const sellingPrice = Number(DiscountEngine.effectivePrice(product)) || regularPrice;
+  const isProductSale = regularPrice > 0 && sellingPrice > 0 && sellingPrice < regularPrice;
+  return {
+    regularPrice,
+    sellingPrice,
+    isProductSale,
+    productSalePercent: isProductSale
+      ? Math.round(((regularPrice - sellingPrice) / regularPrice) * 100)
+      : 0,
+  };
+}
+
+function publicVoucherDetails(coupon, validation, pricing, quantity=1) {
+  const discountAmount = quantity === 1 ? Number(validation?.discount) || 0 : 0;
+  const priceAfterVoucher = discountAmount > 0
+    ? Math.max(0, pricing.sellingPrice - discountAmount)
+    : null;
+  const percentageLabel = `${Number(coupon.value) || 0}% OFF${Number(coupon.maxDiscount) > 0 ? ` (MAX RS. ${formatLkr(coupon.maxDiscount)})` : ''}`;
+  return {
+    code: cleanText(coupon.code, 80).toUpperCase(),
+    type: coupon.type,
+    value: Number(coupon.value) || 0,
+    minOrderAmount: Number(coupon.minOrderAmount) || 0,
+    maxDiscount: Number(coupon.maxDiscount) || 0,
+    userLimit: Number(coupon.userLimit) || 1,
+    discountAmount,
+    priceAfterVoucher,
+    requiresMultipleItems: quantity > 1,
+    minimumProductQuantity: quantity,
+    label: coupon.type === 'percentage'
+      ? percentageLabel
+      : `Rs. ${formatLkr(coupon.value)} OFF`,
+  };
+}
+
+// Return only vouchers that are safe to advertise publicly for this exact
+// product. Checkout's DiscountEngine remains the authority for scope, minimum
+// spend, sale-item exclusions, usage limits, caps and profit protection.
+async function getAdvertisableProductVouchers(product, requestedCode='') {
+  const now = new Date();
+  const normalizedCode = cleanText(requestedCode, 80).toUpperCase();
+  const query = {
+    isActive: true,
+    isNewUserOnly: { $ne: true },
+    validFrom: { $lte: now },
+    validUntil: { $gte: now },
+  };
+  if (normalizedCode && normalizedCode !== 'AUTO') query.code = normalizedCode;
+
+  const coupons = await Coupon.find(query).sort({ value: -1, createdAt: -1 }).lean();
+  const pricing = getAuthoritativeProductPricing(product);
+  if (!pricing.sellingPrice) return [];
+
+  const canonicalProduct = {
+    ...product,
+    category: product.category?._id || product.category,
+  };
+  const results = [];
+  for (const coupon of coupons) {
+    if (coupon.usageLimit && Number(coupon.usedCount) >= Number(coupon.usageLimit)) continue;
+
+    // A minimum order can still make a product eligible even when one unit is
+    // below the threshold. Validate the smallest qualifying quantity and state
+    // that minimum clearly instead of inventing a one-item after-voucher price.
+    const quantity = coupon.minOrderAmount > pricing.sellingPrice
+      ? Math.max(1, Math.ceil(Number(coupon.minOrderAmount) / pricing.sellingPrice))
+      : 1;
+    const lineItem = DiscountEngine.buildLineItem(canonicalProduct, quantity);
+    const validation = await DiscountEngine.validateCoupon(coupon.code, lineItem.subtotal, {
+      lineItems: [lineItem],
+    });
+    if (validation.error || !(Number(validation.discount) > 0)) continue;
+    const configuredDiscount = Math.round(coupon.type === 'percentage'
+      ? Math.min((lineItem.subtotal * Number(coupon.value || 0)) / 100, Number(coupon.maxDiscount) || Infinity)
+      : Math.min(Number(coupon.value || 0), lineItem.subtotal));
+    // A hidden profit-protection reduction can make the public voucher value
+    // differ from checkout. Do not advertise that coupon for this product.
+    if (Number(validation.discount) !== configuredDiscount) continue;
+    results.push(publicVoucherDetails(coupon, validation, pricing, quantity));
+  }
+
+  return results.sort((a, b) => {
+    if (a.requiresMultipleItems !== b.requiresMultipleItems) return a.requiresMultipleItems ? 1 : -1;
+    if (b.discountAmount !== a.discountAmount) return b.discountAmount - a.discountAmount;
+    return b.value - a.value;
+  });
+}
+
+// Marketing features must come from data an admin has explicitly verified or
+// configured on the product. This deliberately excludes free-form product
+// descriptions, tags and AI guesses.
+function getConfiguredMarketingFeatures(product, limit=6) {
+  const features = [];
+  const seenKeys = new Set();
+  const seenValues = new Set();
+  const normalize = value => cleanText(value, 200).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const excludedKey = /(^|\b)(sku|stock|price|cost|brand|category|mpn|part\s*(number|no)|barcode|gtin|condition|certifications?|dimensions?|weight|country\s+of\s+origin|model(\s+number)?)(\b|$)/i;
+  const priority = key => {
+    const value = normalize(key);
+    if (/warranty|guarantee/.test(value)) return 100;
+    if (/charging|power|output|watt|voltage/.test(value)) return 95;
+    if (/battery|capacity|runtime|playtime/.test(value)) return 92;
+    if (/compatib|support/.test(value)) return 90;
+    if (/connect|bluetooth|wifi|wireless/.test(value)) return 88;
+    if (/technology|standard|protocol/.test(value)) return 86;
+    if (/protection|waterproof|resistance|durability|safety/.test(value)) return 84;
+    if (/speed|performance|resolution|pressure|range/.test(value)) return 82;
+    if (/material|display|port|interface/.test(value)) return 78;
+    return 50;
+  };
+  const add = (key, value) => {
+    const cleanKey = cleanText(key, 80);
+    const cleanValue = cleanText(value, 180);
+    if (!cleanKey || !cleanValue || excludedKey.test(cleanKey)) return;
+    const keyFingerprint = normalize(cleanKey)
+      .replace(/\b(product|available|supported|support|feature|details?|specifications?|option)\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const valueFingerprint = normalize(cleanValue).replace(/\s+/g, '');
+    if (!keyFingerprint || !valueFingerprint || seenKeys.has(keyFingerprint) || seenValues.has(valueFingerprint) || features.length >= limit) return;
+    seenKeys.add(keyFingerprint);
+    seenValues.add(valueFingerprint);
+    features.push({ key: cleanKey, value: cleanValue });
+  };
+
+  (product.specifications || [])
+    .filter(spec => spec.verified === true)
+    .sort((a, b) => priority(b.key) - priority(a.key))
+    .forEach(spec => add(spec.key, spec.value));
+
+  (product.variants || []).forEach(variant => {
+    const values = [...new Set((variant.values || [])
+      .filter(value => value.isAvailable !== false)
+      .map(value => cleanText(value.label || value.value, 60))
+      .filter(Boolean))];
+    if (!values.length) return;
+    const visible = values.slice(0, 4).join(', ');
+    add(variant.name || 'Options', values.length > 4 ? `${visible} +${values.length - 4} more` : visible);
+  });
+
+  return features.slice(0, limit);
+}
+
+function decodeLogoDataUrl(dataUrl) {
+  if (!dataUrl) return null;
+  const match = String(dataUrl).match(/^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/=]+)$/i);
+  if (!match) throw new Error('Logo must be a PNG, JPG, or WEBP image');
+  const buffer = Buffer.from(match[2], 'base64');
+  if (!buffer.length || buffer.length > 2 * 1024 * 1024) {
+    throw new Error('Logo image is empty or larger than 2MB');
+  }
+  return buffer;
+}
+
+async function getPublicStoreContact() {
+  const rows = await Settings.find({ key: { $in: ['seo_config', 'whatsappNumber', 'storeName'] } }).lean();
+  const values = Object.fromEntries(rows.map(row => [row.key, row.value]));
+  const candidates = [process.env.PUBLIC_STORE_URL, values.seo_config?.siteUrl, process.env.FRONTEND_URL, 'https://shopzen.lk'];
+  const siteUrl = String(candidates.find(url => /^https:\/\//i.test(String(url || '')) && !/localhost|127\.0\.0\.1/i.test(String(url))) || 'https://shopzen.lk').replace(/\/$/, '');
+  const whatsappNumber = String(values.whatsappNumber || process.env.WHATSAPP_NUMBER || '94775474001').replace(/[^0-9]/g, '').replace(/^0/, '94');
+  return { siteUrl, whatsappNumber, storeName: cleanText(values.storeName || 'ShopZen', 80) };
+}
+
+function localPhone(number) {
+  const digits = String(number || '').replace(/\D/g, '');
+  const local = digits.startsWith('94') && digits.length === 11 ? `0${digits.slice(2)}` : digits;
+  return local.length === 10 ? `${local.slice(0, 3)} ${local.slice(3, 6)} ${local.slice(6)}` : local;
+}
+
+function missingOfferFactsFromCaption(caption, pricing, voucher) {
+  const text = String(caption || '');
+  const compact = text.replace(/,/g, '').toUpperCase();
+  const hasMoney = value => compact.includes(formatLkr(value).replace(/,/g, '').toUpperCase());
+  const missing = [];
+
+  if (pricing.isProductSale) {
+    if (!hasMoney(pricing.sellingPrice)) missing.push(`sale price Rs. ${formatLkr(pricing.sellingPrice)}`);
+    if (!hasMoney(pricing.regularPrice)) missing.push(`regular price Rs. ${formatLkr(pricing.regularPrice)}`);
+  } else if (!hasMoney(pricing.sellingPrice)) {
+    missing.push(`price Rs. ${formatLkr(pricing.sellingPrice)}`);
+  }
+
+  if (voucher) {
+    if (!compact.includes(voucher.code.toUpperCase())) missing.push(`voucher code ${voucher.code}`);
+    if (voucher.type === 'percentage' && !compact.includes(`${voucher.value}%`)) missing.push(`${voucher.value}% voucher benefit`);
+    if (voucher.type === 'fixed' && !hasMoney(voucher.value)) missing.push(`voucher benefit Rs. ${formatLkr(voucher.value)}`);
+    if (voucher.priceAfterVoucher != null && !hasMoney(voucher.priceAfterVoucher)) missing.push(`after-voucher price Rs. ${formatLkr(voucher.priceAfterVoucher)}`);
+    if (voucher.minOrderAmount > 0 && (!/MINIMUM\s+ELIGIBLE\s+ORDER/i.test(text) || !hasMoney(voucher.minOrderAmount))) {
+      missing.push(`minimum eligible order Rs. ${formatLkr(voucher.minOrderAmount)}`);
+    }
+    if (voucher.maxDiscount > 0 && voucher.type === 'percentage'
+      && (!/MAXIMUM\s+VOUCHER\s+DISCOUNT/i.test(text) || !hasMoney(voucher.maxDiscount))) {
+      missing.push(`maximum voucher discount Rs. ${formatLkr(voucher.maxDiscount)}`);
+    }
+    if (voucher.userLimit > 0 && !/USAGE\s+LIMIT/i.test(text)) missing.push('voucher usage limit');
+  }
+  return missing;
+}
 
 /* ══════════════════════════════════════════════════════════════════════════
    GET /api/ai-post-creator/products
@@ -98,7 +308,7 @@ router.get('/products', async (req, res) => {
     }
     const total = await Product.countDocuments(filter);
     const products = await Product.find(filter)
-      .select('name price salePrice thumbnail images brand subCategory category slug isOnSale')
+      .select('name price salePrice thumbnail images brand sku mpn subCategory category slug isOnSale specifications variants')
       .populate('category', 'name')
       .sort({ createdAt: -1 })
       .skip((Number(page) - 1) * Number(limit))
@@ -106,19 +316,24 @@ router.get('/products', async (req, res) => {
       .lean();
 
     res.json({
-      products: products.map(p => ({
-        _id:        p._id,
-        name:       p.name,
-        price:      p.price,
-        salePrice:  p.salePrice || null,
-        discount:   p.salePrice && p.price ? Math.round(((p.price - p.salePrice) / p.price) * 100) : 0,
-        thumbnail:  p.thumbnail || p.images?.[0] || '',
-        images:     p.images || [],
-        brand:      p.brand || '',
-        category:   p.category?.name || p.subCategory || '',
-        slug:       p.slug,
-        isOnSale:   !!p.isOnSale,
-      })),
+      products: products.map(p => {
+        const pricing = getAuthoritativeProductPricing(p);
+        return {
+          _id:        p._id,
+          name:       p.name,
+          price:      pricing.regularPrice,
+          salePrice:  pricing.isProductSale ? pricing.sellingPrice : null,
+          discount:   pricing.productSalePercent,
+          thumbnail:  p.thumbnail || p.images?.[0] || '',
+          images:     p.images || [],
+          brand:      p.brand || '',
+          sku:        p.sku || '',
+          category:   p.category?.name || p.subCategory || '',
+          slug:       p.slug,
+          isOnSale:   pricing.isProductSale,
+          marketingFeatures: getConfiguredMarketingFeatures(p).map(feature => `${feature.key}: ${feature.value}`),
+        };
+      }),
       total,
       pages: Math.ceil(total / Number(limit)),
     });
@@ -476,11 +691,11 @@ const {
    Accepts: { imageUrl } — relative (/uploads/...) or absolute Cloudinary URL.
    Returns: { dataUrl } — PNG with transparent background as base64 data URL.
 
-   Algorithm: corner-colour flood-fill masking
-     1. Sample the 4 corner pixels → determine background colour.
-     2. Walk every pixel; those within TOLERANCE of the bg colour get their
-        alpha reduced (smooth fade at edge of tolerance = anti-alias).
-     3. Re-encode as PNG with alpha.
+   Algorithm: border-colour flood-fill masking
+     1. Sample all border pixels to estimate the background colour.
+     2. Remove only similar pixels connected to the image border.
+     3. Protect the main subject's enclosed light/white surfaces.
+     4. Keep the main opaque component and encode a transparent PNG.
 ══════════════════════════════════════════════════════════════════════════ */
 router.post('/remove-background', async (req, res) => {
   try {
@@ -643,6 +858,94 @@ router.post('/remove-background', async (req, res) => {
       tryEnqueue(x, y - 1); tryEnqueue(x, y + 1);
     }
 
+    // White products photographed on white backgrounds need one extra guard:
+    // a colour-only flood can leak through a tiny anti-aliased opening and
+    // erase a white panel inside the subject. Restore background-coloured
+    // pixels that are enclosed by foreground on both axes. This preserves the
+    // white body of phones, chargers and appliances while edge-connected
+    // studio background remains removable.
+    // Identify the largest non-background component first, so unrelated text
+    // or offer badges cannot create a protected rectangle across the image.
+    const subjectLabels = new Int32Array(width * height).fill(-1);
+    let subjectLabel = 0;
+    let largestSubjectLabel = -2;
+    let largestSubjectSize = 0;
+    for (let start = 0; start < width * height; start++) {
+      if (visited[start] || subjectLabels[start] !== -1) continue;
+      const componentQueue = [start];
+      subjectLabels[start] = subjectLabel;
+      let componentIndex = 0;
+      while (componentIndex < componentQueue.length) {
+        const idx = componentQueue[componentIndex++];
+        const x = idx % width;
+        const y = (idx / width) | 0;
+        const neighbours = [x - 1, y, x + 1, y, x, y - 1, x, y + 1];
+        for (let n = 0; n < neighbours.length; n += 2) {
+          const nx = neighbours[n], ny = neighbours[n + 1];
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+          const next = ny * width + nx;
+          if (visited[next] || subjectLabels[next] !== -1) continue;
+          subjectLabels[next] = subjectLabel;
+          componentQueue.push(next);
+        }
+      }
+      if (componentQueue.length > largestSubjectSize) {
+        largestSubjectSize = componentQueue.length;
+        largestSubjectLabel = subjectLabel;
+      }
+      subjectLabel++;
+    }
+
+    const rowLeft = new Int32Array(height).fill(width);
+    const rowRight = new Int32Array(height).fill(-1);
+    const colTop = new Int32Array(width).fill(height);
+    const colBottom = new Int32Array(width).fill(-1);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = y * width + x;
+        if (subjectLabels[idx] !== largestSubjectLabel) continue;
+        if (x < rowLeft[y]) rowLeft[y] = x;
+        if (x > rowRight[y]) rowRight[y] = x;
+        if (y < colTop[x]) colTop[x] = y;
+        if (y > colBottom[x]) colBottom[x] = y;
+      }
+    }
+
+    // Bridge only small breaks in the subject outline (camera notches,
+    // handles, anti-aliased seams). This prevents a narrow opening from
+    // invalidating an otherwise enclosed white surface without allowing
+    // distant badges or text to influence the mask.
+    const bridgeRadius = Math.max(8, Math.min(18, Math.round(Math.min(width, height) / 55)));
+    const protectedRowLeft = new Int32Array(rowLeft);
+    const protectedRowRight = new Int32Array(rowRight);
+    const protectedColTop = new Int32Array(colTop);
+    const protectedColBottom = new Int32Array(colBottom);
+    for (let y = 0; y < height; y++) {
+      for (let offset = -bridgeRadius; offset <= bridgeRadius; offset++) {
+        const sourceY = y + offset;
+        if (sourceY < 0 || sourceY >= height) continue;
+        protectedRowLeft[y] = Math.min(protectedRowLeft[y], rowLeft[sourceY]);
+        protectedRowRight[y] = Math.max(protectedRowRight[y], rowRight[sourceY]);
+      }
+    }
+    for (let x = 0; x < width; x++) {
+      for (let offset = -bridgeRadius; offset <= bridgeRadius; offset++) {
+        const sourceX = x + offset;
+        if (sourceX < 0 || sourceX >= width) continue;
+        protectedColTop[x] = Math.min(protectedColTop[x], colTop[sourceX]);
+        protectedColBottom[x] = Math.max(protectedColBottom[x], colBottom[sourceX]);
+      }
+    }
+    for (let y = 1; y < height - 1; y++) {
+      if (protectedRowRight[y] - protectedRowLeft[y] < 4) continue;
+      for (let x = protectedRowLeft[y] + 1; x < protectedRowRight[y]; x++) {
+        const idx = y * width + x;
+        if (!visited[idx]) continue;
+        if (protectedColBottom[x] - protectedColTop[x] < 4) continue;
+        if (y > protectedColTop[x] && y < protectedColBottom[x]) visited[idx] = 0;
+      }
+    }
+
     // ── Step 3: apply transparency to flood-filled (background) pixels ─────
     // Smooth alpha fade at the colour-distance boundary = anti-aliased edges.
     for (let i = 0; i < width * height; i++) {
@@ -716,6 +1019,7 @@ router.post('/remove-background', async (req, res) => {
 
     // ── Step 5: encode and return ──────────────────────────────────────────
     const resultBuf = await sharp(out, { raw: { width, height, channels: 4 } })
+      .trim({ background: { r: 0, g: 0, b: 0, alpha: 0 }, threshold: 8 })
       .png({ compressionLevel: 6 })
       .toBuffer();
 
@@ -747,12 +1051,121 @@ router.get('/templates/:id/thumbnail', (req, res) => {
   }
 });
 
+router.get('/product-offers/:productId', async (req, res) => {
+  try {
+    const product = await Product.findOne({ _id: req.params.productId, isActive: true })
+      .populate('category', 'name')
+      .lean();
+    if (!product) return res.status(404).json({ message: 'Product not found or inactive' });
+
+    const pricing = getAuthoritativeProductPricing(product);
+    const vouchers = await getAdvertisableProductVouchers(product);
+    res.json({ pricing, vouchers, recommendedVoucherCode: vouchers[0]?.code || '' });
+  } catch (err) {
+    console.error('[AI Post Creator /product-offers]', err.message);
+    res.status(500).json({ message: 'Product offers could not be loaded: ' + err.message });
+  }
+});
+
+// Deterministic product-aware copy for Template Mode. Only exact product
+// fields, specifications marked Verified for marketing, and configured
+// available variants are included, so captions cannot invent details.
+router.post('/generate-template-copy', async (req, res) => {
+  try {
+    const { productId, ctaType='shop_now', voucherCode='auto' } = req.body || {};
+    if (!productId) return res.status(400).json({ message: 'Select a product first' });
+    if (!['none', 'shop_now', 'whatsapp'].includes(ctaType)) return res.status(400).json({ message: 'Choose a valid action button' });
+
+    const product = await Product.findOne({ _id: productId, isActive: true }).populate('category', 'name').lean();
+    if (!product) return res.status(404).json({ message: 'Product not found or inactive' });
+
+    const contact = await getPublicStoreContact();
+    const productUrl = `${contact.siteUrl}/product/${product.slug}`;
+    const whatsappUrl = `https://wa.me/${contact.whatsappNumber}?text=${encodeURIComponent(`Hi ${contact.storeName}, I am interested in ${product.name}. ${productUrl}`)}`;
+    const pricing = getAuthoritativeProductPricing(product);
+    const requestedVoucher = cleanText(voucherCode, 80).toUpperCase();
+    const availableVouchers = requestedVoucher === 'NONE'
+      ? await getAdvertisableProductVouchers(product)
+      : await getAdvertisableProductVouchers(product, requestedVoucher === 'AUTO' ? '' : requestedVoucher);
+    if (requestedVoucher && !['AUTO', 'NONE'].includes(requestedVoucher) && !availableVouchers.length) {
+      return res.status(400).json({ message: `Voucher ${requestedVoucher} is no longer valid for this product.` });
+    }
+    const selectedVoucher = requestedVoucher === 'NONE' ? null : availableVouchers[0] || null;
+    const verifiedSpecs = getConfiguredMarketingFeatures(product);
+    const category = cleanText(product.category?.name || product.subCategory, 80);
+    // Keep the small creative subtitle distinct from the feature bullets.
+    // Repeating the first specification here made otherwise polished layouts
+    // look like duplicated catalog data.
+    const shortDescription = category
+      ? `Explore ${category} at ${contact.storeName}`.slice(0, 140)
+      : '';
+    const tags = [...new Set([
+      hashtag(product.brand), hashtag(category), hashtag(product.name.split(/\s+/).slice(0, 2).join(' ')),
+      'ShopZenLK', 'SriLanka', 'OnlineShopping',
+    ].filter(Boolean))].slice(0, 6);
+
+    const lines = [];
+    if (selectedVoucher) lines.push(`🎉🔥 ${selectedVoucher.label} WITH VOUCHER! 🔥🎉`, '');
+    else if (pricing.isProductSale) lines.push(`🎉🔥 ${pricing.productSalePercent}% OFF SALE! 🔥🎉`, '');
+    lines.push(`⚡ ${cleanText(product.name, 220)}`);
+    if (selectedVoucher?.priceAfterVoucher != null) {
+      lines.push(`💥 Price After Voucher: Rs. ${formatLkr(selectedVoucher.priceAfterVoucher)}`);
+      if (pricing.isProductSale) lines.push(`🏷️ Current Sale Price: Rs. ${formatLkr(pricing.sellingPrice)}`);
+      else lines.push(`🏷️ Current Price: Rs. ${formatLkr(pricing.sellingPrice)}`);
+      if (pricing.isProductSale) lines.push(`Regular Price: Rs. ${formatLkr(pricing.regularPrice)}`);
+    } else if (pricing.isProductSale) {
+      lines.push(`💥 Now Only: Rs. ${formatLkr(pricing.sellingPrice)}`, `Regular Price: Rs. ${formatLkr(pricing.regularPrice)}`);
+    } else {
+      lines.push(`💰 Price: Rs. ${formatLkr(pricing.sellingPrice)}`);
+    }
+    if (product.brand) lines.push('', `🏷️ Brand: ${cleanText(product.brand, 80)}`);
+    if (verifiedSpecs.length) {
+      lines.push('', '✅ Verified Product Details:');
+      verifiedSpecs.forEach(spec => lines.push(`✅ ${spec.key}: ${spec.value}`));
+    }
+    if (selectedVoucher) {
+      lines.push('', '🎟️ Use Voucher Code:', selectedVoucher.code, `🎁 Voucher Benefit: ${selectedVoucher.label}`);
+      if (selectedVoucher.minOrderAmount > 0) lines.push(`🧾 Minimum Eligible Order: Rs. ${formatLkr(selectedVoucher.minOrderAmount)}`);
+      if (selectedVoucher.maxDiscount > 0 && selectedVoucher.type === 'percentage') lines.push(`ℹ️ Maximum Voucher Discount: Rs. ${formatLkr(selectedVoucher.maxDiscount)}`);
+      if (selectedVoucher.userLimit > 0) lines.push(`👤 Usage Limit: ${selectedVoucher.userLimit} time${selectedVoucher.userLimit === 1 ? '' : 's'} per customer`);
+      if (selectedVoucher.requiresMultipleItems) lines.push(`ℹ️ This voucher requires an eligible order of at least Rs. ${formatLkr(selectedVoucher.minOrderAmount)}; no one-item after-voucher price is claimed.`);
+    }
+    lines.push('', ctaType === 'whatsapp' ? '📲 Order via WhatsApp' : '🛒 Shop Now', ctaType === 'whatsapp' ? whatsappUrl : productUrl);
+    if (ctaType !== 'whatsapp') lines.push('', '📲 WhatsApp Orders', whatsappUrl);
+    lines.push(`☎️ ${localPhone(contact.whatsappNumber)}`, '', '🚚 Islandwide Delivery', '🔒 Secure Checkout', '', tags.map(tag => `#${tag}`).join(' '));
+
+    res.json({
+      description: shortDescription,
+      caption: lines.join('\n'),
+      features: verifiedSpecs.map(spec => `${spec.key}: ${spec.value}`).slice(0, 6),
+      hashtags: tags,
+      productUrl,
+      whatsappUrl,
+      pricing,
+      availableVouchers,
+      selectedVoucher,
+      offerSnapshot: {
+        regularPrice: pricing.regularPrice,
+        sellingPrice: pricing.sellingPrice,
+        productSalePercent: pricing.productSalePercent,
+        voucherCode: selectedVoucher?.code || '',
+        voucherDiscountAmount: selectedVoucher?.discountAmount || 0,
+      },
+    });
+  } catch (err) {
+    console.error('[AI Post Creator /generate-template-copy]', err.message);
+    res.status(500).json({ message: 'Product description could not be generated: ' + err.message });
+  }
+});
+
 router.post('/generate-template', async (req, res) => {
   try {
     const {
       templateId,
-      productImageDataUrl, // background-removed cutout, produced client-side by @imgly/background-removal
+      productImageDataUrl, // background-removed PNG cutout from /remove-background
       name, price, originalPrice, discount, cta, description,
+      badge, brand, productBrand, category, whatsapp, website, features,
+      logoImageDataUrl, logoText, tagline, layout,
     } = req.body || {};
 
     if (!templateId) {
@@ -772,15 +1185,30 @@ router.post('/generate-template', async (req, res) => {
     if (productImageBuffer.length > 10 * 1024 * 1024) {
       return res.status(400).json({ message: 'Product image is too large (max 10MB)' });
     }
+    if (layout && JSON.stringify(layout).length > 200000) {
+      return res.status(400).json({ message: 'Customized template layout is too large' });
+    }
 
+    const logoImageBuffer = decodeLogoDataUrl(logoImageDataUrl);
     const pngBuffer = await renderTemplateMode(templateId, {
       productImageBuffer,
+      logoImageBuffer,
+      layout,
+      logoText: logoText ? String(logoText).trim().slice(0, 30) : '',
+      tagline: tagline ? String(tagline).trim().slice(0, 50) : '',
       name: String(name).trim().slice(0, 120),
       price: Number(price) || 0,
       originalPrice: Number(originalPrice) || 0,
       discount: Number(discount) || 0,
       cta: cta ? String(cta).trim().slice(0, 30) : 'Shop Now',
       description: description ? String(description).trim().slice(0, 140) : '',
+      badge: badge ? String(badge).trim().slice(0, 30) : '',
+      brand: brand ? String(brand).trim().slice(0, 60) : '',
+      productBrand: productBrand ? String(productBrand).trim().slice(0, 60) : '',
+      category: category ? String(category).trim().slice(0, 80) : '',
+      whatsapp: whatsapp ? String(whatsapp).trim().slice(0, 30) : '',
+      website: website ? String(website).trim().slice(0, 60) : '',
+      features: Array.isArray(features) ? features.map(value => String(value).trim().slice(0, 80)).filter(Boolean).slice(0, 6) : [],
     });
 
     const dataUrl = `data:image/png;base64,${pngBuffer.toString('base64')}`;
@@ -839,24 +1267,17 @@ const PUBLISHERS = {
   telegram:  require('../services/publishers/telegram'),
 };
 
-router.post('/publish', async (req, res) => {
-  const { platform, imageUrl, caption, productUrl, productName } = req.body || {};
+async function publishCreativeToPlatform({ platform, imageUrl, caption, productUrl, productName, productId, ctaType, ctaUrl, adminId }) {
   const t0 = Date.now();
-
-  if (!SUPPORTED_PLATFORMS.includes(platform)) {
-    return res.status(400).json({ message: `Unsupported platform: ${platform}` });
-  }
-  if (!imageUrl) {
-    return res.status(400).json({ message: 'imageUrl is required — generate and upload the creative first' });
-  }
-
   const base = {
     trigger:     'manual',
-    triggeredBy: `admin:${req.user?._id || req.user?.id || 'unknown'}`,
+    triggeredBy: `admin:${adminId || 'unknown'}`,
     platform,
     entityType:  'custom',
-    entityId:    null,
+    entityId:    productId || null,
     entityName:  productName || 'AI Post Creator creative',
+    ctaType,
+    ctaUrl,
     attemptNumber: 1,
     isRetry: false,
   };
@@ -873,6 +1294,8 @@ router.post('/publish', async (req, res) => {
       imageUrl,
       imageUrls:  [imageUrl],
       productUrl: productUrl || '',
+      ctaType,
+      ctaUrl,
     };
 
     const result = await PUBLISHERS[platform].publish(creds, payload);
@@ -886,7 +1309,7 @@ router.post('/publish', async (req, res) => {
       durationMs:     Date.now() - t0,
     });
 
-    res.json({ success: true, platformPostId: result.platformPostId || '', logId: log._id });
+    return { platform, success: true, platformPostId: result.platformPostId || '', logId: log._id };
   } catch (err) {
     console.error(`[AI Post Creator /publish] ${platform} error:`, err.message);
     await PublishLog.create({
@@ -898,35 +1321,101 @@ router.post('/publish', async (req, res) => {
       errorCode:    'AI_POST_CREATOR_ERROR',
       durationMs:   Date.now() - t0,
     });
+    return { platform, success: false, message: err.message };
+  }
+}
+
+router.post('/publish', async (req, res) => {
+  const { platform, platforms, imageUrl, caption, productUrl: suppliedProductUrl, productName, productId } = req.body || {};
+  const requested = [...new Set((Array.isArray(platforms) ? platforms : [platform]).filter(Boolean))];
+  const ctaType = String(req.body?.ctaType || 'none').toLowerCase();
+  const voucherCode = cleanText(req.body?.voucherCode, 80).toUpperCase();
+  const offerSnapshot = req.body?.offerSnapshot && typeof req.body.offerSnapshot === 'object'
+    ? req.body.offerSnapshot
+    : null;
+
+  if (!requested.length || requested.some(value => !SUPPORTED_PLATFORMS.includes(value))) {
+    return res.status(400).json({ message: 'Select one or more supported platforms' });
+  }
+  if (!['none', 'shop_now', 'whatsapp'].includes(ctaType)) {
+    return res.status(400).json({ message: 'Choose a valid Shop Now or WhatsApp action' });
+  }
+  if (!imageUrl) {
+    return res.status(400).json({ message: 'imageUrl is required — generate and upload the creative first' });
+  }
+
+  try {
+    const contact = await getPublicStoreContact();
+    const product = productId ? await Product.findOne({ _id: productId, isActive: true })
+      .select('name slug price salePrice costPrice category subCategory brand thumbnail')
+      .lean() : null;
+    if (productId && !product) return res.status(404).json({ message: 'Selected product was not found or is inactive' });
+    let currentPricing = null;
+    let currentVoucher = null;
+    if (product && offerSnapshot) {
+      currentPricing = getAuthoritativeProductPricing(product);
+      const samePrice = Math.abs(Number(offerSnapshot.regularPrice) - currentPricing.regularPrice) < 0.01
+        && Math.abs(Number(offerSnapshot.sellingPrice) - currentPricing.sellingPrice) < 0.01;
+      if (!samePrice) {
+        return res.status(409).json({ message: 'The product price changed after this description was generated. Generate the Social Media Description again before publishing.' });
+      }
+      if (voucherCode) {
+        const currentVouchers = await getAdvertisableProductVouchers(product, voucherCode);
+        currentVoucher = currentVouchers[0];
+        if (!currentVoucher) {
+          return res.status(409).json({ message: `Voucher ${voucherCode} is no longer valid for this product. Generate the Social Media Description again.` });
+        }
+        if (String(offerSnapshot.voucherCode || '').toUpperCase() !== currentVoucher.code
+          || Math.abs(Number(offerSnapshot.voucherDiscountAmount || 0) - Number(currentVoucher.discountAmount || 0)) >= 0.01) {
+          return res.status(409).json({ message: `Voucher ${voucherCode} changed after this description was generated. Generate it again before publishing.` });
+        }
+        if (!String(caption || '').toUpperCase().includes(currentVoucher.code)) {
+          return res.status(400).json({ message: `The Social Media Description must include voucher code ${currentVoucher.code}.` });
+        }
+      }
+      const missingOfferFacts = missingOfferFactsFromCaption(caption, currentPricing, currentVoucher);
+      if (missingOfferFacts.length) {
+        return res.status(400).json({
+          message: `The Social Media Description is missing verified offer details: ${missingOfferFacts.join(', ')}. Generate it again before publishing.`,
+        });
+      }
+    }
+    const productUrl = product?.slug ? `${contact.siteUrl}/product/${product.slug}` : String(suppliedProductUrl || '');
+    if (ctaType === 'shop_now' && !/^https:\/\//i.test(productUrl)) return res.status(400).json({ message: 'Shop Now requires a public product URL' });
+    const whatsappUrl = `https://wa.me/${contact.whatsappNumber}?text=${encodeURIComponent(`Hi ${contact.storeName}, I am interested in ${product?.name || productName || 'this product'}. ${productUrl}`)}`;
+    const ctaUrl = ctaType === 'shop_now' ? productUrl : ctaType === 'whatsapp' ? whatsappUrl : '';
+    let finalCaption = String(caption || '').trim().slice(0, 5000);
+    if (productUrl && !finalCaption.includes(productUrl)) finalCaption += `${finalCaption ? '\n\n' : ''}🛒 ${productUrl}`;
+    if (ctaType === 'whatsapp' && !finalCaption.includes('wa.me/')) finalCaption += `${finalCaption ? '\n\n' : ''}📲 ${whatsappUrl}`;
+
+    const args = { imageUrl, caption: finalCaption, productUrl, productName: product?.name || productName, productId: product?._id || null, ctaType, ctaUrl, adminId: req.user?._id || req.user?.id };
+    const results = await Promise.all(requested.map(selectedPlatform =>
+      publishCreativeToPlatform({ ...args, platform: selectedPlatform })
+    ));
+    const succeeded = results.filter(result => result.success).length;
+    const failed = results.length - succeeded;
+    if (requested.length === 1 && failed) return res.status(500).json({ success: false, message: results[0].message, results, succeeded, failed });
+    res.json({ success: failed === 0, results, succeeded, failed });
+  } catch (err) {
+    console.error('[AI Post Creator /publish]', err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
 
 /* ══════════════════════════════════════════════════════════════════════════
-   SAVED PRESETS — localStorage-synced on the client, but also stored
-   server-side (in memory / optionally persisted) so presets survive
-   browser clears and work across devices for the same admin.
-   Uses a simple in-memory Map per admin user (keyed by req.user._id).
-   Production: swap the Map for a MongoDB collection or Settings subdoc.
+   SAVED PRESETS — localStorage-synced on the client and persistently stored
+   in MongoDB per admin, so customized layouts survive browser clears,
+   deployments and device changes.
 ══════════════════════════════════════════════════════════════════════════ */
-const _presetsStore = new Map(); // userId → [{ id, name, data }]
-
-function getPresetsForUser(userId) {
-  return _presetsStore.get(String(userId)) || [];
-}
-function setPresetsForUser(userId, list) {
-  _presetsStore.set(String(userId), list);
-}
-
 /**
  * GET /api/ai-post-creator/presets
  * Returns all saved presets for the current admin.
  */
-router.get('/presets', (req, res) => {
+router.get('/presets', async (req, res) => {
   try {
     const userId  = req.user?._id || req.user?.id || 'default';
-    const presets = getPresetsForUser(userId);
+    const presets = await AIPostPreset.find({ userId: String(userId) }).sort({ updatedAt: -1 }).limit(30).lean();
     res.json({ presets });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -938,20 +1427,22 @@ router.get('/presets', (req, res) => {
  * Body: { name: string, data: object }
  * Saves a new named preset. Returns the full updated list.
  */
-router.post('/presets', (req, res) => {
+router.post('/presets', async (req, res) => {
   try {
     const userId  = req.user?._id || req.user?.id || 'default';
     const { name, data } = req.body || {};
     if (!name || typeof name !== 'string') {
       return res.status(400).json({ message: 'Preset name is required' });
     }
-    const newPreset = { id: Date.now(), name: String(name).trim().slice(0, 60), data: data || {} };
-    const existing  = getPresetsForUser(userId);
-    // Replace if same name exists
-    const filtered  = existing.filter(p => p.name !== newPreset.name);
-    const updated   = [newPreset, ...filtered].slice(0, 30); // max 30 presets
-    setPresetsForUser(userId, updated);
-    res.json({ preset: newPreset, presets: updated });
+    const cleanName = String(name).trim().slice(0, 60);
+    if (JSON.stringify(data || {}).length > 3 * 1024 * 1024) return res.status(400).json({ message: 'Preset data is too large' });
+    const preset = await AIPostPreset.findOneAndUpdate(
+      { userId: String(userId), name: cleanName },
+      { $set: { data: data || {}, id: Date.now() } },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    ).lean();
+    const presets = await AIPostPreset.find({ userId: String(userId) }).sort({ updatedAt: -1 }).limit(30).lean();
+    res.json({ preset, presets });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -961,14 +1452,13 @@ router.post('/presets', (req, res) => {
  * DELETE /api/ai-post-creator/presets/:id
  * Deletes a preset by its numeric id.
  */
-router.delete('/presets/:id', (req, res) => {
+router.delete('/presets/:id', async (req, res) => {
   try {
     const userId  = req.user?._id || req.user?.id || 'default';
-    const id      = Number(req.params.id);
-    const existing = getPresetsForUser(userId);
-    const updated  = existing.filter(p => p.id !== id);
-    setPresetsForUser(userId, updated);
-    res.json({ deleted: true, presets: updated });
+    const id = Number(req.params.id);
+    await AIPostPreset.deleteOne({ userId: String(userId), id });
+    const presets = await AIPostPreset.find({ userId: String(userId) }).sort({ updatedAt: -1 }).limit(30).lean();
+    res.json({ deleted: true, presets });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

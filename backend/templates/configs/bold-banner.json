@@ -5,22 +5,37 @@
     "background": "bold-banner.png",
     "canvas": { "width": 1080, "height": 1080 },
     "thumbnail": "bold-banner.png",
-  
+    "logo": { "x": 745, "y": 30, "width": 285, "height": 88, "fit": "contain" },
+    "logoMark": { "x": 760, "y": 30, "width": 84, "height": 84, "fit": "contain" },
+
     "productImage": {
-      "x": 240,
-      "y": 240,
-      "width": 700,
-      "height": 700,
+      "x": 180,
+      "y": 205,
+      "width": 820,
+      "height": 720,
       "fit": "contain",
       "shadow": { "enabled": true, "blur": 35, "opacity": 0.3, "offsetY": 25 }
     },
   
     "fields": {
+      "brand": {
+        "x": 790,
+        "y": 130,
+        "width": 240,
+        "maxLines": 1,
+        "fontSize": 22,
+        "fontWeight": 800,
+        "fontFamily": "Arial, sans-serif",
+        "color": "#1a1a2e",
+        "align": "right"
+      },
       "name": {
         "x": 50,
         "y": 50,
         "width": 620,
         "maxLines": 3,
+        "autoFit": true,
+        "minFontSize": 38,
         "fontSize": 58,
         "fontWeight": 900,
         "fontFamily": "Arial, sans-serif",

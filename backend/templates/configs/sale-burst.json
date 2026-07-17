@@ -5,12 +5,14 @@
     "background": "sale-burst.png",
     "canvas": { "width": 1080, "height": 1080 },
     "thumbnail": "sale-burst.png",
-  
+    "logo": { "x": 760, "y": 30, "width": 260, "height": 86, "fit": "contain" },
+    "logoMark": { "x": 780, "y": 30, "width": 82, "height": 82, "fit": "contain" },
+
     "productImage": {
-      "x": 190,
-      "y": 330,
-      "width": 700,
-      "height": 700,
+      "x": 135,
+      "y": 260,
+      "width": 810,
+      "height": 680,
       "fit": "contain",
       "shadow": { "enabled": true, "blur": 40, "opacity": 0.35, "offsetY": 30 }
     },
@@ -19,8 +21,10 @@
       "name": {
         "x": 60,
         "y": 60,
-        "width": 960,
+        "width": 720,
         "maxLines": 2,
+        "autoFit": true,
+        "minFontSize": 42,
         "fontSize": 64,
         "fontWeight": 800,
         "fontFamily": "Arial, sans-serif",
@@ -29,6 +33,17 @@
         "lineHeight": 1.08,
         "letterSpacing": -1,
         "shadow": { "enabled": true, "color": "rgba(0,0,0,0.35)", "blur": 8, "offsetY": 3 }
+      },
+      "brand": {
+        "x": 800,
+        "y": 120,
+        "width": 220,
+        "maxLines": 1,
+        "fontSize": 22,
+        "fontWeight": 800,
+        "fontFamily": "Arial, sans-serif",
+        "color": "#ffe9df",
+        "align": "right"
       },
       "discount": {
         "x": 60,

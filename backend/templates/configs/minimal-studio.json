@@ -5,22 +5,37 @@
     "background": "minimal-studio.png",
     "canvas": { "width": 1080, "height": 1080 },
     "thumbnail": "minimal-studio.png",
-  
+    "logo": { "x": 745, "y": 30, "width": 275, "height": 86, "fit": "contain" },
+    "logoMark": { "x": 760, "y": 30, "width": 82, "height": 82, "fit": "contain" },
+
     "productImage": {
-      "x": 190,
-      "y": 200,
-      "width": 700,
-      "height": 650,
+      "x": 125,
+      "y": 145,
+      "width": 830,
+      "height": 700,
       "fit": "contain",
       "shadow": { "enabled": true, "blur": 40, "opacity": 0.18, "offsetY": 30 }
     },
   
     "fields": {
+      "brand": {
+        "x": 790,
+        "y": 125,
+        "width": 230,
+        "maxLines": 1,
+        "fontSize": 22,
+        "fontWeight": 800,
+        "fontFamily": "Arial, sans-serif",
+        "color": "#555555",
+        "align": "right"
+      },
       "name": {
         "x": 60,
         "y": 870,
         "width": 960,
         "maxLines": 2,
+        "autoFit": true,
+        "minFontSize": 36,
         "fontSize": 52,
         "fontWeight": 800,
         "fontFamily": "Arial, sans-serif",

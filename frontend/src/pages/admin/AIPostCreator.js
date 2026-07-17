@@ -13,7 +13,7 @@
  *     • Website URL — footer right
  *     • WhatsApp number — footer left
  *     • All contact/brand fields editable
- *  3. Save & Load Template presets (stored in localStorage)
+ *  3. Save & Load Template presets (MongoDB with localStorage fallback)
  *     • Save current settings as a named preset
  *     • Load any saved preset
  *     • Delete presets
@@ -793,15 +793,247 @@ function ProductPickerModal({ onClose, onConfirm, initialSelected }) {
   );
 }
 
+const EDITOR_FIELD_LABELS = {
+  badge: 'Offer Badge', brand: 'Store Name', name: 'Product Title', description: 'Subtitle',
+  productBrand: 'Product Brand', category: 'Category',
+  feature1: 'Feature 1', feature2: 'Feature 2', feature3: 'Feature 3', feature4: 'Feature 4',
+  feature5: 'Feature 5', feature6: 'Feature 6', discount: 'Discount', originalPrice: 'Regular Price',
+  price: 'Selling Price', cta: 'Action Button', website: 'Website', whatsapp: 'WhatsApp',
+};
+
+const EDITOR_THEMES = [
+  { name: 'Original', tint: '#000000', opacity: 0, accent: null, text: null },
+  { name: 'Midnight', tint: '#07111f', opacity: .78, accent: '#31e8ff', text: '#ffffff' },
+  { name: 'Emerald', tint: '#063d34', opacity: .68, accent: '#f2cf78', text: '#ffffff' },
+  { name: 'Rose', tint: '#f4c6d4', opacity: .48, accent: '#a92f60', text: '#30151f' },
+  { name: 'Royal', tint: '#151b54', opacity: .68, accent: '#f0c75e', text: '#ffffff' },
+  { name: 'Graphite', tint: '#101216', opacity: .76, accent: '#f1f3f5', text: '#ffffff' },
+];
+
+const cloneLayout = value => value ? JSON.parse(JSON.stringify(value)) : null;
+
+function recommendedTemplateForProduct(product, templates) {
+  const haystack = `${product?.name || ''} ${product?.brand || ''} ${product?.category || ''}`.toLowerCase();
+  const preferred = /beauty|fashion|jewel|watch|perfume/.test(haystack) ? 'champagne-signature-pro'
+    : /car|automotive|tool|inflator|outdoor/.test(haystack) ? 'velocity-conversion-pro'
+    : /home|kitchen|living|appliance/.test(haystack) ? 'editorial-pearl-pro'
+    : /phone|charger|audio|earbud|headphone|computer|gaming|tech|cable|accessor/.test(haystack) ? 'aurora-commerce-pro'
+    : 'midnight-spotlight-pro';
+  return templates.find(template => template.id === preferred)?.id || templates.find(template => template.tier === 'advanced')?.id || templates[0]?.id;
+}
+
+function VisualTemplateEditor({
+  layout, baseLayout, setLayout, onClose, onSave, templateThumbnail,
+  cutoutDataUrl, logoImgSrc, logoText, headline, templateDescription, badgeLabel,
+  features, discountPct, originalPrice, salePrice, cta, website, whatsapp, product,
+}) {
+  const [selectedId, setSelectedId] = useState('productImage');
+  const [zoom, setZoom] = useState(.55);
+  const [snap, setSnap] = useState(true);
+  const [logoIsMark, setLogoIsMark] = useState(false);
+  const layoutRef = useRef(layout);
+  useEffect(() => { layoutRef.current = layout; }, [layout]);
+  useEffect(() => {
+    if (!logoImgSrc) { setLogoIsMark(false); return; }
+    const image = new Image();
+    image.onload = () => setLogoIsMark(image.width / image.height < 1.8);
+    image.src = logoImgSrc;
+  }, [logoImgSrc]);
+
+  if (!layout) return null;
+  const logoLayerKey = logoIsMark && layout.logoMark ? 'logoMark' : 'logo';
+  const snapValue = value => snap ? Math.round(value / 10) * 10 : Math.round(value);
+  const getLayer = (source, id) => id === 'productImage' || id === 'logo' || id === 'logoMark'
+    ? source?.[id]
+    : source?.fields?.[id];
+  const updateLayer = (id, patch) => setLayout(current => {
+    const next = cloneLayout(current);
+    if (id === 'productImage' || id === 'logo' || id === 'logoMark') next[id] = { ...next[id], ...patch };
+    else next.fields[id] = { ...next.fields[id], ...patch };
+    return next;
+  });
+
+  const startTransform = (event, id, mode) => {
+    event.preventDefault(); event.stopPropagation(); setSelectedId(id);
+    const startX = event.clientX, startY = event.clientY;
+    const original = { ...getLayer(layoutRef.current, id) };
+    const aspect = (original.width || 1) / (original.height || 1);
+    const isImage = ['productImage', 'logo', 'logoMark'].includes(id);
+    const move = pointer => {
+      const dx = (pointer.clientX - startX) / zoom;
+      const dy = (pointer.clientY - startY) / zoom;
+      if (mode === 'move') updateLayer(id, { x: snapValue((original.x || 0) + dx), y: snapValue((original.y || 0) + dy) });
+      else if (isImage) {
+        const width = Math.max(40, snapValue((original.width || 100) + dx));
+        updateLayer(id, { width, height: Math.max(40, Math.round(width / aspect)) });
+      } else updateLayer(id, {
+        width: Math.max(40, snapValue((original.width || 150) + dx)),
+        ...(original.height ? { height: Math.max(24, snapValue(original.height + dy)) } : {}),
+      });
+    };
+    const stop = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', stop); };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', stop);
+  };
+
+  const values = {
+    badge: badgeLabel, brand: (!logoImgSrc || logoIsMark) ? logoText : '', name: headline,
+    productBrand: product?.brand || '', category: product?.category || '',
+    description: templateDescription, feature1: features[0], feature2: features[1], feature3: features[2],
+    feature4: features[3], feature5: features[4], feature6: features[5], discount: Number(discountPct) || 0,
+    originalPrice: Number(originalPrice) || 0, price: Number(salePrice) || Number(originalPrice) || 0,
+    cta, website, whatsapp,
+  };
+  const displayText = (key, field) => {
+    const raw = values[key];
+    if (raw === '' || raw === null || raw === undefined) return '';
+    if ((key === 'discount' || key === 'originalPrice') && Number(raw) <= 0) return '';
+    const formatted = ['price', 'originalPrice'].includes(key) ? Number(raw).toLocaleString('en-LK') : raw;
+    let text = `${field.prefix || ''}${formatted}${field.suffix || ''}`;
+    return field.uppercase ? text.toUpperCase() : text;
+  };
+  const fieldEntries = Object.entries(layout.fields || {});
+  const layers = [
+    { id: 'productImage', label: 'Product Image', type: 'image', src: cutoutDataUrl, box: layout.productImage },
+    ...(logoImgSrc ? [{ id: logoLayerKey, label: 'Store Logo', type: 'image', src: logoImgSrc, box: layout[logoLayerKey] }] : []),
+    ...fieldEntries.map(([id, box]) => ({ id, label: EDITOR_FIELD_LABELS[id] || id, type: 'text', text: displayText(id, box), box })),
+  ];
+  const selected = getLayer(layout, selectedId);
+  const selectedIsField = selectedId && !['productImage', 'logo', 'logoMark'].includes(selectedId);
+
+  const applyTheme = theme => setLayout(current => {
+    const next = cloneLayout(current);
+    next.backgroundOverlay = { color: theme.tint, opacity: theme.opacity };
+    if (theme.accent || theme.text) Object.entries(next.fields || {}).forEach(([key, field]) => {
+      if (theme.accent && field.background) field.background = theme.accent;
+      if (theme.text && !field.background && !['description', 'website', 'whatsapp', 'originalPrice'].includes(key)) field.color = theme.text;
+    });
+    return next;
+  });
+
+  const scaleSelected = factor => {
+    if (!selected) return;
+    const width = Math.max(20, Math.round((selected.width || 100) * factor));
+    const patch = { width };
+    if (selected.height) patch.height = Math.max(20, Math.round(selected.height * factor));
+    if (selectedIsField && selected.fontSize) patch.fontSize = Math.max(8, Math.round(selected.fontSize * factor));
+    updateLayer(selectedId, patch);
+  };
+  const baseSelected = getLayer(baseLayout, selectedId);
+  const selectedScale = selected && baseSelected?.width ? Math.round((selected.width / baseSelected.width) * 100) : 100;
+  const setSelectedScale = percent => {
+    if (!selected || !baseSelected) return;
+    const factor = Number(percent) / 100;
+    const patch = { width: Math.max(20, Math.round(baseSelected.width * factor)) };
+    if (baseSelected.height) patch.height = Math.max(20, Math.round(baseSelected.height * factor));
+    if (selectedIsField && baseSelected.fontSize) patch.fontSize = Math.max(8, Math.round(baseSelected.fontSize * factor));
+    updateLayer(selectedId, patch);
+  };
+  const nudgeSelected = (dx, dy) => selected && updateLayer(selectedId, { x: (selected.x || 0) + dx, y: (selected.y || 0) + dy });
+  const centerSelected = axis => {
+    if (!selected) return;
+    updateLayer(selectedId, axis === 'x' ? { x: Math.round((1080 - (selected.width || 0)) / 2) } : { y: Math.round((1080 - (selected.height || 0)) / 2) });
+  };
+  const resetSelected = () => baseSelected && updateLayer(selectedId, cloneLayout(baseSelected));
+  const applyAccent = color => setLayout(current => {
+    const next = cloneLayout(current);
+    Object.values(next.fields || {}).forEach(field => { if (field.background) field.background = color; });
+    return next;
+  });
+
+  return (
+    <div className="fixed inset-0 z-[80] bg-gray-950/90 backdrop-blur-sm p-3 sm:p-5 overflow-auto">
+      <div className="max-w-[1500px] mx-auto bg-gray-100 rounded-2xl overflow-hidden shadow-2xl min-h-[92vh]">
+        <div className="bg-white border-b px-4 py-3 flex items-center gap-3 flex-wrap sticky top-0 z-30">
+          <div className="mr-auto"><p className="font-bold text-gray-900">Visual Template Studio</p><p className="text-xs text-gray-500">Drag any layer, resize from its corner, then save it for future products.</p></div>
+          <label className="text-xs font-semibold text-gray-600 flex items-center gap-2">Canvas zoom
+            <input type="range" min="0.35" max="0.85" step="0.05" value={zoom} onChange={e=>setZoom(Number(e.target.value))}/><span>{Math.round(zoom*100)}%</span>
+          </label>
+          <label className="text-xs font-semibold text-gray-600"><input type="checkbox" checked={snap} onChange={e=>setSnap(e.target.checked)} className="mr-1"/>Snap 10px</label>
+          <button onClick={()=>setLayout(cloneLayout(baseLayout))} className="px-3 py-2 rounded-lg border text-xs font-bold">Reset</button>
+          <button onClick={onSave} className="btn-primary text-xs">💾 Save Template</button>
+          <button onClick={onClose} className="px-3 py-2 rounded-lg bg-gray-900 text-white text-xs font-bold">Done</button>
+        </div>
+
+        <div className="grid xl:grid-cols-[230px_minmax(600px,1fr)_310px] gap-3 p-3">
+          <aside className="bg-white rounded-xl border p-3 xl:max-h-[calc(92vh-90px)] overflow-auto">
+            <p className="form-label mb-2">Layers</p>
+            <div className="space-y-1">
+              {layers.map(layer => <button key={layer.id} onClick={()=>setSelectedId(layer.id)}
+                className={`w-full rounded-lg px-2 py-2 flex items-center gap-2 text-left text-xs ${selectedId===layer.id?'bg-primary/10 text-primary font-bold':'hover:bg-gray-50 text-gray-700'}`}>
+                <span>{layer.type==='image'?'🖼':'T'}</span><span className="flex-1 truncate">{layer.label}</span>
+                <span onClick={e=>{e.stopPropagation();updateLayer(layer.id,{visible:layer.box?.visible===false})}} className="text-sm">{layer.box?.visible===false?'○':'●'}</span>
+              </button>)}
+            </div>
+            <p className="form-label mt-5 mb-2">Modern Themes</p>
+            <div className="grid grid-cols-2 gap-2">
+              {EDITOR_THEMES.map(theme=><button key={theme.name} onClick={()=>applyTheme(theme)} className="rounded-lg border p-2 text-[11px] font-bold text-left" style={{background:theme.opacity?theme.tint:'#fff',color:theme.text||'#374151'}}>{theme.name}</button>)}
+            </div>
+          </aside>
+
+          <main className="bg-gray-900 rounded-xl overflow-auto flex items-start justify-center p-6 min-h-[680px]">
+            <div style={{width:1080*zoom,height:1080*zoom}} className="relative shrink-0">
+              <div className="absolute origin-top-left overflow-hidden bg-white shadow-2xl" style={{width:1080,height:1080,transform:`scale(${zoom})`}} onPointerDown={()=>setSelectedId('')}>
+                <img src={templateThumbnail} alt="Template background" className="absolute inset-0 w-full h-full" draggable={false}/>
+                {layout.backgroundOverlay?.opacity>0&&<div className="absolute inset-0 pointer-events-none" style={{background:layout.backgroundOverlay.color,opacity:layout.backgroundOverlay.opacity}}/>}
+                {layers.filter(layer=>layer.box?.visible!==false).map(layer=>{
+                  const box=layer.box||{}; const active=selectedId===layer.id;
+                  const height=box.height||Math.ceil((box.fontSize||30)*(box.maxLines||1)*1.25+12);
+                  if(layer.type==='text'&&!layer.text)return null;
+                  return <div key={layer.id} onPointerDown={e=>startTransform(e,layer.id,'move')}
+                    className={`absolute select-none cursor-move ${active?'ring-[5px] ring-blue-500 ring-offset-2 ring-offset-transparent':''}`}
+                    style={{left:box.x||0,top:box.y||0,width:box.width||200,height,opacity:box.opacity??1,zIndex:layer.type==='image'?10:20,
+                      ...(layer.type==='text'?{fontFamily:box.fontFamily||'Arial, sans-serif',fontSize:box.fontSize||30,fontWeight:box.fontWeight||400,color:box.color||'#000',textAlign:box.align||'left',letterSpacing:box.letterSpacing||0,lineHeight:box.lineHeight||1.08,background:box.background||'transparent',borderRadius:box.borderRadius||0,display:'flex',alignItems:box.background?'center':'flex-start',justifyContent:box.align==='center'?'center':box.align==='right'?'flex-end':'flex-start',padding:box.background?'0 14px':0,overflow:'hidden',whiteSpace:'normal'}:{})}}>
+                    {layer.type==='image'?<img src={layer.src} alt={layer.label} draggable={false} className="w-full h-full object-contain drop-shadow-2xl"/>:<span>{layer.text}</span>}
+                    {active&&<span onPointerDown={e=>startTransform(e,layer.id,'resize')} className="absolute -right-3 -bottom-3 w-7 h-7 rounded-full bg-blue-500 border-4 border-white cursor-nwse-resize shadow-lg"/>}
+                  </div>;
+                })}
+              </div>
+            </div>
+          </main>
+
+          <aside className="bg-white rounded-xl border p-4 xl:max-h-[calc(92vh-90px)] overflow-auto">
+            <p className="form-label mb-1">Easy Adjust</p>
+            <p className="text-[11px] text-gray-400 mb-3">Select an item, then use these simple controls. Dragging on the canvas also works.</p>
+            {!selected?<p className="text-xs text-gray-400">Select an object from the canvas or Layers list.</p>:<div className="space-y-4">
+              <div className="flex items-center justify-between"><p className="text-sm font-bold text-gray-800">{selectedId==='productImage'?'Product Image':selectedId==='logo'||selectedId==='logoMark'?'Store Logo':EDITOR_FIELD_LABELS[selectedId]||selectedId}</p><label className="text-xs font-semibold">Show <input type="checkbox" checked={selected.visible!==false} onChange={e=>updateLayer(selectedId,{visible:e.target.checked})}/></label></div>
+              <div className="bg-gray-50 rounded-xl p-3">
+                <p className="text-[11px] font-bold text-gray-500 mb-2">MOVE</p>
+                <div className="grid grid-cols-3 gap-1 max-w-[150px] mx-auto"><span/><button onClick={()=>nudgeSelected(0,-10)} className="border rounded-lg py-2">↑</button><span/><button onClick={()=>nudgeSelected(-10,0)} className="border rounded-lg py-2">←</button><button onClick={()=>centerSelected('x')} className="border rounded-lg py-2 text-[10px] font-bold">CENTER</button><button onClick={()=>nudgeSelected(10,0)} className="border rounded-lg py-2">→</button><span/><button onClick={()=>nudgeSelected(0,10)} className="border rounded-lg py-2">↓</button><span/></div>
+                <button onClick={()=>centerSelected('y')} className="w-full mt-2 border rounded-lg py-1.5 text-[10px] font-bold">CENTER VERTICALLY</button>
+              </div>
+              <label className="text-[11px] font-bold text-gray-500 block">SIZE — {selectedScale}%<input className="w-full mt-2" type="range" min="40" max="180" step="5" value={Math.max(40,Math.min(180,selectedScale))} onChange={e=>setSelectedScale(e.target.value)}/></label>
+              <div className="flex gap-2"><button onClick={()=>scaleSelected(.9)} className="flex-1 border rounded-lg py-2 text-xs font-bold">− Smaller</button><button onClick={()=>scaleSelected(1.1)} className="flex-1 border rounded-lg py-2 text-xs font-bold">+ Larger</button></div>
+              {selectedIsField&&<div className="grid grid-cols-2 gap-2"><label className="text-[11px] text-gray-500">Text colour<input type="color" className="w-full h-10 mt-1" value={/^#[0-9a-f]{6}$/i.test(selected.color||'')?selected.color:'#000000'} onChange={e=>updateLayer(selectedId,{color:e.target.value})}/></label>{selected.background&&<label className="text-[11px] text-gray-500">Button colour<input type="color" className="w-full h-10 mt-1" value={selected.background} onChange={e=>updateLayer(selectedId,{background:e.target.value})}/></label>}</div>}
+              <div className="grid grid-cols-2 gap-2"><label className="text-[11px] text-gray-500">All accent colours<input type="color" className="w-full h-10 mt-1" defaultValue="#18bfa0" onChange={e=>applyAccent(e.target.value)}/></label><label className="text-[11px] text-gray-500">Background tint<input type="color" className="w-full h-10 mt-1" value={layout.backgroundOverlay?.color||'#000000'} onChange={e=>setLayout(current=>({...cloneLayout(current),backgroundOverlay:{...current.backgroundOverlay,color:e.target.value}}))}/></label></div>
+              <label className="text-[11px] text-gray-500 block">Tint strength<input className="w-full" type="range" min="0" max="1" step=".05" value={layout.backgroundOverlay?.opacity||0} onChange={e=>setLayout(current=>({...cloneLayout(current),backgroundOverlay:{color:current.backgroundOverlay?.color||'#000000',opacity:Number(e.target.value)}}))}/></label>
+              <div className="flex gap-2"><button onClick={resetSelected} className="flex-1 border rounded-lg py-2 text-xs font-bold">Reset Item</button><button onClick={()=>setLayout(cloneLayout(baseLayout))} className="flex-1 border rounded-lg py-2 text-xs font-bold">Reset All</button></div>
+
+              <details className="border-t pt-3"><summary className="cursor-pointer text-xs font-bold text-gray-700">Advanced controls</summary><div className="space-y-3 mt-3">
+                <div className="grid grid-cols-2 gap-2">{[['x','X'],['y','Y'],['width','Width'],['height','Height']].map(([key,label])=>selected[key]!==undefined&&<label key={key} className="text-[11px] text-gray-500">{label}<input className="form-input mt-1" type="number" value={Math.round(selected[key])} onChange={e=>updateLayer(selectedId,{[key]:Number(e.target.value)})}/></label>)}</div>
+                <label className="text-[11px] text-gray-500 block">Opacity {Math.round((selected.opacity??1)*100)}%<input className="w-full" type="range" min="0" max="1" step=".05" value={selected.opacity??1} onChange={e=>updateLayer(selectedId,{opacity:Number(e.target.value)})}/></label>
+                {selectedIsField&&<><div className="grid grid-cols-2 gap-2"><label className="text-[11px] text-gray-500">Font size<input className="form-input mt-1" type="number" min="8" max="180" value={selected.fontSize||30} onChange={e=>updateLayer(selectedId,{fontSize:Number(e.target.value)})}/></label><label className="text-[11px] text-gray-500">Weight<select className="form-input mt-1" value={selected.fontWeight||400} onChange={e=>updateLayer(selectedId,{fontWeight:Number(e.target.value)})}><option value="400">Regular</option><option value="600">Semi Bold</option><option value="700">Bold</option><option value="900">Black</option></select></label></div><label className="text-[11px] text-gray-500 block">Font<select className="form-input mt-1" value={selected.fontFamily||'Arial, sans-serif'} onChange={e=>updateLayer(selectedId,{fontFamily:e.target.value})}><option>Arial, sans-serif</option><option>Verdana, sans-serif</option><option>Georgia, serif</option><option>Trebuchet MS, sans-serif</option><option>Impact, sans-serif</option></select></label><div className="grid grid-cols-3 gap-1">{['left','center','right'].map(value=><button key={value} onClick={()=>updateLayer(selectedId,{align:value})} className={`border rounded-lg py-2 text-xs capitalize ${selected.align===value?'bg-gray-900 text-white':''}`}>{value}</button>)}</div></>}
+              </div></details>
+            </div>}
+          </aside>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ════════════════════════════════════════════════════════════════════════
    TEMPLATE MODE VIEW
 ════════════════════════════════════════════════════════════════════════ */
 function TemplateModeView({
   product, products, activeIdx, setActiveIdx,
-  templateList, templatesLoading, selectedTemplateId, setSelectedTemplateId,
+  templateList, templatesLoading, selectedTemplateId, setSelectedTemplateId, selectedTemplate,
+  customTemplateLayout, setCustomTemplateLayout,
   headline, setHeadline, cta, setCta,
-  templateDescription, setTemplateDescription,
+  templateDescription, setTemplateDescription, templateCaption, setTemplateCaption,
+  generateTemplateCopy, templateCopyLoading,
   discountPct, setDiscountPct, originalPrice, setOriginalPrice, salePrice, setSalePrice,
+  handleDiscountChange, handleOriginalPriceChange, handleSalePriceChange,
+  availableVouchers, voucherChoice, setVoucherChoice, vouchersLoading, resolvedVoucher, templateCopyStale,
   badgeLabel, setBadgeLabel,
   features, updateFeature,
   whatsapp, setWhatsapp, website, setWebsite,
@@ -810,21 +1042,34 @@ function TemplateModeView({
   paletteId, setPaletteId, customAccent, setCustomAccent, accentColor,
   bgRemoving, cutoutDataUrl, runBackgroundRemoval,
   templateRendering, templateResultUrl, generateTemplateCreative,
+  templatePreviewStale,
   downloadCreative, getCurrentDataUrl,
-  connectedPlatforms, publishPlatform, setPublishPlatform, handlePublish, publishing,
+  connectedPlatforms, publishPlatforms, setPublishPlatforms,
+  publishCtaType, setPublishCtaType, handlePublish, publishing,
   presets, showSaveModal, setShowSaveModal, handleSavePreset, handleLoadPreset, handleDeletePreset,
 }) {
   const logoFileRef = React.useRef(null);
+  const [visualEditorOpen, setVisualEditorOpen] = React.useState(false);
   const handleLogoUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      toast.error('Use a PNG, JPG, or WEBP logo');
+      e.target.value = '';
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('Logo must be smaller than 2MB');
+      e.target.value = '';
+      return;
+    }
     const reader = new FileReader();
     reader.onload = (ev) => setLogoImgSrc(ev.target.result);
     reader.readAsDataURL(file);
   };
   return (
-    <div className="grid lg:grid-cols-[400px_1fr] gap-6">
-      <div className="space-y-4">
+    <div className="grid lg:grid-cols-[440px_minmax(0,1fr)] xl:grid-cols-[500px_minmax(0,1fr)] gap-6 items-start">
+      <div className="space-y-4 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:overscroll-contain lg:pr-2">
 
         {/* Preset bar */}
         <div className="flex gap-2 flex-wrap">
@@ -870,25 +1115,27 @@ function TemplateModeView({
         )}
 
         <div className="bg-white rounded-2xl border border-gray-100 p-4">
-          <p className="form-label mb-3">Choose Template</p>
+          <div className="flex items-center justify-between gap-2 mb-3"><p className="form-label mb-0">Choose Template</p><div className="flex items-center gap-2"><button type="button" onClick={()=>{const id=recommendedTemplateForProduct(product,templateList);if(id)setSelectedTemplateId(id);}} className="text-[11px] font-bold text-primary hover:underline">✨ Auto-pick best design</button><span className="text-xs text-gray-400">{templateList.length} designs</span></div></div>
           {templatesLoading ? (
             <p className="text-sm text-gray-400">Loading templates…</p>
           ) : templateList.length === 0 ? (
             <p className="text-sm text-gray-400">No templates available.</p>
           ) : (
-            <div className="grid grid-cols-3 gap-2">
+            <div className="flex gap-2 overflow-x-auto overscroll-x-contain pb-2 snap-x">
               {templateList.map(t => (
                 <button key={t.id} onClick={() => setSelectedTemplateId(t.id)}
-                  className={`rounded-xl overflow-hidden border-2 transition-all text-left ${selectedTemplateId === t.id ? 'border-primary ring-2 ring-primary/20' : 'border-gray-100 hover:border-gray-200'}`}
+                  className={`w-28 shrink-0 snap-start rounded-xl overflow-hidden border-2 transition-all text-left ${selectedTemplateId === t.id ? 'border-primary ring-2 ring-primary/20' : 'border-gray-100 hover:border-gray-200'}`}
                   title={t.description}>
                   <div className="w-full aspect-square bg-gray-50">
                     <img src={t.thumbnailUrl} alt={t.label} className="w-full h-full object-cover" />
                   </div>
-                  <p className="text-[11px] font-semibold text-gray-700 px-1.5 py-1 truncate">{t.label}</p>
+                  <p className="text-[11px] font-semibold text-gray-700 px-1.5 pt-1 truncate">{t.label}</p>
+                  {t.tier==='advanced'&&<p className="text-[9px] font-black text-primary px-1.5 pb-1 uppercase tracking-wide">Premium Pro</p>}
                 </button>
               ))}
             </div>
           )}
+          <p className="text-[11px] text-gray-400 mt-1">Choose any design to render it automatically. Scroll sideways to see all templates.</p>
         </div>
 
         <div className="bg-white rounded-2xl border border-gray-100 p-4">
@@ -902,7 +1149,7 @@ function TemplateModeView({
               style={{ backgroundImage: 'linear-gradient(45deg,#eee 25%,transparent 25%),linear-gradient(-45deg,#eee 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#eee 75%),linear-gradient(-45deg,transparent 75%,#eee 75%)', backgroundSize: '10px 10px', backgroundPosition:'0 0,0 5px,5px -5px,-5px 0px' }}>
               {cutoutDataUrl ? <img src={cutoutDataUrl} alt="Cutout" className="w-full h-full object-contain" /> : <span className="text-2xl opacity-30">🖼️</span>}
             </div>
-            <button onClick={runBackgroundRemoval} disabled={bgRemoving || !product?.thumbnail}
+            <button onClick={()=>runBackgroundRemoval()} disabled={bgRemoving || !product?.thumbnail}
               className="btn-primary text-sm flex-1 disabled:opacity-50 disabled:cursor-not-allowed">
               {bgRemoving ? 'Removing background…' : cutoutDataUrl ? '↻ Re-run Removal' : '✂️ Remove Background'}
             </button>
@@ -917,23 +1164,17 @@ function TemplateModeView({
               <label className="form-label">Discount %</label>
               <input className="form-input text-center font-bold text-lg" type="number" min="0" max="99"
                 value={discountPct}
-                onChange={e => {
-                  const d = Math.max(0, Math.min(99, parseInt(e.target.value) || 0));
-                  setDiscountPct(d);
-                  if (originalPrice && d > 0) {
-                    setSalePrice(String(Math.round(parseFloat(originalPrice) * (1 - d / 100))));
-                  }
-                }} />
+                onChange={e => handleDiscountChange(e.target.value)} />
             </div>
             <div>
               <label className="form-label">Original Price</label>
               <input className="form-input" type="number" min="0" value={originalPrice}
-                onChange={e => setOriginalPrice(e.target.value)} placeholder="Rs." />
+                onChange={e => handleOriginalPriceChange(e.target.value)} placeholder="Rs." />
             </div>
             <div>
               <label className="form-label">Sale Price</label>
               <input className="form-input" type="number" min="0" value={salePrice}
-                onChange={e => setSalePrice(e.target.value)} placeholder="Rs." />
+                onChange={e => handleSalePriceChange(e.target.value)} placeholder="Rs." />
             </div>
           </div>
           {salePrice && originalPrice && Number(originalPrice) > 0 && (
@@ -941,6 +1182,27 @@ function TemplateModeView({
               Customer saves {fmtLKR(Number(originalPrice) - Number(salePrice))} ({Math.round(((Number(originalPrice) - Number(salePrice)) / Number(originalPrice)) * 100)}% off)
             </p>
           )}
+          <div className="mt-4 pt-4 border-t border-gray-100">
+            <label className="form-label">Product Voucher</label>
+            <select className="form-input" value={voucherChoice} disabled={vouchersLoading}
+              onChange={e => setVoucherChoice(e.target.value)}>
+              <option value="auto">{vouchersLoading ? 'Checking active vouchers…' : 'Auto-detect best valid voucher'}</option>
+              {availableVouchers.map(voucher => (
+                <option key={voucher.code} value={voucher.code}>
+                  {voucher.code} — {voucher.label}{voucher.minOrderAmount > 0 ? ` · Min. Rs. ${Number(voucher.minOrderAmount).toLocaleString('en-LK')}` : ''}
+                </option>
+              ))}
+            </select>
+            {!vouchersLoading && availableVouchers.length === 0 && (
+              <p className="text-[11px] text-gray-400 mt-1">No active publicly eligible voucher applies to this product. A genuine product sale will still be shown automatically.</p>
+            )}
+            {resolvedVoucher && !templateCopyStale && (
+              <div className="mt-2 rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2 text-[11px] text-emerald-800">
+                Verified for this description: <strong>{resolvedVoucher.code}</strong> · {resolvedVoucher.label}
+                {resolvedVoucher.minOrderAmount > 0 ? ` · Minimum eligible order Rs. ${Number(resolvedVoucher.minOrderAmount).toLocaleString('en-LK')}` : ''}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* ── Accent Colour ── */}
@@ -967,7 +1229,13 @@ function TemplateModeView({
 
         {/* ── Post Content ── */}
         <div className="bg-white rounded-2xl border border-gray-100 p-4">
-          <p className="form-label mb-3">Post Content</p>
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <p className="form-label mb-0">Post Content</p>
+            <button type="button" onClick={()=>generateTemplateCopy()} disabled={templateCopyLoading}
+              className="text-xs font-bold text-primary hover:underline disabled:opacity-50">
+              {templateCopyLoading?'Generating…':'✨ Generate Product Description'}
+            </button>
+          </div>
           <div className="space-y-3">
             <div>
               <label className="form-label">Top Badge Text</label>
@@ -979,7 +1247,7 @@ function TemplateModeView({
               <input className="form-input" value={headline} onChange={e => setHeadline(e.target.value.slice(0, 60))} />
             </div>
             <div>
-              <label className="form-label">Description</label>
+              <label className="form-label">Short Description on Creative</label>
               <textarea className="form-input" rows={2} value={templateDescription}
                 onChange={e => setTemplateDescription(e.target.value.slice(0, 140))}
                 placeholder="Short line shown on the creative (optional)" />
@@ -988,18 +1256,28 @@ function TemplateModeView({
               <label className="form-label">CTA Button Text</label>
               <input className="form-input" value={cta} onChange={e => setCta(e.target.value.slice(0, 20))} placeholder="Shop Now" />
             </div>
+            <div>
+              <label className="form-label">Social Media Description</label>
+              <textarea className="form-input font-mono text-xs leading-5" rows={12} maxLength={5000} value={templateCaption}
+                onChange={e => setTemplateCaption(e.target.value)}
+                placeholder="Generate a product-aware description, then review and edit it before publishing." />
+              <p className="text-[11px] text-gray-400 mt-1">Generated from the live database price, genuine sale price, checkout-validated voucher, links, contact details, and verified product features.</p>
+              {templateCopyStale && templateCaption.trim() && (
+                <p className="text-[11px] font-semibold text-amber-700 mt-1">Pricing, voucher, or post action changed. Generate the description again before publishing.</p>
+              )}
+            </div>
           </div>
         </div>
 
         {/* ── Product Options / Feature Bullets ── */}
         <div className="bg-white rounded-2xl border border-gray-100 p-4">
           <p className="form-label mb-1">Product Options &amp; Features</p>
-          <p className="text-xs text-gray-400 mb-3">Each entry appears as a • bullet callout on the generated image. Leave blank to hide.</p>
+          <p className="text-xs text-gray-400 mb-3">Auto-filled from verified specifications and available product options. You can review or edit each bullet.</p>
           <div className="grid grid-cols-2 gap-2">
             {features.map((f, i) => (
               <input key={i} className="form-input text-xs" value={f}
-                onChange={e => updateFeature(i, e.target.value.slice(0, 24))}
-                placeholder={['High Quality Sound','Crystal Clear Call','60 HRS Battery','10 Min Fast Charge','ANC Technology','IPX5 Waterproof'][i] || `Option ${i+1}`} />
+                onChange={e => updateFeature(i, e.target.value.slice(0, 60))}
+                placeholder={`Verified feature or option ${i + 1}`} />
             ))}
           </div>
         </div>
@@ -1022,7 +1300,7 @@ function TemplateModeView({
                     className="shrink-0 w-8 h-8 rounded-full bg-red-50 text-red-400 hover:bg-red-100 text-xs flex items-center justify-center">✕</button>
                 )}
               </div>
-              <input type="file" accept="image/*" ref={logoFileRef} className="hidden" onChange={handleLogoUpload} />
+              <input type="file" accept="image/png,image/jpeg,image/webp" ref={logoFileRef} className="hidden" onChange={handleLogoUpload} />
               {logoImgSrc && (
                 <div className="mt-2 w-24 h-12 rounded-lg bg-gray-900 overflow-hidden flex items-center justify-center border border-gray-200">
                   <img src={logoImgSrc} alt="Logo preview" className="max-w-full max-h-full object-contain" />
@@ -1050,31 +1328,37 @@ function TemplateModeView({
           </div>
         </div>
 
-        <button onClick={generateTemplateCreative} disabled={templateRendering || bgRemoving || !selectedTemplateId}
+        <button onClick={()=>generateTemplateCreative()} disabled={templateRendering || bgRemoving || !selectedTemplateId}
           className="btn-primary text-sm w-full py-3 disabled:opacity-50 disabled:cursor-not-allowed">
-          {templateRendering ? 'Generating…' : '🖼️ Generate Template Creative'}
+          {templateRendering ? 'Refreshing Live Preview…' : '↻ Refresh Live Preview'}
         </button>
       </div>
 
-      <div className="space-y-4">
+      <div className="space-y-4 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:overscroll-contain lg:pr-2">
         <div className="bg-white rounded-2xl border border-gray-100 p-5">
           <div className="flex items-center justify-between mb-4">
             <p className="form-label mb-0">
-              Preview
-              {templateRendering && <span className="text-gray-400 text-xs normal-case ml-2">(rendering…)</span>}
+              Live Preview
+              {templateRendering && <span className="text-primary text-xs normal-case ml-2">(updating…)</span>}
+              {!templateRendering&&templatePreviewStale&&templateResultUrl&&<span className="text-amber-600 text-xs normal-case ml-2">(changes pending…)</span>}
             </p>
-            <span className="text-xs text-gray-400 font-mono">1080 × 1080px</span>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={()=>setVisualEditorOpen(true)} disabled={!customTemplateLayout}
+                className="px-3 py-2 rounded-lg bg-gray-900 text-white text-xs font-bold disabled:opacity-40">✦ Customize Design</button>
+              <span className="text-xs text-gray-400 font-mono">1080 × 1080px</span>
+            </div>
           </div>
-          <div className="bg-gray-900 rounded-xl p-3 flex items-center justify-center overflow-auto" style={{ minHeight: 340, maxHeight: '72vh' }}>
+          <div className="relative bg-gray-100 border border-gray-200 rounded-xl p-0 flex items-center justify-center overflow-auto" style={{ minHeight: 340, maxHeight: '62vh' }}>
             {templateResultUrl ? (
               <img src={templateResultUrl} alt="Template creative preview"
-                className="rounded-lg shadow-2xl max-w-full"
-                style={{ maxHeight: '66vh', width: 'auto', height: 'auto' }} />
+                className={`max-w-full transition-opacity ${templatePreviewStale?'opacity-60':'opacity-100'}`}
+                style={{ maxHeight: '56vh', width: 'auto', height: 'auto' }} />
             ) : (
               <p className="text-gray-500 text-sm text-center px-6">
-                Pick a template, remove the product's background, then click "Generate Template Creative".
+                {templateRendering?'Creating your live preview…':'Choose a template to create the live preview automatically.'}
               </p>
             )}
+            {templateRendering&&templateResultUrl&&<div className="absolute inset-0 flex items-center justify-center bg-black/20 rounded-xl"><span className="rounded-full bg-white/95 px-4 py-2 text-xs font-bold text-primary shadow-lg">Updating preview…</span></div>}
           </div>
         </div>
 
@@ -1094,23 +1378,41 @@ function TemplateModeView({
           {connectedPlatforms.length === 0 ? (
             <p className="text-sm text-gray-400">No social accounts connected.</p>
           ) : (
-            <div className="flex flex-wrap gap-2 items-center">
-              <select className="form-input flex-1 min-w-[160px]" value={publishPlatform} onChange={e => setPublishPlatform(e.target.value)}>
-                <option value="">Select platform…</option>
-                {connectedPlatforms.map(p => (
-                  <option key={p.platform} value={p.platform}>
-                    {PLATFORM_META[p.platform]?.label || p.platform}{p.accountName ? ` — ${p.accountName}` : ''}
-                  </option>
-                ))}
-              </select>
-              <button onClick={handlePublish} disabled={!publishPlatform || publishing || !templateResultUrl}
-                className="btn-primary text-sm whitespace-nowrap disabled:opacity-50">
-                {publishing ? 'Publishing…' : '📤 Publish Now'}
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {connectedPlatforms.map(p => {
+                  const selected=publishPlatforms.has(p.platform);
+                  return <label key={p.platform} className={`rounded-xl border p-3 cursor-pointer ${selected?'border-primary bg-primary/5':'border-gray-200'}`}>
+                    <span className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={selected} onChange={()=>setPublishPlatforms(current=>{const next=new Set(current);next.has(p.platform)?next.delete(p.platform):next.add(p.platform);return next;})}/>{PLATFORM_META[p.platform]?.label||p.platform}</span>
+                    {p.accountName&&<span className="block ml-5 mt-1 text-[10px] text-gray-400 truncate">{p.accountName}</span>}
+                  </label>;
+                })}
+              </div>
+              <div>
+                <p className="form-label mb-2">Post Action</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {[{value:'shop_now',label:'🛒 Shop Now'},{value:'whatsapp',label:'💬 WhatsApp'},{value:'none',label:'No native button'}].map(option=><label key={option.value} className={`rounded-xl border p-2.5 cursor-pointer text-xs font-semibold ${publishCtaType===option.value?'border-primary bg-primary/5':'border-gray-200'}`}><input type="radio" name="aiCreatorCta" className="mr-2" checked={publishCtaType===option.value} onChange={()=>{setPublishCtaType(option.value);if(option.value==='shop_now')setCta('SHOP NOW');if(option.value==='whatsapp')setCta('WHATSAPP')}}/>{option.label}</label>)}
+                </div>
+                <p className="text-[11px] text-amber-700 mt-2">Facebook can receive the native Shop Now or WhatsApp action. Instagram and other organic feeds receive the exact product and WhatsApp links inside the reviewed description because they do not support this per-post native button format.</p>
+              </div>
+              <button onClick={handlePublish} disabled={!publishPlatforms.size || publishing || !templateResultUrl || templatePreviewStale || !templateCaption.trim() || templateCopyStale}
+                className="btn-primary text-sm w-full disabled:opacity-50">
+                {publishing ? 'Publishing…' : `📤 Publish to ${publishPlatforms.size} Platform${publishPlatforms.size===1?'':'s'}`}
               </button>
             </div>
           )}
         </div>
       </div>
+      {visualEditorOpen&&<VisualTemplateEditor
+        layout={customTemplateLayout} baseLayout={selectedTemplate?.editorConfig}
+        setLayout={setCustomTemplateLayout} onClose={()=>setVisualEditorOpen(false)}
+        onSave={()=>{setVisualEditorOpen(false);setShowSaveModal(true);}} templateThumbnail={selectedTemplate?.thumbnailUrl}
+        cutoutDataUrl={cutoutDataUrl} logoImgSrc={logoImgSrc} logoText={logoText}
+        headline={headline} templateDescription={templateDescription} badgeLabel={badgeLabel}
+        features={features} discountPct={discountPct} originalPrice={originalPrice} salePrice={salePrice}
+        cta={cta} website={website} whatsapp={whatsapp}
+        product={product}
+      />}
     </div>
   );
 }
@@ -1138,6 +1440,12 @@ export default function AIPostCreator() {
   const [discountPct, setDiscountPct]     = useState(0);
   const [originalPrice, setOriginalPrice] = useState('');
   const [salePrice, setSalePrice]         = useState('');
+  const [availableVouchers, setAvailableVouchers] = useState([]);
+  const [voucherChoice, setVoucherChoice] = useState('auto');
+  const [vouchersLoading, setVouchersLoading] = useState(false);
+  const [resolvedVoucher, setResolvedVoucher] = useState(null);
+  const [offerSnapshot, setOfferSnapshot] = useState(null);
+  const [lastGeneratedCopySignature, setLastGeneratedCopySignature] = useState('');
 
   // Features / product options — up to 6 bullet-point chips
   const [features, setFeatures]           = useState(['', '', '', '', '', '']);
@@ -1153,6 +1461,8 @@ export default function AIPostCreator() {
 
   const [connectedPlatforms, setConnectedPlatforms] = useState([]);
   const [publishPlatform, setPublishPlatform]       = useState('');
+  const [publishPlatforms, setPublishPlatforms]     = useState(new Set());
+  const [publishCtaType, setPublishCtaType]         = useState('shop_now');
   const [publishing, setPublishing]                 = useState(false);
   const [uploadedUrl, setUploadedUrl]               = useState('');
 
@@ -1170,19 +1480,40 @@ export default function AIPostCreator() {
   const [templatesLoading, setTemplatesLoading]     = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [templateDescription, setTemplateDescription] = useState('');
+  const [templateCaption, setTemplateCaption]       = useState('');
+  const [templateCopyLoading, setTemplateCopyLoading] = useState(false);
   const [bgRemoving, setBgRemoving]               = useState(false);
   const [cutoutDataUrl, setCutoutDataUrl]         = useState('');
   const [templateResultUrl, setTemplateResultUrl] = useState('');
   const [templateRendering, setTemplateRendering] = useState(false);
+  const [templatePreviewStale, setTemplatePreviewStale] = useState(true);
+  const [customTemplateLayout, setCustomTemplateLayout] = useState(null);
 
   const canvasRef = useRef(null);
   const templatesFetchedRef = useRef(false);
   const logoFileRef = useRef(null);
+  const templateRenderSequenceRef = useRef(0);
+  const currentTemplateVisualSignatureRef = useRef('');
+  const lastRenderedTemplateSignatureRef = useRef('');
 
   const format      = useMemo(() => FORMATS.find(f => f.id === formatId), [formatId]);
   const product     = products[activeIdx] || null;
   const palette     = ACCENT_PALETTES.find(p => p.id === paletteId) || ACCENT_PALETTES[0];
   const accentColor = customAccent || palette.color;
+  const selectedTemplate = useMemo(() => templateList.find(template => template.id === selectedTemplateId) || null, [templateList, selectedTemplateId]);
+  const templateVisualSignature = useMemo(() => JSON.stringify([
+    product?._id || '', selectedTemplateId, headline, cta, templateDescription,
+    Number(discountPct)||0, originalPrice, salePrice, badgeLabel, features,
+    whatsapp, website, logoText, logoImgSrc, tagline, customTemplateLayout,
+  ]), [product?._id, selectedTemplateId, headline, cta, templateDescription, discountPct, originalPrice, salePrice, badgeLabel, features, whatsapp, website, logoText, logoImgSrc, tagline, customTemplateLayout]);
+  currentTemplateVisualSignatureRef.current=templateVisualSignature;
+  const templateCopySignature = useMemo(() => JSON.stringify([
+    product?._id || '', originalPrice, salePrice, Number(discountPct) || 0,
+    voucherChoice, publishCtaType,
+  ]), [product?._id, originalPrice, salePrice, discountPct, voucherChoice, publishCtaType]);
+  const currentTemplateCopySignatureRef = useRef('');
+  currentTemplateCopySignatureRef.current = templateCopySignature;
+  const templateCopyStale = !templateCaption.trim() || lastGeneratedCopySignature !== templateCopySignature;
 
   /* ── Connected platforms ── */
   useEffect(() => {
@@ -1210,6 +1541,25 @@ export default function AIPostCreator() {
       .finally(() => setTemplatesLoading(false));
   }, [generationMode]);
 
+  useEffect(() => {
+    if (!selectedTemplate?.editorConfig) return;
+    setCustomTemplateLayout(current => current?.id === selectedTemplate.id ? current : cloneLayout(selectedTemplate.editorConfig));
+  }, [selectedTemplate]);
+
+  // Merge server-persisted templates with local presets so saved designs are
+  // available across browsers while preserving existing offline behaviour.
+  useEffect(() => {
+    API.get('/ai-post-creator/presets').then(({data}) => {
+      const server = data.presets || [];
+      if (!server.length) return;
+      setPresets(current => {
+        const merged = [...server, ...current.filter(local => !server.some(saved => saved.name === local.name))].slice(0, 30);
+        savePresets(merged);
+        return merged;
+      });
+    }).catch(()=>{});
+  }, []);
+
   /* ── Auto-populate fields when product changes ── */
   useEffect(() => {
     if (!product) return;
@@ -1218,12 +1568,45 @@ export default function AIPostCreator() {
     setDiscountPct(product.discount || 0);
     setHeadline(product.name || '');
     setBadgeLabel(product.discount > 0 ? 'HOT DEAL' : 'NEW ARRIVAL');
+    setFeatures((product.marketingFeatures || []).concat(['','','','','','']).slice(0, 6));
+    setVoucherChoice('auto');
+    setAvailableVouchers([]);
+    setResolvedVoucher(null);
+    setOfferSnapshot(null);
+    setLastGeneratedCopySignature('');
+    setTemplateDescription('');
+    setTemplateCaption('');
     setUploadedUrl('');
     setPhotorealUrl('');
     setViewMode('canvas');
     setCutoutDataUrl('');
     setTemplateResultUrl('');
+    setTemplatePreviewStale(true);
   }, [product?._id]); // eslint-disable-line
+
+  useEffect(() => {
+    if (generationMode !== 'template' || !product?._id) return undefined;
+    let cancelled = false;
+    setVouchersLoading(true);
+    API.get(`/ai-post-creator/product-offers/${product._id}`)
+      .then(({ data }) => {
+        if (cancelled) return;
+        setAvailableVouchers(data.vouchers || []);
+        if (data.pricing) {
+          setOriginalPrice(String(data.pricing.regularPrice || ''));
+          setSalePrice(data.pricing.isProductSale ? String(data.pricing.sellingPrice || '') : '');
+          setDiscountPct(Number(data.pricing.productSalePercent) || 0);
+          lastPricingChange.current = 'prices';
+        }
+      })
+      .catch(err => {
+        if (!cancelled) toast.error(err.response?.data?.message || 'Could not check product vouchers');
+      })
+      .finally(() => {
+        if (!cancelled) setVouchersLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [generationMode, product?._id]);
 
   /* ═══════════════════════════════════════════════════════════
      BIDIRECTIONAL PRICING LOGIC
@@ -1245,16 +1628,18 @@ export default function AIPostCreator() {
   };
 
   const handleOriginalPriceChange = (val) => {
-    lastPricingChange.current = 'prices';
+    const keepPercentage = lastPricingChange.current === 'discount';
     setOriginalPrice(val);
     const orig = parseFloat(val);
     const sale = parseFloat(salePrice);
-    if (orig > 0 && sale > 0 && sale < orig) {
-      setDiscountPct(Math.round(((orig - sale) / orig) * 100));
-    } else if (discountPct > 0 && orig > 0) {
-      // Recalculate sale from stored discount
+    if (keepPercentage && discountPct > 0 && orig > 0) {
       setSalePrice(String(Math.round(orig * (1 - discountPct / 100))));
+    } else if (orig > 0 && sale > 0 && sale < orig) {
+      setDiscountPct(Math.round(((orig - sale) / orig) * 100));
+    } else if (sale >= orig && orig > 0) {
+      setDiscountPct(0);
     }
+    lastPricingChange.current = keepPercentage ? 'discount' : 'prices';
   };
 
   const handleSalePriceChange = (val) => {
@@ -1319,15 +1704,22 @@ export default function AIPostCreator() {
   const PRESET_FIELDS = () => ({
     badgeLabel, headline, cta, tagline, discountPct,
     originalPrice, salePrice, features, whatsapp, website,
-    logoText, paletteId, customAccent, formatId,
+    logoText, logoImgSrc, paletteId, customAccent, formatId,
+    selectedTemplateId, customTemplateLayout,
   });
 
-  const handleSavePreset = (name) => {
+  const handleSavePreset = async (name) => {
     const newPreset = { id: Date.now(), name, data: PRESET_FIELDS() };
     const updated   = [newPreset, ...presets].slice(0, 20);
     setPresets(updated);
     savePresets(updated);
-    toast.success(`Preset "${name}" saved`);
+    try {
+      const {data}=await API.post('/ai-post-creator/presets',{name,data:newPreset.data});
+      if(data.presets?.length){setPresets(data.presets);savePresets(data.presets);}
+      toast.success(`Template "${name}" saved for future use`);
+    } catch {
+      toast.success(`Template "${name}" saved on this browser`);
+    }
   };
 
   const handleLoadPreset = (preset) => {
@@ -1343,17 +1735,24 @@ export default function AIPostCreator() {
     if (d.whatsapp   !== undefined)  setWhatsapp(d.whatsapp);
     if (d.website    !== undefined)  setWebsite(d.website);
     if (d.logoText   !== undefined)  setLogoText(d.logoText);
+    if (d.logoImgSrc !== undefined)  setLogoImgSrc(d.logoImgSrc);
     if (d.paletteId  !== undefined)  setPaletteId(d.paletteId);
     if (d.customAccent !== undefined) setCustomAccent(d.customAccent);
     if (d.formatId   !== undefined)  setFormatId(d.formatId);
+    if (d.selectedTemplateId !== undefined) setSelectedTemplateId(d.selectedTemplateId);
+    if (d.customTemplateLayout !== undefined) setCustomTemplateLayout(cloneLayout(d.customTemplateLayout));
     setShowPresets(false);
     toast.success(`Preset "${preset.name}" loaded`);
   };
 
-  const handleDeletePreset = (id) => {
+  const handleDeletePreset = async (id) => {
     const updated = presets.filter(p => p.id !== id);
     setPresets(updated);
     savePresets(updated);
+    try {
+      const {data}=await API.delete(`/ai-post-creator/presets/${id}`);
+      if(data.presets){setPresets(data.presets);savePresets(data.presets);}
+    } catch {}
   };
 
   /* ── AI Copy ── */
@@ -1402,14 +1801,14 @@ export default function AIPostCreator() {
   };
 
   /* ── Template Mode ── */
-  const runBackgroundRemoval = async () => {
-    if (!product?.thumbnail) { toast.error('This product has no image'); return null; }
+  const runBackgroundRemoval = async ({quiet=false}={}) => {
+    if (!product?.thumbnail) { if(!quiet)toast.error('This product has no image'); return null; }
     setBgRemoving(true);
     setTemplateResultUrl('');
     try {
       const dataUrl = await removeImageBackground(product.thumbnail, API);
       setCutoutDataUrl(dataUrl);
-      toast.success('Background removed');
+      if(!quiet)toast.success('Background removed');
       return dataUrl;
     } catch (err) {
       const serverMsg = err?.response?.data?.message;
@@ -1420,31 +1819,108 @@ export default function AIPostCreator() {
     }
   };
 
-  const generateTemplateCreative = async () => {
-    if (!product) { toast.error('Select a product first'); return; }
-    if (!selectedTemplateId) { toast.error('Choose a template first'); return; }
-    setTemplateRendering(true);
+  const generateTemplateCopy = async ({ quiet=false, onlyMissing=false }={}) => {
+    if (!product) { if(!quiet)toast.error('Select a product first'); return null; }
+    const copySignatureAtRequest = templateCopySignature;
+    setTemplateCopyLoading(true);
     try {
-      const cutout = cutoutDataUrl || await runBackgroundRemoval();
+      const { data } = await API.post('/ai-post-creator/generate-template-copy', {
+        productId: product._id,
+        ctaType: publishCtaType,
+        voucherCode: voucherChoice,
+      });
+      if (copySignatureAtRequest !== currentTemplateCopySignatureRef.current) return null;
+      const verifiedCopySignature = data.pricing ? JSON.stringify([
+        product._id,
+        String(data.pricing.regularPrice || ''),
+        data.pricing.isProductSale ? String(data.pricing.sellingPrice || '') : '',
+        Number(data.pricing.productSalePercent) || 0,
+        voucherChoice,
+        publishCtaType,
+      ]) : copySignatureAtRequest;
+      const shouldUpdateCaption = !onlyMissing || !templateCaption.trim() || lastGeneratedCopySignature !== verifiedCopySignature;
+      if (data.pricing) {
+        setOriginalPrice(String(data.pricing.regularPrice || ''));
+        setSalePrice(data.pricing.isProductSale ? String(data.pricing.sellingPrice || '') : '');
+        setDiscountPct(Number(data.pricing.productSalePercent) || 0);
+        lastPricingChange.current = 'prices';
+      }
+      if(!onlyMissing||!templateDescription.trim())setTemplateDescription(data.description||'');
+      if(shouldUpdateCaption)setTemplateCaption(data.caption||'');
+      if((!onlyMissing||!features.some(Boolean))&&data.features?.length)setFeatures(data.features.concat(['','','','','','']).slice(0,6));
+      if(data.hashtags?.length)setHashtags(data.hashtags);
+      if(voucherChoice === 'auto' && data.availableVouchers) setAvailableVouchers(data.availableVouchers);
+      setResolvedVoucher(data.selectedVoucher || null);
+      setOfferSnapshot(data.offerSnapshot || null);
+      if(shouldUpdateCaption || lastGeneratedCopySignature === verifiedCopySignature) setLastGeneratedCopySignature(verifiedCopySignature);
+      if(!quiet)toast.success('Accurate product description generated');
+      return data;
+    } catch (err) {
+      if(!quiet)toast.error(err.response?.data?.message || 'Description generation failed');
+      return null;
+    } finally {
+      setTemplateCopyLoading(false);
+    }
+  };
+
+  const generateTemplateCreative = async ({automatic=false,templateId=selectedTemplateId,renderSignature=templateVisualSignature}={}) => {
+    if (!product) { if(!automatic)toast.error('Select a product first'); return; }
+    if (!templateId) { if(!automatic)toast.error('Choose a template first'); return; }
+    const requestId=++templateRenderSequenceRef.current;
+    setTemplateRendering(true);
+    setTemplatePreviewStale(true);
+    setUploadedUrl('');
+    try {
+      const generatedCopy=(!templateCaption.trim()||!templateDescription.trim())
+        ? await generateTemplateCopy({quiet:true,onlyMissing:true})
+        : null;
+      const cutout = cutoutDataUrl || await runBackgroundRemoval({quiet:automatic});
       if (!cutout) return;
       const { data } = await API.post('/ai-post-creator/generate-template', {
-        templateId: selectedTemplateId,
+        templateId,
         productImageDataUrl: cutout,
         name: headline || product.name,
         price: parseFloat(salePrice) || parseFloat(originalPrice) || product.price,
         originalPrice: parseFloat(originalPrice) || product.price,
         discount: discountPct,
-        cta, description: templateDescription,
+        cta,
+        description: templateDescription || generatedCopy?.description || '',
+        badge: badgeLabel,
+        brand: product.brand || '',
+        productBrand: product.brand || '',
+        category: product.category || '',
+        logoImageDataUrl: logoImgSrc || '',
+        logoText,
+        tagline,
+        layout: customTemplateLayout,
+        whatsapp,
+        website,
+        features: features.some(Boolean)?features:(generatedCopy?.features||[]),
       });
+      if(requestId!==templateRenderSequenceRef.current||renderSignature!==currentTemplateVisualSignatureRef.current)return;
       setTemplateResultUrl(data.dataUrl);
+      lastRenderedTemplateSignatureRef.current=renderSignature;
+      setTemplatePreviewStale(false);
       setUploadedUrl('');
-      toast.success('Template creative generated');
+      if(!automatic)toast.success('Live preview refreshed');
     } catch (err) {
       toast.error(err.response?.data?.message || 'Template generation failed');
     } finally {
-      setTemplateRendering(false);
+      if(requestId===templateRenderSequenceRef.current)setTemplateRendering(false);
     }
   };
+
+  // Debounced live rendering keeps typing responsive and prevents an older
+  // request from replacing a newer template selection. The existing manual
+  // refresh action remains available if an external image service fails.
+  useEffect(() => {
+    if(generationMode!=='template'||!product?.thumbnail||!selectedTemplateId)return;
+    if(lastRenderedTemplateSignatureRef.current===templateVisualSignature){setTemplatePreviewStale(false);return;}
+    setTemplatePreviewStale(true);
+    setUploadedUrl('');
+    const timer=setTimeout(()=>generateTemplateCreative({automatic:true,templateId:selectedTemplateId,renderSignature:templateVisualSignature}),550);
+    return()=>clearTimeout(timer);
+  }, [generationMode, product?.thumbnail, selectedTemplateId, templateVisualSignature]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const exportMime   = { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp' }[exportFormat];
   const getCurrentDataUrl = () => {
@@ -1474,19 +1950,29 @@ export default function AIPostCreator() {
   };
 
   const handlePublish = async () => {
-    if (!publishPlatform || !product) return;
+    const selectedPlatforms=generationMode==='template'?[...publishPlatforms]:(publishPlatform?[publishPlatform]:[]);
+    if (!selectedPlatforms.length || !product) return;
     setPublishing(true);
     try {
       const url = uploadedUrl || await uploadCreative();
       const fullCaption = generationMode === 'template'
-        ? [headline || product.name, templateDescription].filter(Boolean).join('\n\n')
+        ? templateCaption
         : [headline, caption, hashtags.map(h => `#${h}`).join(' ')].filter(Boolean).join('\n\n');
-      await API.post('/ai-post-creator/publish', {
-        platform: publishPlatform, imageUrl: url, caption: fullCaption,
+      const {data}=await API.post('/ai-post-creator/publish', {
+        platforms: selectedPlatforms, imageUrl: url, caption: fullCaption,
+        productId: product._id,
         productUrl: product.slug ? `${window.location.origin}/product/${product.slug}` : '',
         productName: product.name,
-      });
-      toast.success(`Published to ${PLATFORM_META[publishPlatform]?.label}`);
+        ctaType: generationMode==='template'?publishCtaType:'none',
+        voucherCode: generationMode==='template' ? (offerSnapshot?.voucherCode || '') : '',
+        offerSnapshot: generationMode==='template' ? offerSnapshot : null,
+      },{timeout:180000});
+      if(data.succeeded)toast.success(`Published successfully to ${data.succeeded} platform${data.succeeded===1?'':'s'}`);
+      if(data.failed){
+        const failures=(data.results||[]).filter(result=>!result.success).map(result=>`${PLATFORM_META[result.platform]?.label||result.platform}: ${result.message}`).join(' · ');
+        toast.error(`${data.failed} platform${data.failed===1?'':'s'} failed. ${failures}`);
+      }
+      if(!data.succeeded&&data.message)throw new Error(data.message);
     } catch (err) {
       toast.error(err.response?.data?.message || 'Publish failed');
     } finally {
@@ -1595,12 +2081,18 @@ export default function AIPostCreator() {
           activeIdx={activeIdx} setActiveIdx={setActiveIdx}
           templateList={templateList} templatesLoading={templatesLoading}
           selectedTemplateId={selectedTemplateId} setSelectedTemplateId={setSelectedTemplateId}
+          selectedTemplate={selectedTemplate} customTemplateLayout={customTemplateLayout} setCustomTemplateLayout={setCustomTemplateLayout}
           headline={headline} setHeadline={setHeadline}
           cta={cta} setCta={setCta}
           templateDescription={templateDescription} setTemplateDescription={setTemplateDescription}
+          templateCaption={templateCaption} setTemplateCaption={setTemplateCaption}
+          generateTemplateCopy={generateTemplateCopy} templateCopyLoading={templateCopyLoading}
           discountPct={discountPct} setDiscountPct={setDiscountPct}
           originalPrice={originalPrice} setOriginalPrice={setOriginalPrice}
           salePrice={salePrice} setSalePrice={setSalePrice}
+          handleDiscountChange={handleDiscountChange} handleOriginalPriceChange={handleOriginalPriceChange} handleSalePriceChange={handleSalePriceChange}
+          availableVouchers={availableVouchers} voucherChoice={voucherChoice} setVoucherChoice={setVoucherChoice}
+          vouchersLoading={vouchersLoading} resolvedVoucher={resolvedVoucher} templateCopyStale={templateCopyStale}
           badgeLabel={badgeLabel} setBadgeLabel={setBadgeLabel}
           features={features} updateFeature={updateFeature}
           whatsapp={whatsapp} setWhatsapp={setWhatsapp}
@@ -1613,10 +2105,12 @@ export default function AIPostCreator() {
           accentColor={accentColor}
           bgRemoving={bgRemoving} cutoutDataUrl={cutoutDataUrl} runBackgroundRemoval={runBackgroundRemoval}
           templateRendering={templateRendering} templateResultUrl={templateResultUrl}
+          templatePreviewStale={templatePreviewStale}
           generateTemplateCreative={generateTemplateCreative}
           downloadCreative={downloadCreative} getCurrentDataUrl={getCurrentDataUrl}
           connectedPlatforms={connectedPlatforms}
-          publishPlatform={publishPlatform} setPublishPlatform={setPublishPlatform}
+          publishPlatforms={publishPlatforms} setPublishPlatforms={setPublishPlatforms}
+          publishCtaType={publishCtaType} setPublishCtaType={setPublishCtaType}
           handlePublish={handlePublish} publishing={publishing}
           presets={presets} showSaveModal={showSaveModal} setShowSaveModal={setShowSaveModal}
           handleSavePreset={handleSavePreset} handleLoadPreset={handleLoadPreset}
