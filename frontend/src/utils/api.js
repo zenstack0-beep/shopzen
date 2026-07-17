@@ -65,7 +65,6 @@ const isAdminOrPrivatePath = (path = '') => {
     path.startsWith('/subscribers') ||
     path.startsWith('/upload') ||
     path.startsWith('/notifications') ||
-    path.startsWith('/ai-post-creator') ||
     path.startsWith('/social-media') ||
     path.startsWith('/gift-cards/admin') ||
     path.startsWith('/gift-cards/my') ||
