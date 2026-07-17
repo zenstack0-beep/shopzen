@@ -33,6 +33,9 @@
 const rateLimit    = require('express-rate-limit');
 const helmet       = require('helmet');
 const mongoSanitize = require('express-mongo-sanitize');
+const crypto       = require('crypto');
+const jwt          = require('jsonwebtoken');
+const User         = require('../models/User');
 const fs           = require('fs');
 const path         = require('path');
 
@@ -222,6 +225,40 @@ function xssClean(req, _res, next) {
 //           skipped entirely when NODE_ENV !== 'production' — production
 //           behaviour (200 req / 15 min per IP) is completely unchanged.
 const isProd = process.env.NODE_ENV === 'production';
+const adminRateLimitCache = new Map();
+
+async function isAuthenticatedAdminRequest(req) {
+  const header = String(req.get('Authorization') || '');
+  if (!header.startsWith('Bearer ')) return false;
+  const token = header.slice(7).trim();
+  if (!token) return false;
+
+  // Cache only a one-way token fingerprint. The actual bearer token is never
+  // retained in application memory beyond this request.
+  const fingerprint = crypto.createHash('sha256').update(token).digest('hex');
+  const cached = adminRateLimitCache.get(fingerprint);
+  if (cached && cached.expiresAt > Date.now()) return cached.isAdmin;
+  if (cached) adminRateLimitCache.delete(fingerprint);
+
+  try {
+    const verifyOptions = {};
+    if (process.env.JWT_ISSUER) verifyOptions.issuer = process.env.JWT_ISSUER;
+    if (process.env.JWT_AUDIENCE) verifyOptions.audience = process.env.JWT_AUDIENCE;
+    const decoded = jwt.verify(token, process.env.JWT_SECRET, verifyOptions);
+    const user = await User.findOne({ _id: decoded.id, role: 'admin', isActive: true }).select('_id').lean();
+    const isAdmin = Boolean(user);
+    adminRateLimitCache.set(fingerprint, { isAdmin, expiresAt: Date.now() + (isAdmin ? 60000 : 15000) });
+    if (adminRateLimitCache.size > 1000) {
+      const now = Date.now();
+      for (const [key, value] of adminRateLimitCache) if (value.expiresAt <= now) adminRateLimitCache.delete(key);
+    }
+    return isAdmin;
+  } catch {
+    adminRateLimitCache.set(fingerprint, { isAdmin: false, expiresAt: Date.now() + 15000 });
+    return false;
+  }
+}
+
 const globalLimiter = rateLimit({
   windowMs:          15 * 60 * 1000,  // 15 minutes
   max:               200,              // per IP per window
@@ -238,7 +275,9 @@ const globalLimiter = rateLimit({
     // Exempt cheap read-only admin endpoints that would otherwise be
     // hammered by rapid UI navigation (e.g. template list, product picker).
     if (req.path === '/api/ai-post-creator/templates') return true;
-    return false;
+    // Active Admin bearer tokens are verified before exemption. Invalid,
+    // expired, customer, and fabricated tokens remain rate-limited.
+    return isAuthenticatedAdminRequest(req);
   },
 });
 
@@ -422,4 +461,5 @@ module.exports = {
   xssClean,
   sanitizeBody,
   globalLimiter,
+  isAuthenticatedAdminRequest,
 };
