@@ -13,6 +13,27 @@ const variantOptionSchema = new mongoose.Schema({
   }]
 }, { _id: false });
 
+const specificationSchema = new mongoose.Schema({
+  key: { type: String, trim: true },
+  value: { type: String, trim: true },
+  // Specifications are excluded from marketing captions until an admin has
+  // checked the exact model against the recorded research sources.
+  verified: { type: Boolean, default: false },
+  verifiedAt: Date,
+  verificationMethod: {
+    type: String,
+    enum: ['admin', 'openrouter-web'],
+  },
+  sourceUrl: { type: String, trim: true },
+  sourceTitle: { type: String, trim: true },
+}, { _id: false });
+
+const specificationSourceSchema = new mongoose.Schema({
+  url: { type: String, required: true, trim: true },
+  title: { type: String, trim: true },
+  domain: { type: String, trim: true },
+}, { _id: false });
+
 const productSchema = new mongoose.Schema({
   name: { type: String, required: true },
   slug: { type: String, unique: true },
@@ -34,7 +55,8 @@ const productSchema = new mongoose.Schema({
   lowStockThreshold: { type: Number, default: 5 },
   weight: Number,
   dimensions: { length: Number, width: Number, height: Number },
-  specifications: [{ key: String, value: String }],
+  specifications: [specificationSchema],
+  specificationSources: [specificationSourceSchema],
   // Product variants — size, color, material etc
   variants: [variantOptionSchema],
   // For tracking combined variant stock (e.g. Red+L has 5 stock)

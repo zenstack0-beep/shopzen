@@ -1,6 +1,6 @@
 /**
  * routes/ai.js  — AI autofill helpers
- * Primary: OpenRouter | Fallback: Gemini
+ * AI provider: OpenRouter
  *
  * Endpoints:
  *   POST /api/ai/autofill   → { brand, shortDescription }
@@ -42,35 +42,65 @@ async function callOpenRouter(systemMsg, userMsg, maxTokens = 1000) {
   return data.choices?.[0]?.message?.content?.trim() || '';
 }
 
-async function callGemini(prompt, maxTokens = 1000) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
-  const res = await fetch(url, {
+async function callOpenRouterWithWebSearch(prompt, maxTokens = 1600) {
+  if (!process.env.OPENROUTER_API_KEY) {
+    throw new Error('Source-backed specification research requires OPENROUTER_API_KEY.');
+  }
+  const url = 'https://openrouter.ai/api/v1/chat/completions';
+  const response = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      'HTTP-Referer': process.env.FRONTEND_URL || 'https://shopzen.lk',
+      'X-Title': 'ShopZen Product Specification Research',
+    },
     body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { maxOutputTokens: maxTokens, temperature: 0.2 },
+      model: process.env.OPENROUTER_RESEARCH_MODEL || 'openrouter/auto',
+      max_tokens: maxTokens,
+      temperature: 0,
+      messages: [{ role: 'user', content: prompt }],
+      tools: [{
+        type: 'openrouter:web_search',
+        parameters: {
+          engine: 'auto',
+          max_results: 5,
+          max_total_results: 10,
+          search_context_size: 'medium',
+          excluded_domains: ['reddit.com', 'facebook.com', 'instagram.com', 'tiktok.com'],
+        },
+      }],
     }),
   });
-  if (!res.ok) throw new Error(`Gemini error ${res.status}: ${await res.text()}`);
-  const data = await res.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+  if (!response.ok) throw new Error(`OpenRouter web research error ${response.status}: ${await response.text()}`);
+  const data = await response.json();
+  const message = data.choices?.[0]?.message || {};
+  const text = typeof message.content === 'string'
+    ? message.content.trim()
+    : (message.content || []).map(part => part.text || '').join('').trim();
+  const annotations = [
+    ...(Array.isArray(message.annotations) ? message.annotations : []),
+    ...(Array.isArray(message.citations) ? message.citations.map(url => ({ type: 'url_citation', url })) : []),
+  ];
+  const sources = annotations
+    .filter(annotation => annotation?.type === 'url_citation' && /^https:\/\//i.test(String(annotation.url || annotation.url_citation?.url || '')))
+    .map(annotation => {
+      const citation = annotation.url_citation || annotation;
+      const sourceUrl = citation.url;
+      let domain = '';
+      try { domain = new URL(sourceUrl).hostname.replace(/^www\./, ''); } catch {}
+      return { url: sourceUrl, title: citation.title || domain || 'OpenRouter web source', domain };
+    })
+    .filter((source, index, list) => list.findIndex(item => item.url === source.url) === index)
+    .slice(0, 8);
+  if (!text) throw new Error('OpenRouter web research returned no specification candidates.');
+  if (!sources.length) throw new Error('OpenRouter returned no web citations. Nothing was generated.');
+  return { text, sources };
 }
 
 async function callAI(systemMsg, userMsg, maxTokens = 1000) {
-  if (process.env.OPENROUTER_API_KEY) {
-    try {
-      return await callOpenRouter(systemMsg, userMsg, maxTokens);
-    } catch (err) {
-      console.warn('[AI] OpenRouter failed, trying Gemini fallback:', err.message);
-      if (process.env.GEMINI_API_KEY)
-        return await callGemini(`${systemMsg}\n\n${userMsg}`, maxTokens);
-      throw err;
-    }
-  }
-  if (process.env.GEMINI_API_KEY)
-    return callGemini(`${systemMsg}\n\n${userMsg}`, maxTokens);
-  throw new Error('No AI key configured. Set OPENROUTER_API_KEY or GEMINI_API_KEY in your .env');
+  if (!process.env.OPENROUTER_API_KEY) throw new Error('No AI key configured. Set OPENROUTER_API_KEY in your .env');
+  return callOpenRouter(systemMsg, userMsg, maxTokens);
 }
 
 /* ── safe JSON extractor ── */
@@ -348,71 +378,65 @@ router.post('/description', async (req, res) => {
 ══════════════════════════════════════════════════════════════════ */
 router.get('/status', (req, res) => {
   if (process.env.OPENROUTER_API_KEY) return res.json({ provider: 'openrouter', status: 'ok' });
-  if (process.env.GEMINI_API_KEY)     return res.json({ provider: 'gemini',     status: 'ok' });
   res.status(500).json({ provider: 'none', status: 'error' });
 });
 
 /* ══════════════════════════════════════════════════════════════════
-   POST /api/ai/specs  →  { specs: [{ key, value }] }
-   Generates a full product specifications table in the same format
-   as the SpecsPanel — ordered rows of { key, value } pairs covering
-   brand, model, connectivity, dimensions, safety, warranty, etc.
+   POST /api/ai/specs
+   Returns OpenRouter web-grounded specification candidates and sources.
+   Candidates remain unverified until an admin checks the exact model
+   and explicitly approves each row in the Product editor.
 ══════════════════════════════════════════════════════════════════ */
 router.post('/specs', async (req, res) => {
-  const { name, category, brand, sku, price, salePrice, description } = req.body;
+  const { name, category, brand, sku } = req.body;
   if (!name || name.trim().length < 3)
     return res.status(400).json({ message: 'Product name too short' });
 
   const ctxLines = [
     brand       && `Brand: ${brand}`,
     category    && `Category: ${category}`,
-    sku         && `Model / SKU: ${sku}`,
-    price       && `Price: Rs.${price}${salePrice ? ` (sale Rs.${salePrice})` : ''}`,
-    description && `Description snippet: ${String(description).replace(/<[^>]+>/g, '').slice(0, 300)}`,
+    sku         && `Shop SKU / possible model identifier: ${sku}`,
   ].filter(Boolean).join('\n');
 
-  const systemMsg = 'You are an expert e-commerce product data specialist. You output ONLY valid JSON arrays. No markdown, no code fences, no explanation.';
-
-  const userMsg = [
-    `Generate a complete product specifications table for "${name.trim()}" on shopzen.lk.`,
+  const researchPrompt = [
+    `Use web search to research the exact product "${name.trim()}".`,
     ctxLines ? `\nProduct context:\n${ctxLines}` : '',
-    ``,
-    `Reply ONLY with a JSON array of objects, each with "key" and "value" string fields, nothing else.`,
-    `Example format:`,
-    `[{"key":"Brand","value":"UGREEN"},{"key":"Model","value":"W707"},{"key":"Charging Standard","value":"Qi2 Certified"}]`,
-    ``,
-    `SPEC RULES:`,
-    `- Always start with: Brand, Model (if known), Part Number / SKU (if known), Product Type`,
-    `- Include all relevant technical specifications appropriate for this product category`,
-    `- For CHARGERS/POWER: include Charging Standard, Output Power (per port), Input Interface, Cable Length/Type, Certifications, Safety Features, Compatibility`,
-    `- For SMARTPHONES: include Display, Processor, RAM, Storage, Battery, Camera, OS, Connectivity, Dimensions, Weight`,
-    `- For AUDIO: include Driver Size, Frequency Response, Impedance, Connectivity, Battery Life, Codec Support, Noise Cancellation`,
-    `- For LAPTOPS/COMPUTERS: include Processor, RAM, Storage, Display, GPU, OS, Ports, Battery, Weight`,
-    `- For ACCESSORIES: include Material, Compatibility, Dimensions/Size, Color, Certifications`,
-    `- Always end with: Color (if applicable), Certifications (if applicable), Warranty`,
-    `- Use factual spec names (e.g. "Phone Charging Output" not "Output") — be specific and professional`,
-    `- Values must be concise but complete (e.g. "Up to 15W" not just "15W"; "Overcharge, Overcurrent, Overheat Protection" not "Yes")`,
-    `- Include 12–25 spec rows depending on product complexity`,
-    `- Do NOT invent specific model numbers or certifications not inferable from the product name — use generic accurate values`,
-    `- Do NOT include price, availability, or shipping info`,
-  ].filter(s => s !== undefined).join('\n');
+    '',
+    'Return ONLY a JSON array. Every object must contain "key", "value", "sourceUrl", and "sourceTitle" strings.',
+    'Example: [{"key":"Model","value":"EC706","sourceUrl":"https://manufacturer.example/product","sourceTitle":"Official product page"}]',
+    '',
+    'STRICT VERIFICATION RULES:',
+    '- First confirm the exact model or part number. Do not combine facts from similar products, another phone size, another generation, or a regional variant.',
+    '- Prefer the official manufacturer product page, official manual, official support page, or exact product packaging documentation.',
+    '- Include at most 8 useful marketing specifications that are explicitly written in a source.',
+    '- Never infer material, compatibility, dimensions, weight, output, warranty, safety certification, or regulatory certification.',
+    '- Never convert units unless the source provides both units.',
+    '- Do not use generic values. Omit any field that is absent, ambiguous, conflicting, or belongs to a similar model.',
+    '- Do not include price, stock, shipping, subjective quality claims, or retailer-created promotional claims.',
+    '- If the exact product cannot be confidently matched, return [].',
+  ].join('\n');
 
   try {
-    const raw    = await callAI(systemMsg, userMsg, 1200);
-    const parsed = extractJSON(raw, 'array');
-
-    // Validate and clean: must be array of { key, value }
+    const grounded = await callOpenRouterWithWebSearch(researchPrompt);
+    const parsed = extractJSON(grounded.text, 'array');
     const specs = parsed
       .filter(item => item && typeof item.key === 'string' && typeof item.value === 'string')
-      .map(item => ({ key: item.key.trim(), value: item.value.trim() }))
-      .filter(item => item.key && item.value);
+      .map(item => ({
+        key: item.key.trim().slice(0, 80),
+        value: item.value.trim().slice(0, 180),
+        verified: false,
+        sourceUrl: /^https:\/\//i.test(String(item.sourceUrl || '')) ? String(item.sourceUrl).slice(0, 1000) : '',
+        sourceTitle: String(item.sourceTitle || '').trim().slice(0, 200),
+      }))
+      .filter(item => item.key && item.value && item.sourceUrl)
+      .slice(0, 8);
 
-    if (specs.length === 0) throw new Error('AI returned no valid specs');
+    if (specs.length === 0) throw new Error('No exact, source-backed specifications were found. No values were generated.');
 
-    res.json({ specs });
+    res.json({ specs, sources: grounded.sources, requiresAdminVerification: true });
   } catch (err) {
-    console.error('[AI /specs]', err.message);
-    res.status(500).json({ message: 'AI spec generation failed: ' + err.message });
+    console.error('[AI /specs OpenRouter web verification]', err.message);
+    res.status(500).json({ message: 'OpenRouter specification research failed: ' + err.message });
   }
 });
 
@@ -508,53 +532,11 @@ async function generateProductDescription({ name = '', category = '', brand = ''
  *   const { generateProductSpecs } = require('./ai');
  *   const specs = await generateProductSpecs({ name, brand, sku, category });
  * ─────────────────────────────────────────────────────────────────────────── */
-async function generateProductSpecs({ name = '', category = '', brand = '', sku = '', price = '', salePrice = '', description = '' } = {}) {
-  if (!name || name.trim().length < 3) throw new Error('Product name too short');
-
-  const ctxLines = [
-    brand       && `Brand: ${brand}`,
-    category    && `Category: ${category}`,
-    sku         && `Model / SKU: ${sku}`,
-    price       && `Price: Rs.${price}${salePrice ? ` (sale Rs.${salePrice})` : ''}`,
-    description && `Description snippet: ${String(description).replace(/<[^>]+>/g, '').slice(0, 300)}`,
-  ].filter(Boolean).join('\n');
-
-  const systemMsg = 'You are an expert e-commerce product data specialist. You output ONLY valid JSON arrays. No markdown, no code fences, no explanation.';
-
-  const userMsg = [
-    `Generate a complete product specifications table for "${name.trim()}" on shopzen.lk.`,
-    ctxLines ? `\nProduct context:\n${ctxLines}` : '',
-    '',
-    'Reply ONLY with a JSON array of objects, each with "key" and "value" string fields, nothing else.',
-    'Example format:',
-    '[{"key":"Brand","value":"UGREEN"},{"key":"Model","value":"W707"},{"key":"Charging Standard","value":"Qi2 Certified"}]',
-    '',
-    'SPEC RULES:',
-    '- Always start with: Brand, Model (if known), Part Number / SKU (if known), Product Type',
-    '- Include all relevant technical specifications appropriate for this product category',
-    '- For CHARGERS/POWER: include Charging Standard, Output Power (per port), Input Interface, Cable Length/Type, Certifications, Safety Features, Compatibility',
-    '- For SMARTPHONES: include Display, Processor, RAM, Storage, Battery, Camera, OS, Connectivity, Dimensions, Weight',
-    '- For AUDIO: include Driver Size, Frequency Response, Impedance, Connectivity, Battery Life, Codec Support, Noise Cancellation',
-    '- For LAPTOPS/COMPUTERS: include Processor, RAM, Storage, Display, GPU, OS, Ports, Battery, Weight',
-    '- For ACCESSORIES: include Material, Compatibility, Dimensions/Size, Color, Certifications',
-    '- Always end with: Color (if applicable), Certifications (if applicable), Warranty',
-    '- Use factual spec names (e.g. "Phone Charging Output" not "Output") — be specific and professional',
-    '- Values must be concise but complete (e.g. "Up to 15W" not just "15W"; "Overcharge, Overcurrent, Overheat Protection" not "Yes")',
-    '- Include 12–25 spec rows depending on product complexity',
-    '- Do NOT invent specific model numbers or certifications not inferable from the product name — use generic accurate values',
-    '- Do NOT include price, availability, or shipping info',
-  ].filter(s => s !== undefined).join('\n');
-
-  const raw    = await callAI(systemMsg, userMsg, 1200);
-  const parsed = extractJSON(raw, 'array');
-
-  const specs = parsed
-    .filter(item => item && typeof item.key === 'string' && typeof item.value === 'string')
-    .map(item => ({ key: item.key.trim(), value: item.value.trim() }))
-    .filter(item => item.key && item.value);
-
-  if (specs.length === 0) throw new Error('AI returned no valid specs');
-  return specs;
+async function generateProductSpecs() {
+  // Automated imports must not publish model-generated technical claims.
+  // The Admin Product editor provides an explicit Google Search research and
+  // human-verification workflow for specifications instead.
+  return [];
 }
 
 /* ── generateBrand — exported helper for scrape.js ──────────────────────────
@@ -638,3 +620,4 @@ module.exports.generateProductDescription = generateProductDescription;
 module.exports.generateProductSpecs       = generateProductSpecs;
 module.exports.generateShortDescription   = generateShortDescription;
 module.exports.generateBrand              = generateBrand;
+module.exports.callOpenRouterWithWebSearch = callOpenRouterWithWebSearch;

@@ -43,6 +43,7 @@ const Stars = ({ rating, count, interactive, selected, onSelect }) => (
 
 const VariantSelector = ({ variant, selected, onSelect }) => {
   const isColor = variant.type === 'color';
+
   return (
     <div className="mb-5">
       <div className="flex items-center gap-2 mb-3">
@@ -461,6 +462,7 @@ export default function ProductDetail() {
   const isOnSale = product.isOnSale && product.salePrice;
   const discount = isOnSale ? Math.round(((product.price - product.salePrice) / product.price) * 100) : 0;
   const inWishlist = wishlist.includes(product._id);
+  const publicSpecifications = (product.specifications || []).filter(spec => spec.verified === true);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8" style={{ background: 'var(--body-bg)' }}>
@@ -659,9 +661,9 @@ export default function ProductDetail() {
         )}
 
         {tab === 'specifications' && (
-          product.specifications?.length > 0 ? (
+          publicSpecifications.length > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {product.specifications.map((s, i) => (
+              {publicSpecifications.map((s, i) => (
                 <Card3D key={i} className="flex gap-4 rounded-2xl p-3 sm:p-4 border text-xs sm:text-sm" style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)' }} rotMax={8}>
                   <span className="text-xs sm:text-sm font-black text-gray-500 w-24 sm:w-32 flex-shrink-0 break-words">{s.key}</span>
                   <span className="text-xs sm:text-sm text-gray-800 font-semibold break-words">{s.value}</span>

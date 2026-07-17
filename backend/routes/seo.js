@@ -46,6 +46,26 @@ function productConditionUrl(condition) {
 // in your Admin → Settings → Logo, which will override this fallback automatically.
 const SHOPZEN_LOGO_URL = 'https://res.cloudinary.com/dn7tvazaw/image/upload/w_512,h_512,c_pad,b_white,f_png/v1779758903/shopzen/1779758893538-714817024.png';
 
+// Facebook Page CTA posts are link cards, so Meta reads the product's
+// server-rendered Open Graph image instead of the images sent to the photo
+// publisher. Fit the complete artwork onto Meta's 1200×630 canvas; c_fill
+// would crop portrait and square product artwork.
+function buildSocialOgImage(rawUrl) {
+  if (!rawUrl || !rawUrl.includes('res.cloudinary.com')) return rawUrl;
+  const marker = '/image/upload/';
+  const markerAt = rawUrl.indexOf(marker);
+  if (markerAt === -1) return rawUrl;
+
+  const prefix = rawUrl.slice(0, markerAt + marker.length);
+  const tail = rawUrl.slice(markerAt + marker.length);
+  const versionAt = tail.search(/(?:^|\/)v\d+\//);
+  const assetPath = versionAt >= 0
+    ? tail.slice(versionAt).replace(/^\//, '')
+    : tail;
+
+  return `${prefix}w_1200,h_630,c_pad,b_auto,f_jpg,q_auto/${assetPath}`;
+}
+
 /** Build a <url> entry with zero or more <image:image> children */
 function urlEntry(loc, lastmod, changefreq = 'weekly', priority = '0.7', images = []) {
   const imgXml = images
@@ -664,7 +684,7 @@ router.get('/product-meta/:slug', async (req, res) => {
     // ALL images for rich results
     const allImages  = [product.thumbnail, ...(product.images || [])].filter(Boolean);
     const uniqueImages = [...new Set(allImages)];
-    const ogImage = uniqueImages[0] || 'https://res.cloudinary.com/dn7tvazaw/image/upload/w_1200,h_630,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png';
+    const ogImage = buildSocialOgImage(uniqueImages[0] || 'https://res.cloudinary.com/dn7tvazaw/image/upload/w_1200,h_630,c_fit,f_png/v1779758903/shopzen/1779758893538-714817024.png');
     const canonical = productUrl;
 
     const keywords = [
@@ -1284,7 +1304,7 @@ const seoRenderMiddleware = async (req, res) => {
         const metaDesc     = `${baseDesc || product.name}. ${priceText}. Fast delivery across Sri Lanka. Shop at ${storeName}.`.slice(0, 165);
         const allImages    = [product.thumbnail, ...(product.images || [])].filter(Boolean);
         const uniqueImages = [...new Set(allImages)];
-        const ogImage      = uniqueImages[0] || defaultOgImage;
+        const ogImage      = buildSocialOgImage(uniqueImages[0] || defaultOgImage);
         const keywords     = [product.name, product.brand, product.category?.name, ...(product.tags || []), 'sri lanka'].filter(Boolean).join(', ');
         const schemaDesc   = plainDesc.slice(0, 500) || (product.brand ? `${product.brand} ${product.name}` : product.name);
 
@@ -1666,3 +1686,4 @@ const seoRenderMiddleware = async (req, res) => {
 
 module.exports = router;
 module.exports.seoRenderMiddleware = seoRenderMiddleware;
+module.exports.buildSocialOgImage = buildSocialOgImage;

@@ -21,7 +21,7 @@ const emptyProduct = {
   costPrice:'', sku:'', category:'', subCategory:'', brand:'', stock:'5', lowStockThreshold:5,
   weight:'', thumbnail:'', images:[],
   tags:'', isFeatured:false, isActive:true, isOnSale:false,
-  specifications:[], variants:[]
+  specifications:[], specificationSources:[], variants:[]
 };
 
 /* ── Modal ── */
@@ -137,7 +137,7 @@ function RichEditor({ value, onChange }) {
 }
 
 /* ── Specifications Panel ── */
-function SpecsPanel({ specs, onChange, onAIGenerate, aiGeneratingSpecs }) {
+function SpecsPanel({ specs, sources, onChange, onAIGenerate, aiGeneratingSpecs }) {
   const [specKey,    setSpecKey]   = useState('');
   const [specVal,    setSpecVal]   = useState('');
   const [pasteText,  setPasteText] = useState('');
@@ -148,7 +148,7 @@ function SpecsPanel({ specs, onChange, onAIGenerate, aiGeneratingSpecs }) {
 
   const addOne = () => {
     if (!specKey.trim() || !specVal.trim()) { toast.error('Enter both name and value'); return; }
-    onChange([...specsRef.current, { key: specKey.trim(), value: specVal.trim() }]);
+    onChange([...specsRef.current, { key: specKey.trim(), value: specVal.trim(), verified: false }]);
     setSpecKey(''); setSpecVal('');
   };
 
@@ -166,7 +166,7 @@ function SpecsPanel({ specs, onChange, onAIGenerate, aiGeneratingSpecs }) {
       else if (pi > 0) { key = line.slice(0,pi).trim();  value = line.slice(pi+1).trim(); }
       else if (di > 0) { key = line.slice(0,di).trim();  value = line.slice(di).replace(/^[\s-]+/,'').trim(); }
       else if (ti > 0) { key = line.slice(0,ti).trim();  value = line.slice(ti+1).trim(); }
-      if (key && value) parsed.push({ key, value });
+      if (key && value) parsed.push({ key, value, verified: false });
     });
     if (parsed.length === 0) { toast.error('Could not parse. Use format: Name: Value'); return; }
     onChange([...specsRef.current, ...parsed]);
@@ -177,11 +177,21 @@ function SpecsPanel({ specs, onChange, onAIGenerate, aiGeneratingSpecs }) {
   const remove   = i => onChange(specsRef.current.filter((_,si)=>si!==i));
   const moveUp   = i => { if(i===0)return; const s=[...specsRef.current];[s[i-1],s[i]]=[s[i],s[i-1]];onChange(s); };
   const moveDown = i => { if(i===specs.length-1)return; const s=[...specsRef.current];[s[i],s[i+1]]=[s[i+1],s[i]];onChange(s); };
+  const toggleVerified = i => onChange(specsRef.current.map((spec,index) => {
+    if (index !== i) return spec;
+    const verified = spec.verified !== true;
+    return {
+      ...spec,
+      verified,
+      verifiedAt: verified ? new Date().toISOString() : undefined,
+      verificationMethod: verified ? (spec.sourceUrl ? 'openrouter-web' : 'admin') : undefined,
+    };
+  }));
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-gray-500">Add technical specifications shown on the product page.</p>
+        <p className="text-sm text-gray-500">Only specifications you verify here can appear in campaign captions.</p>
         {onAIGenerate && (
           <button
             onClick={onAIGenerate}
@@ -189,11 +199,22 @@ function SpecsPanel({ specs, onChange, onAIGenerate, aiGeneratingSpecs }) {
             style={{fontSize:11,padding:'4px 12px',borderRadius:20,border:'1.5px solid var(--color-primary)',color:'var(--color-primary)',background:'transparent',cursor:'pointer',fontWeight:600,display:'flex',alignItems:'center',gap:5,opacity:aiGeneratingSpecs?0.5:1,flexShrink:0}}
           >
             {aiGeneratingSpecs
-              ? <><span style={{display:'inline-block',width:10,height:10,border:'2px solid var(--color-primary)',borderTopColor:'transparent',borderRadius:'50%',animation:'spin 0.7s linear infinite'}}></span>Generating…</>
-              : <>✨ AI Generate Specs</>}
+              ? <><span style={{display:'inline-block',width:10,height:10,border:'2px solid var(--color-primary)',borderTopColor:'transparent',borderRadius:'50%',animation:'spin 0.7s linear infinite'}}></span>Searching…</>
+              : <>🔎 Research via OpenRouter</>}
           </button>
         )}
       </div>
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+        OpenRouter web results are research candidates, not automatic truth. Open the source, confirm the exact model/part number, and then select <strong>Verified for marketing</strong>. Unchecked rows are excluded from scheduled social posts.
+      </div>
+      {Array.isArray(sources) && sources.length > 0 && (
+        <div className="rounded-xl border border-blue-100 bg-blue-50 p-3">
+          <p className="text-xs font-semibold text-blue-900 mb-2">OpenRouter web research sources</p>
+          <div className="space-y-1">
+            {sources.map((source,index)=><a key={`${source.url}-${index}`} href={source.url} target="_blank" rel="noreferrer" className="block text-xs text-blue-700 hover:underline break-all">{source.title || source.domain || source.url}</a>)}
+          </div>
+        </div>
+      )}
       <div className="flex gap-2">
         <input value={specKey} onChange={e=>setSpecKey(e.target.value)}
           onKeyDown={e=>{if(e.key==='Tab'){e.preventDefault();document.getElementById('spec-val')?.focus();}}}
@@ -226,7 +247,8 @@ function SpecsPanel({ specs, onChange, onAIGenerate, aiGeneratingSpecs }) {
       {specs.length > 0 ? (
         <div className="space-y-1.5 max-h-72 overflow-y-auto">
           {specs.map((spec,i) => (
-            <div key={i} className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2">
+            <div key={i} className={`rounded-xl border px-3 py-2 ${spec.verified?'border-green-200 bg-green-50':'border-gray-200 bg-gray-50'}`}>
+              <div className="flex items-center gap-2">
               <div className="flex flex-col gap-0.5">
                 <button onClick={()=>moveUp(i)} className="text-gray-300 hover:text-gray-500 text-xs leading-none">▲</button>
                 <button onClick={()=>moveDown(i)} className="text-gray-300 hover:text-gray-500 text-xs leading-none">▼</button>
@@ -237,6 +259,14 @@ function SpecsPanel({ specs, onChange, onAIGenerate, aiGeneratingSpecs }) {
                 <span className="text-sm text-gray-600">{spec.value}</span>
               </div>
               <button onClick={()=>remove(i)} className="text-red-300 hover:text-red-500 text-sm">✕</button>
+              </div>
+              <div className="mt-2 ml-6 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <label className="flex items-center gap-2 text-xs font-medium text-gray-700 cursor-pointer">
+                  <input type="checkbox" checked={spec.verified===true} onChange={()=>toggleVerified(i)} className="w-4 h-4 accent-green-600"/>
+                  Verified for marketing
+                </label>
+                {spec.sourceUrl&&<a href={spec.sourceUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline truncate max-w-md">Check source: {spec.sourceTitle||spec.sourceUrl}</a>}
+              </div>
             </div>
           ))}
         </div>
@@ -440,7 +470,7 @@ export default function AdminProducts() {
       toast.error('Enter a product name first'); return;
     }
     setAiGeneratingSpecs(true);
-    const toastId = toast.loading('✨ Generating specifications…');
+    const toastId = toast.loading('🔎 Researching the exact product through OpenRouter…');
     try {
       const categoryName = categories.find(c => c._id === current.category)?.name || '';
       const { data } = await API.post('/ai/specs', {
@@ -448,13 +478,10 @@ export default function AdminProducts() {
         category:    categoryName,
         brand:       current.brand       || '',
         sku:         current.sku         || '',
-        price:       current.price       || '',
-        salePrice:   current.salePrice   || '',
-        description: current.description || '',
       });
       if (Array.isArray(data.specs) && data.specs.length > 0) {
-        updateForm(p => ({ ...p, specifications: data.specs }));
-        toast.success(`✅ ${data.specs.length} specs generated!`, { id: toastId });
+        updateForm(p => ({ ...p, specifications: data.specs, specificationSources: data.sources || [] }));
+        toast.success(`Found ${data.specs.length} source-backed candidates. Verify each row before marketing use.`, { id: toastId });
       } else {
         throw new Error('Empty response');
       }
@@ -634,8 +661,9 @@ export default function AdminProducts() {
       thumbnail:        selectedImages[0]  || prev.thumbnail,
       images:           selectedImages.slice(1),
       specifications:   (Array.isArray(d.specifications) && d.specifications.length > 0)
-                          ? d.specifications
+                          ? d.specifications.map(spec=>({...spec,verified:false,verifiedAt:undefined,verificationMethod:undefined}))
                           : prev.specifications,
+      specificationSources: Array.isArray(d.specificationSources) ? d.specificationSources : [],
     }));
     toast.success('Fields filled from URL! Review them then save.');
     setActiveTab('basic');
@@ -2158,6 +2186,7 @@ export default function AdminProducts() {
           {activeTab==='specs' && (
             <SpecsPanel
               specs={form.specifications || []}
+              sources={form.specificationSources || []}
               onChange={newSpecs => updateForm(p => ({ ...p, specifications: newSpecs }))}
               onAIGenerate={generateAISpecs}
               aiGeneratingSpecs={aiGeneratingSpecs}

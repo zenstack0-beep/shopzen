@@ -384,7 +384,7 @@ export default function useSEO({
 
   function buildOgImage(rawUrl) {
     if (!rawUrl || !rawUrl.includes('res.cloudinary.com')) return rawUrl;
-    return rawUrl.replace(/\/upload\/(v\d+\/)?/, '/upload/w_1200,h_630,c_fill,g_auto,f_jpg,q_auto/$1');
+    return rawUrl.replace(/\/upload\/(v\d+\/)?/, '/upload/w_1200,h_630,c_pad,b_auto,f_jpg,q_auto/$1');
   }
   const finalImage = buildOgImage(image || defaultImage);
 

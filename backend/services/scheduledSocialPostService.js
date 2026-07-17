@@ -26,12 +26,22 @@ function scheduledTimeForIndex(startAt,index,gapMinutes,productsPerDay){
 }
 
 function productFeatures(product){
-  const specs=(product.specifications||[]).map(spec=>({key:clean(spec.key,80),value:clean(spec.value,180)})).filter(spec=>spec.key&&spec.value&&!/^(brand|sku|part number|part number \/ sku)$/i.test(spec.key)).slice(0,8);
+  const specs=(product.specifications||[])
+    .filter(spec=>spec.verified===true)
+    .map(spec=>({key:clean(spec.key,80),value:clean(spec.value,180)}))
+    .filter(spec=>spec.key&&spec.value&&!/^(brand|sku|part number|part number \/ sku)$/i.test(spec.key))
+    .slice(0,8);
   const descriptions=[clean(product.shortDescription,500),clean(product.description,900)].filter(Boolean);
   const summary=[...new Set(descriptions)].join(' ').slice(0,1200);
   const tags=(product.tags||[]).map(tag=>clean(tag,60)).filter(Boolean).slice(0,10);
   const category=clean(product.category?.name||product.subCategory,100);
   return {specs,summary,tags,category};
+}
+
+function unverifiedFeatureClaims(caption,product){
+  const claims=String(caption||'').split(/\r?\n/).map(line=>line.match(/^✅\s*([^:\n]+):\s*(\S.*)$/)).filter(Boolean).map(match=>({key:clean(match[1],80),value:clean(match[2],180)}));
+  const allowed=new Set((product.specifications||[]).filter(spec=>spec.verified===true).map(spec=>`${clean(spec.key,80).toLowerCase()}\u0000${clean(spec.value,180).toLowerCase()}`));
+  return claims.filter(claim=>!allowed.has(`${claim.key.toLowerCase()}\u0000${claim.value.toLowerCase()}`));
 }
 
 function localPhone(number){
@@ -115,6 +125,8 @@ function validateEditedCaption(value,product,facts){
   if(facts.voucherCode)required.push(facts.voucherCode);
   const missing=[...new Set(required)].filter(text=>!caption.includes(text));
   if(missing.length)throw new Error(`${product.name}: edited caption is missing verified information (${missing.join(', ')}).`);
+  const unsupported=unverifiedFeatureClaims(caption,product);
+  if(unsupported.length)throw new Error(`${product.name}: feature claims must exactly match specifications marked Verified for marketing (${unsupported.map(claim=>claim.key).join(', ')}).`);
   return caption;
 }
 
@@ -204,7 +216,15 @@ async function saveScheduleDraft(draftId,items,createdBy){
 async function confirmScheduleDraft(draftId,items,createdBy){
   const filter={_id:draftId,status:'draft',expiresAt:{$gt:new Date()}};if(createdBy)filter.createdBy=createdBy;
   const draft=await SocialScheduleDraft.findOneAndUpdate(filter,{$set:{status:'confirming'}},{new:true});
-  if(!draft)throw new Error('Draft was not found, expired, or already confirmed.');
+  if(!draft){
+    const confirmedFilter={_id:draftId,status:'confirmed'};if(createdBy)confirmedFilter.createdBy=createdBy;
+    const confirmed=await SocialScheduleDraft.findOne(confirmedFilter).lean();
+    if(confirmed?.confirmedBatchId){
+      const jobs=await ScheduledSocialPost.find({batchId:confirmed.confirmedBatchId}).sort({scheduledAt:1}).lean();
+      if(jobs.length){const products=new Set(jobs.map(job=>String(job.productId))).size;const platforms=new Set(jobs.map(job=>job.platform)).size;const dailyLimit=jobs[0].productsPerDay||products;return {batchId:confirmed.confirmedBatchId,jobs:jobs.length,products,platforms,productsPerDay:dailyLimit,days:Math.ceil(products/dailyLimit),firstPostAt:jobs[0].scheduledAt,lastPostAt:jobs[jobs.length-1].scheduledAt,alreadyConfirmed:true};}
+    }
+    throw new Error('Draft was not found, expired, or is currently being confirmed.');
+  }
   try{
     const captions=captionMapForDraft(draft,items);
     const result=await createSchedule({productIds:draft.productIds,platforms:draft.platforms,startAt:draft.startAt,gapMinutes:draft.gapMinutes,productsPerDay:draft.productsPerDay,offerPercent:draft.offerPercent,voucherCode:draft.voucherCode,includeSinhala:draft.includeSinhala,ctaType:draft.ctaType,createdBy},{captionOverrides:captions});
@@ -253,6 +273,10 @@ async function runDueScheduledPosts(){
       if(!currentProduct||!currentProduct.isActive||regularPriceChanged||sellingPrice(currentProduct)!==Number(job.sellingPriceSnapshot)){
         await ScheduledSocialPost.updateOne({_id:job._id},{$set:{status:'failed',failureReason:'Product is inactive, missing, or its selling price changed after scheduling. Review and create a new schedule.'}});continue;
       }
+      const unsupportedFeatures=unverifiedFeatureClaims(job.caption,currentProduct);
+      if(unsupportedFeatures.length){
+        await ScheduledSocialPost.updateOne({_id:job._id},{$set:{status:'failed',failureReason:`Caption contains specifications that are not verified for marketing: ${unsupportedFeatures.map(claim=>claim.key).join(', ')}. Verify the exact product specifications in Admin, then retry this scheduled post.`}});continue;
+      }
       if(job.voucherCode){
         const currentCoupon=await Coupon.findOne({code:job.voucherCode,isActive:true,validFrom:{$lte:new Date()},validUntil:{$gte:new Date()}}).lean();
         if(!currentCoupon||!couponApplies(currentCoupon,currentProduct)||String(currentCoupon.type)!==String(job.couponSnapshot?.type)||Number(currentCoupon.value)!==Number(job.couponSnapshot?.value)){
@@ -269,4 +293,4 @@ async function runDueScheduledPosts(){
 let timer=null;
 function startScheduledSocialPostScheduler(){if(timer)return;timer=setInterval(runDueScheduledPosts,30000);timer.unref?.();setTimeout(runDueScheduledPosts,10000);console.log('[Social Scheduler] durable scheduled-post queue registered')}
 
-module.exports={createSchedule,createScheduleDraft,listScheduleDrafts,saveScheduleDraft,confirmScheduleDraft,discardScheduleDraft,templateCaption,fallbackCaption:templateCaption,validateEditedCaption,productFeatures,scheduledTimeForIndex,runDueScheduledPosts,startScheduledSocialPostScheduler};
+module.exports={createSchedule,createScheduleDraft,listScheduleDrafts,saveScheduleDraft,confirmScheduleDraft,discardScheduleDraft,templateCaption,fallbackCaption:templateCaption,validateEditedCaption,productFeatures,unverifiedFeatureClaims,scheduledTimeForIndex,runDueScheduledPosts,startScheduledSocialPostScheduler};

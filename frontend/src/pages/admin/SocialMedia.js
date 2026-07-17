@@ -295,6 +295,8 @@ function PostManagementTab({ connectedPlatforms }) {
   // Products
   const [products, setProducts]       = useState([]);
   const [loadingProds, setLoadingProds] = useState(false);
+  const [productLoadError, setProductLoadError] = useState('');
+  const [productReloadKey, setProductReloadKey] = useState(0);
   const [selectedIds, setSelectedIds] = useState(new Set());
 
   // Platform selection
@@ -325,7 +327,7 @@ function PostManagementTab({ connectedPlatforms }) {
   const [previewScheduled,setPreviewScheduled] = useState(null);
   const [scheduleForm,setScheduleForm] = useState(()=>{const defaults={startAt:new Date(Date.now()+10*60000-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16),gapMinutes:5,productsPerDay:5,offerPercent:0,voucherCode:'',includeSinhala:true,ctaType:'shop_now'};try{return {...defaults,...JSON.parse(localStorage.getItem('shopzen.socialSchedule.form')||'{}')}}catch{return defaults}});
 
-  const loadSchedules=useCallback(async()=>{try{const [jobs,batches,drafts]=await Promise.all([API.get('/social-media/schedules',{params:{limit:50}}),API.get('/social-media/schedule-batches',{params:{limit:20}}),API.get('/social-media/schedule-drafts')]);setScheduled(jobs.data.items||[]);setScheduleBatches(batches.data.items||[]);setScheduleDrafts(drafts.data.items||[])}catch{}},[]);
+  const loadSchedules=useCallback(async()=>{const [jobs,batches,drafts]=await Promise.allSettled([API.get('/social-media/schedules',{params:{limit:50}}),API.get('/social-media/schedule-batches',{params:{limit:20}}),API.get('/social-media/schedule-drafts')]);if(jobs.status==='fulfilled')setScheduled(jobs.value.data.items||[]);if(batches.status==='fulfilled')setScheduleBatches(batches.value.data.items||[]);if(drafts.status==='fulfilled')setScheduleDrafts(drafts.value.data.items||[])},[]);
 
   // ── Load brands + categories on mount ──────────────────────────────────────
   useEffect(() => {
@@ -340,23 +342,38 @@ function PostManagementTab({ connectedPlatforms }) {
 
   // ── Load products whenever filter changes ───────────────────────────────────
   useEffect(() => {
+    let cancelled=false;
     const load = async () => {
       setLoadingProds(true);
-      setSelectedIds(new Set());
-      try {
-        const params = new URLSearchParams({ limit: 200, status: 'active' });
-        if (filterBrand) params.set('brand', filterBrand);
-        if (filterCat)   params.set('category', filterCat);
-        const { data } = await API.get(`/products/admin/all?${params}`);
-        setProducts(data.products || []);
-      } catch {
-        toast.error('Failed to load products');
-      } finally {
-        setLoadingProds(false);
+      setProductLoadError('');
+      const params = new URLSearchParams({ limit: 200, status: 'active' });
+      if (filterBrand) params.set('brand', filterBrand);
+      if (filterCat)   params.set('category', filterCat);
+      for(let attempt=1;attempt<=3;attempt++){
+        try {
+          const { data } = await API.get(`/products/admin/all?${params}`);
+          if (!cancelled) {
+            const nextProducts = data.products || [];
+            const nextIds = new Set(nextProducts.map(product => product._id));
+            setProducts(nextProducts);
+            setSelectedIds(current => new Set([...current].filter(id => nextIds.has(id))));
+          }
+          break;
+        } catch (error) {
+          if (attempt === 3 && !cancelled) {
+            const message = error.response?.data?.message || 'Products are temporarily unavailable.';
+            setProductLoadError(message);
+            toast.error(`${message} Please try Refresh Products.`);
+          } else {
+            await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+          }
+        }
       }
+      if(!cancelled)setLoadingProds(false);
     };
     load();
-  }, [filterBrand, filterCat]);
+    return()=>{cancelled=true};
+  }, [filterBrand, filterCat, productReloadKey]);
 
   const toggleProduct  = (id) => setSelectedIds(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const toggleAllProds = () => {
@@ -477,7 +494,22 @@ function PostManagementTab({ connectedPlatforms }) {
 
       {/* ── Filters ── */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-        <h2 className="text-sm font-semibold text-gray-800 mb-4">Filter Products</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-gray-800">Filter Products</h2>
+          <button
+            type="button"
+            className="text-xs font-medium text-primary disabled:opacity-50"
+            disabled={loadingProds}
+            onClick={() => setProductReloadKey(value => value + 1)}
+          >
+            {loadingProds ? 'Loading…' : 'Refresh Products'}
+          </button>
+        </div>
+        {productLoadError && (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            {productLoadError} Previously loaded products remain available; select Refresh Products to retry.
+          </div>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="form-label">Brand</label>
@@ -614,7 +646,7 @@ function PostManagementTab({ connectedPlatforms }) {
           <label className="text-xs text-gray-500">Offer percentage<input type="number" min="0" max="95" step="0.01" className="form-input mt-1" value={scheduleForm.offerPercent} onChange={e=>setScheduleForm({...scheduleForm,offerPercent:e.target.value})}/></label>
         </div>
         {selectedIds.size>0&&<div className="rounded-xl bg-violet-50 p-3 text-xs text-violet-800">Schedule plan: {selectedIds.size} products · up to {Number(scheduleForm.productsPerDay)||0} per day · {Math.ceil(selectedIds.size/(Number(scheduleForm.productsPerDay)||1))} day(s) · first post each day at {scheduleForm.startAt?new Date(scheduleForm.startAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'—'} · {Number(scheduleForm.gapMinutes)||0}-minute gaps.</div>}
-        <div><p className="text-sm font-semibold text-gray-800 mb-2">Facebook post button</p><div className="grid grid-cols-1 sm:grid-cols-3 gap-2">{[{value:'shop_now',label:'🛒 Shop Now',help:'Opens the exact product page.'},{value:'whatsapp',label:'💬 WhatsApp',help:'Opens a prefilled WhatsApp enquiry.'},{value:'none',label:'No native button',help:'Uses the existing Facebook photo-post format.'}].map(option=><label key={option.value} className={`rounded-xl border p-3 cursor-pointer ${scheduleForm.ctaType===option.value?'border-primary bg-primary/5':'border-gray-200'}`}><span className="flex items-center gap-2 text-sm font-medium"><input type="radio" name="scheduleCta" value={option.value} checked={scheduleForm.ctaType===option.value} onChange={event=>setScheduleForm({...scheduleForm,ctaType:event.target.value})}/>{option.label}</span><span className="block text-xs text-gray-500 mt-1 ml-5">{option.help}</span></label>)}</div><p className="text-xs text-amber-600 mt-2">Native buttons apply to Facebook Page posts. WhatsApp requires the Facebook Page to be linked to the ShopZen WhatsApp Business account. Other platforms keep the links inside the caption.</p></div>
+        <div><p className="text-sm font-semibold text-gray-800 mb-2">Facebook post format</p><div className="grid grid-cols-1 sm:grid-cols-3 gap-2">{[{value:'shop_now',label:'🛒 Shop Now button',help:'One complete fitted preview image plus a button to the exact product page.'},{value:'whatsapp',label:'💬 WhatsApp button',help:'One complete fitted preview image plus a prefilled WhatsApp button.'},{value:'none',label:'Multi-image carousel',help:'All product images, but Facebook cannot add a native button to this organic format.'}].map(option=><label key={option.value} className={`rounded-xl border p-3 cursor-pointer ${scheduleForm.ctaType===option.value?'border-primary bg-primary/5':'border-gray-200'}`}><span className="flex items-center gap-2 text-sm font-medium"><input type="radio" name="scheduleCta" value={option.value} checked={scheduleForm.ctaType===option.value} onChange={event=>setScheduleForm({...scheduleForm,ctaType:event.target.value})}/>{option.label}</span><span className="block text-xs text-gray-500 mt-1 ml-5">{option.help}</span></label>)}</div><div className="mt-2 space-y-1 text-xs text-amber-700"><p><strong>Facebook:</strong> Meta supports the native Shop Now/WhatsApp button on a single link-card preview. Select Multi-image carousel when showing every product image is more important than the button.</p><p><strong>Instagram:</strong> Organic feed and carousel posts do not support per-post native CTA buttons. The reviewed caption will contain the product link, WhatsApp link and phone number; configure the WhatsApp contact button on the Instagram professional profile for a tappable profile action.</p></div></div>
         <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm text-blue-900"><strong>Review required before scheduling</strong><span className="block text-xs text-blue-700 mt-1">Generate the verified descriptions first, review or edit every product, then use Confirm &amp; Schedule. No post is scheduled by the preview button.</span></div>
         <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={scheduleForm.includeSinhala} onChange={e=>setScheduleForm({...scheduleForm,includeSinhala:e.target.checked})}/><span><strong>Include Sinhala</strong><span className="block text-xs text-gray-500">Enabled: attractive natural Sinhala + English mixed caption. Disabled: English-only caption.</span></span></label>
         {selectedIds.size>0&&Number(scheduleForm.offerPercent)>0&&<div className="rounded-xl bg-green-50 p-3 text-xs text-green-800">Example: {(()=>{const p=products.find(x=>selectedIds.has(x._id));const price=Number(p?.salePrice||p?.price||0);return p?`${p.name}: LKR ${price.toLocaleString()} → LKR ${(price*(1-Number(scheduleForm.offerPercent)/100)).toLocaleString(undefined,{maximumFractionDigits:2})} with ${scheduleForm.voucherCode||'a required percentage voucher'}`:''})()}</div>}

@@ -24,7 +24,7 @@ const socialScheduleDraftSchema=new mongoose.Schema({
   createdBy:{type:mongoose.Schema.Types.ObjectId,ref:'User'},
   confirmedBatchId:{type:String,default:''},
   confirmedAt:Date,
-  expiresAt:{type:Date,required:true,index:true},
+  expiresAt:{type:Date,required:true},
 },{timestamps:true});
 
 socialScheduleDraftSchema.index({expiresAt:1},{expireAfterSeconds:0});

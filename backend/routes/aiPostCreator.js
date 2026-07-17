@@ -21,7 +21,7 @@
  *                                                  Low-token AI call — only
  *                                                  name/category/brand/price/
  *                                                  discount are sent, reusing
- *                                                  the same OpenRouter→Gemini
+ *                                                  the same OpenRouter-only
  *                                                  caller pattern as routes/ai.js.
  *   POST /api/ai-post-creator/upload-creative    → uploads a generated PNG/JPG/
  *                                                  WEBP (base64 data URL) and
@@ -156,33 +156,9 @@ async function callOpenRouter(systemMsg, userMsg, maxTokens) {
   return data.choices?.[0]?.message?.content?.trim() || '';
 }
 
-async function callGemini(prompt, maxTokens) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { maxOutputTokens: maxTokens, temperature: 0.6 },
-    }),
-  });
-  if (!res.ok) throw new Error(`Gemini error ${res.status}: ${await res.text()}`);
-  const data = await res.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
-}
-
 async function callAI(systemMsg, userMsg, maxTokens = 220) {
-  if (process.env.OPENROUTER_API_KEY) {
-    try {
-      return await callOpenRouter(systemMsg, userMsg, maxTokens);
-    } catch (err) {
-      console.warn('[AI Post Creator] OpenRouter failed, trying Gemini fallback:', err.message);
-      if (process.env.GEMINI_API_KEY) return await callGemini(`${systemMsg}\n\n${userMsg}`, maxTokens);
-      throw err;
-    }
-  }
-  if (process.env.GEMINI_API_KEY) return callGemini(`${systemMsg}\n\n${userMsg}`, maxTokens);
-  throw new Error('No AI key configured. Set OPENROUTER_API_KEY or GEMINI_API_KEY in your .env');
+  if (!process.env.OPENROUTER_API_KEY) throw new Error('No AI key configured. Set OPENROUTER_API_KEY in your .env');
+  return callOpenRouter(systemMsg, userMsg, maxTokens);
 }
 
 function extractJSON(raw, type = 'object') {
@@ -462,7 +438,7 @@ router.post('/generate-photoreal', async (req, res) => {
    generationMode: "template" (vs the existing "ai" flow above, which is
    left completely untouched). This section:
      - never imports from, calls, or mutates anything in the AI flow above
-       (callAI / callOpenRouter / callGemini / generate-photoreal / etc.)
+       (callAI / callOpenRouter / generate-photoreal / etc.)
      - uses its own isolated rendering engine: services/templateRenderer.js
        (Sharp-based compositing, no node-canvas dependency)
      - background removal happens CLIENT-SIDE in the browser via
