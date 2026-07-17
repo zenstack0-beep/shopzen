@@ -1,12 +1,31 @@
 const express = require('express');
 const router = express.Router();
-const { Category, Product } = require('../models/index');
+const { Category } = require('../models/index');
+const Product = require('../models/Product');
 const { adminAuth } = require('../middleware/auth');
 
 async function publicCategoryFilter(req, baseFilter) {
   if (req.query.inventory !== 'true') return baseFilter;
-  const categoryIds = await Product.distinct('category', { isActive: true });
-  return { ...baseFilter, _id: { $in: categoryIds.filter(Boolean) } };
+  const directIds = (await Product.distinct('category', { isActive: true })).filter(Boolean);
+
+  // Products can belong to subcategories. Include their active ancestors so
+  // the public parent-category grid remains navigable, while categories with
+  // no real products stay hidden.
+  const inventoryIds = new Set(directIds.map(String));
+  let frontier = directIds;
+  while (frontier.length) {
+    const categories = await Category.find({ _id: { $in: frontier }, isActive: true })
+      .select('parent')
+      .lean();
+    const parents = categories
+      .map(category => category.parent)
+      .filter(Boolean)
+      .filter(parent => !inventoryIds.has(String(parent)));
+    parents.forEach(parent => inventoryIds.add(String(parent)));
+    frontier = parents;
+  }
+
+  return { ...baseFilter, _id: { $in: [...inventoryIds] } };
 }
 
 // ── PUBLIC: Get all active parent categories (no parent) ────────────────────

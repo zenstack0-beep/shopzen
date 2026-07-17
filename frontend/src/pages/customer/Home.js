@@ -687,7 +687,7 @@ export default function Home() {
   }, [settings]);
 
   useEffect(() => {
-    Promise.all([
+    Promise.allSettled([
       API.get('/products?featured=true&limit=8'),
       API.get('/products?limit=8'),
       API.get('/products?onSale=true&limit=8'),
@@ -695,13 +695,15 @@ export default function Home() {
       API.get('/banners?position=hero'),
       API.get('/banners?position=promo'),
     ]).then(([feat,newest,sale,cats,hero,promo]) => {
-      setFeatured(feat.data.products||[]);
-      setNewArrivals(newest.data.products||[]);
-      setOnSale(sale.data.products||[]);
-      setCategories(cats.data||[]);
-      setHeroBanners(hero.data||[]);
-      setPromoBanners(promo.data||[]);
-    }).catch(()=>{}).finally(()=>setDbReady(true));
+      // Optional sections must fail independently. A category/banner outage
+      // must never discard successful product responses and blank the store.
+      if (feat.status === 'fulfilled') setFeatured(feat.value.data.products || []);
+      if (newest.status === 'fulfilled') setNewArrivals(newest.value.data.products || []);
+      if (sale.status === 'fulfilled') setOnSale(sale.value.data.products || []);
+      if (cats.status === 'fulfilled') setCategories(cats.value.data || []);
+      if (hero.status === 'fulfilled') setHeroBanners(hero.value.data || []);
+      if (promo.status === 'fulfilled') setPromoBanners(promo.value.data || []);
+    }).finally(()=>setDbReady(true));
   },[]);
 
   // Kill stale ScrollTriggers from previous page so GSAP recalculates from top.
