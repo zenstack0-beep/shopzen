@@ -9,10 +9,20 @@ import axios from 'axios';
  *   and increases Edge Requests / Function Invocations.
  */
 const DEFAULT_API_URL = 'https://shopzen-production.up.railway.app/api';
-const PUBLIC_CACHE_PREFIX = 'shopzen_public_api_cache_v2:';
+const PUBLIC_CACHE_PREFIX = 'shopzen_public_api_cache_v3:';
 
 const hasWindow = typeof window !== 'undefined';
 const hasLocalStorage = () => hasWindow && typeof window.localStorage !== 'undefined';
+
+// Remove the previous public-settings cache generation, which may contain
+// fields that are now classified as server-only secrets.
+if (hasLocalStorage()) {
+  try {
+    Object.keys(window.localStorage)
+      .filter(key => key.startsWith('shopzen_public_api_cache_v2:'))
+      .forEach(key => window.localStorage.removeItem(key));
+  } catch {}
+}
 
 const normalizeBaseURL = (url) => {
   const configured = String(url || '').trim();

@@ -158,7 +158,28 @@ function invalidateSettingsCache() {
 // Keys that must NEVER be sent to the browser via this public endpoint.
 // They are still readable server-side (see backend/routes/reviews.js
 // "GET /google", which reads Settings directly with Settings.find()).
-const PUBLIC_RESPONSE_SECRET_KEYS = ['googlePlacesApiKey'];
+const PUBLIC_RESPONSE_SECRET_KEYS = new Set([
+  'googlePlacesApiKey',
+  'meta_capi_token',
+  'capiAccessToken',
+  'meta_test_event_code',
+  'capiTestEventCode',
+]);
+
+function isSecretSettingKey(key) {
+  return PUBLIC_RESPONSE_SECRET_KEYS.has(key)
+    || /secret|password|access.?token|private.?key|api.?key|api.?token|capi.?token/i.test(String(key));
+}
+
+function sanitizePublicSetting(value) {
+  if (Array.isArray(value)) return value.map(sanitizePublicSetting);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !isSecretSettingKey(key))
+      .map(([key, nestedValue]) => [key, sanitizePublicSetting(nestedValue)])
+  );
+}
 
 // Get all settings as a flat key→value object (public — needed for store name etc.)
 router.get('/', async (req, res) => {
@@ -189,8 +210,8 @@ router.get('/', async (req, res) => {
     const settings = await Settings.find().lean();
     const obj = {};
     settings.forEach(s => {
-      if (PUBLIC_RESPONSE_SECRET_KEYS.includes(s.key)) return; // never expose secrets here
-      obj[s.key] = s.value;
+      if (isSecretSettingKey(s.key)) return; // never expose secrets here
+      obj[s.key] = sanitizePublicSetting(s.value);
     });
 
     _settingsCache = obj;

@@ -8,7 +8,9 @@ import React, {
 import API from '../utils/api';
 
 const ThemeContext = createContext();
-const LS_KEY = 'shopzen_theme_v2';
+const LS_KEY = 'shopzen_theme_v3';
+
+try { localStorage.removeItem('shopzen_theme_v2'); } catch {}
 
 /* ── 20+ Theme palette ──────────────────────────────────────────────────── */
 export const THEMES = {
@@ -145,8 +147,8 @@ export const applyTheme = (settings) => {
       let fav = document.querySelector(`link[rel="${rel}"]`);
       if (!fav) { fav = document.createElement('link'); fav.rel = rel; document.head.appendChild(fav); }
       fav.href = rel === 'apple-touch-icon'
-        ? `/apple-touch-icon.png?v=${version}`
-        : `/favicon-96x96.png?v=${version}`;
+        ? `/shopzen-favicon-v2-180x180.png?v=${version}`
+        : `/shopzen-favicon-v2-96x96.png?v=${version}`;
     });
   }
 
