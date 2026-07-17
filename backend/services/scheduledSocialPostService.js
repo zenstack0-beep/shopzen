@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const mongoose = require('mongoose');
 const Product = require('../models/Product');
 const ScheduledSocialPost = require('../models/ScheduledSocialPost');
+const SocialScheduleDraft = require('../models/SocialScheduleDraft');
 const { Coupon, Settings } = require('../models/index');
 const { publishNow } = require('./publisherService');
 const { getOrCreate, decryptPlatformFields } = require('./socialMediaService');
@@ -103,7 +104,23 @@ function templateCaption(product, facts) {
   return lines.join('\n');
 }
 
-async function createSchedule({ productIds, platforms, startAt, gapMinutes, productsPerDay=5, offerPercent=0, voucherCode='', includeSinhala=true, createdBy }) {
+function validateEditedCaption(value,product,facts){
+  const caption=String(value||'').trim();
+  if(!caption)throw new Error(`${product.name}: caption cannot be empty.`);
+  if(caption.length>5000)throw new Error(`${product.name}: caption must be 5,000 characters or fewer.`);
+  if(/localhost|127\.0\.0\.1/i.test(caption))throw new Error(`${product.name}: caption contains a local development URL.`);
+  const required=[clean(product.name,220),facts.productUrl,facts.whatsappUrl,facts.whatsappDisplay,money(facts.regularPrice)];
+  if(facts.productSale)required.push(money(facts.sellingPrice));
+  if(facts.promotionalPrice!==facts.sellingPrice)required.push(money(facts.displayPromotionalPrice));
+  if(facts.voucherCode)required.push(facts.voucherCode);
+  const missing=[...new Set(required)].filter(text=>!caption.includes(text));
+  if(missing.length)throw new Error(`${product.name}: edited caption is missing verified information (${missing.join(', ')}).`);
+  return caption;
+}
+
+async function createSchedule({ productIds, platforms, startAt, gapMinutes, productsPerDay=5, offerPercent=0, voucherCode='', includeSinhala=true, createdBy },options={}) {
+  const {previewOnly=false,captionOverrides={}}=options;
+  const overrides=captionOverrides instanceof Map?captionOverrides:new Map(Object.entries(captionOverrides||{}));
   const ids=[...new Set((productIds||[]).map(String))];
   const validPlatforms=['facebook','instagram','tiktok','whatsapp','telegram'];
   const platformList=[...new Set((platforms||[]).filter(p=>validPlatforms.includes(p)))];
@@ -138,12 +155,65 @@ async function createSchedule({ productIds, platforms, startAt, gapMinutes, prod
     const lowStock=Number(product.stock)>0&&Number(product.stock)<=Number(product.lowStockThreshold||5);
     const productSalePercent=productSale?Math.round((1-price/regularPrice)*10000)/100:0;
     const facts={regularPrice,sellingPrice:price,productSale,productSalePercent,promotionalPrice,displayPromotionalPrice,offerPercent:effectivePercent,voucherCode:coupon?.code||'',voucherText,lowStock,features:productFeatures(product),productUrl,whatsappDisplay:localPhone(contact.whatsappNumber),whatsappUrl:`https://wa.me/${contact.whatsappNumber}`,languageMode};
-    const generated={caption:templateCaption(product,facts),source:'template'};
+    const editedCaption=overrides.get(String(product._id));
+    const generated=editedCaption==null?{caption:templateCaption(product,facts),source:'template'}:{caption:validateEditedCaption(editedCaption,product,facts),source:'admin'};
     const scheduledAt=scheduledTimeForIndex(start,index,gap,dailyLimit);
     for(const platform of platformList) docs.push({batchId,batchState:'active',scheduleStartAt:start,gapMinutes:gap,productsPerDay:dailyLimit,totalProducts:ordered.length,productId:product._id,productName:product.name,platform,scheduledAt,caption:generated.caption,captionSource:generated.source,languageMode,offerPercent:effectivePercent,regularPriceSnapshot:regularPrice,sellingPriceSnapshot:price,productSalePercentSnapshot:productSalePercent,promotionalPriceSnapshot:promotionalPrice,displayPromotionalPriceSnapshot:displayPromotionalPrice,voucherCode:facts.voucherCode,couponSnapshot:coupon?{id:coupon._id,code:coupon.code,type:coupon.type,value:coupon.value,validUntil:coupon.validUntil}:null,createdBy});
   }
-  await ScheduledSocialPost.insertMany(docs,{ordered:true});
-  return {batchId,jobs:docs.length,products:ordered.length,platforms:platformList.length,productsPerDay:dailyLimit,days:Math.ceil(ordered.length/dailyLimit),firstPostAt:start,lastPostAt:docs[docs.length-1].scheduledAt};
+  if(!previewOnly)await ScheduledSocialPost.insertMany(docs,{ordered:true});
+  const result={batchId,jobs:docs.length,products:ordered.length,platforms:platformList.length,productsPerDay:dailyLimit,days:Math.ceil(ordered.length/dailyLimit),firstPostAt:start,lastPostAt:docs[docs.length-1].scheduledAt};
+  if(previewOnly){result._docs=docs;result._config={productIds:ordered.map(product=>product._id),platforms:platformList,startAt:start,gapMinutes:gap,productsPerDay:dailyLimit,offerPercent:effectivePercent,voucherCode:coupon?.code||'',includeSinhala:includeSinhala!==false};}
+  return result;
+}
+
+function draftPayload(draft){
+  const value=draft.toObject?draft.toObject():draft;
+  return {_id:value._id,status:value.status,platforms:value.platforms,startAt:value.startAt,gapMinutes:value.gapMinutes,productsPerDay:value.productsPerDay,offerPercent:value.offerPercent,voucherCode:value.voucherCode,includeSinhala:value.includeSinhala,items:value.items,expiresAt:value.expiresAt,createdAt:value.createdAt};
+}
+
+async function createScheduleDraft(args){
+  const preview=await createSchedule(args,{previewOnly:true});
+  const uniqueItems=[];const seen=new Set();
+  for(const doc of preview._docs){const id=String(doc.productId);if(seen.has(id))continue;seen.add(id);uniqueItems.push({productId:doc.productId,productName:doc.productName,scheduledAt:doc.scheduledAt,caption:doc.caption});}
+  const draft=await SocialScheduleDraft.create({...preview._config,items:uniqueItems,createdBy:args.createdBy,expiresAt:new Date(Date.now()+24*60*60*1000)});
+  return {draft:draftPayload(draft),summary:{products:preview.products,platforms:preview.platforms,jobs:preview.jobs,days:preview.days,firstPostAt:preview.firstPostAt,lastPostAt:preview.lastPostAt}};
+}
+
+async function listScheduleDrafts(createdBy){
+  const filter={status:'draft',expiresAt:{$gt:new Date()}};if(createdBy)filter.createdBy=createdBy;
+  return (await SocialScheduleDraft.find(filter).sort({createdAt:-1}).limit(20).lean()).map(draftPayload);
+}
+
+function captionMapForDraft(draft,items){
+  const submitted=new Map((items||[]).map(item=>[String(item.productId),String(item.caption||'')]));
+  const expected=draft.items.map(item=>String(item.productId));
+  if(submitted.size!==expected.length||expected.some(id=>!submitted.has(id)))throw new Error('Every draft product must have exactly one caption before confirmation.');
+  return submitted;
+}
+
+async function saveScheduleDraft(draftId,items,createdBy){
+  const filter={_id:draftId,status:'draft'};if(createdBy)filter.createdBy=createdBy;
+  const draft=await SocialScheduleDraft.findOne(filter);if(!draft)throw new Error('Draft was not found, expired, or already confirmed.');
+  const captions=captionMapForDraft(draft,items);
+  draft.items.forEach(item=>{const caption=captions.get(String(item.productId)).trim();if(!caption||caption.length>5000)throw new Error(`${item.productName}: caption must contain 1 to 5,000 characters.`);item.caption=caption;});
+  await draft.save();return draftPayload(draft);
+}
+
+async function confirmScheduleDraft(draftId,items,createdBy){
+  const filter={_id:draftId,status:'draft',expiresAt:{$gt:new Date()}};if(createdBy)filter.createdBy=createdBy;
+  const draft=await SocialScheduleDraft.findOneAndUpdate(filter,{$set:{status:'confirming'}},{new:true});
+  if(!draft)throw new Error('Draft was not found, expired, or already confirmed.');
+  try{
+    const captions=captionMapForDraft(draft,items);
+    const result=await createSchedule({productIds:draft.productIds,platforms:draft.platforms,startAt:draft.startAt,gapMinutes:draft.gapMinutes,productsPerDay:draft.productsPerDay,offerPercent:draft.offerPercent,voucherCode:draft.voucherCode,includeSinhala:draft.includeSinhala,createdBy},{captionOverrides:captions});
+    draft.items.forEach(item=>{item.caption=captions.get(String(item.productId)).trim();});draft.status='confirmed';draft.confirmedBatchId=result.batchId;draft.confirmedAt=new Date();await draft.save();
+    return result;
+  }catch(error){await SocialScheduleDraft.updateOne({_id:draft._id,status:'confirming'},{$set:{status:'draft'}});throw error;}
+}
+
+async function discardScheduleDraft(draftId,createdBy){
+  const filter={_id:draftId,status:'draft'};if(createdBy)filter.createdBy=createdBy;
+  const draft=await SocialScheduleDraft.findOneAndUpdate(filter,{$set:{status:'discarded'}},{new:true});if(!draft)throw new Error('Draft was not found or is no longer editable.');return {success:true};
 }
 
 let running=false;
@@ -197,4 +267,4 @@ async function runDueScheduledPosts(){
 let timer=null;
 function startScheduledSocialPostScheduler(){if(timer)return;timer=setInterval(runDueScheduledPosts,30000);timer.unref?.();setTimeout(runDueScheduledPosts,10000);console.log('[Social Scheduler] durable scheduled-post queue registered')}
 
-module.exports={createSchedule,templateCaption,fallbackCaption:templateCaption,productFeatures,scheduledTimeForIndex,runDueScheduledPosts,startScheduledSocialPostScheduler};
+module.exports={createSchedule,createScheduleDraft,listScheduleDrafts,saveScheduleDraft,confirmScheduleDraft,discardScheduleDraft,templateCaption,fallbackCaption:templateCaption,validateEditedCaption,productFeatures,scheduledTimeForIndex,runDueScheduledPosts,startScheduledSocialPostScheduler};

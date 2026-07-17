@@ -15,7 +15,7 @@ const { getOrCreate, decryptPlatformFields } = require('../services/socialMediaS
 const { inspectToken } = require('../services/facebookTokenRefresh');
 const { manualPublish } = require('../services/publisherService');
 const ScheduledSocialPost = require('../models/ScheduledSocialPost');
-const { createSchedule } = require('../services/scheduledSocialPostService');
+const { createSchedule, createScheduleDraft, listScheduleDrafts, saveScheduleDraft, confirmScheduleDraft, discardScheduleDraft } = require('../services/scheduledSocialPostService');
 
 // ─── PUBLIC: storefront footer social links (no secrets) ─────────────────────
 router.get('/public', async (req, res) => {
@@ -158,6 +158,33 @@ router.post('/schedules', async (req,res) => {
     const result=await createSchedule({...req.body,createdBy:req.user?._id||req.admin?._id});
     res.status(201).json(result);
   } catch(error) { res.status(400).json({message:error.message}); }
+});
+
+router.post('/schedules/preview', async (req,res) => {
+  try {
+    const result=await createScheduleDraft({...req.body,createdBy:req.user?._id||req.admin?._id});
+    res.status(201).json(result);
+  } catch(error){res.status(400).json({message:error.message});}
+});
+
+router.get('/schedule-drafts', async (req,res) => {
+  try {res.json({items:await listScheduleDrafts(req.user?._id||req.admin?._id)});}
+  catch(error){res.status(500).json({message:'Schedule drafts could not be loaded'});}
+});
+
+router.patch('/schedule-drafts/:id', async (req,res) => {
+  try {res.json({draft:await saveScheduleDraft(req.params.id,req.body.items,req.user?._id||req.admin?._id)});}
+  catch(error){res.status(400).json({message:error.message});}
+});
+
+router.post('/schedule-drafts/:id/confirm', async (req,res) => {
+  try {res.status(201).json(await confirmScheduleDraft(req.params.id,req.body.items,req.user?._id||req.admin?._id));}
+  catch(error){res.status(400).json({message:error.message});}
+});
+
+router.delete('/schedule-drafts/:id', async (req,res) => {
+  try {res.json(await discardScheduleDraft(req.params.id,req.user?._id||req.admin?._id));}
+  catch(error){res.status(400).json({message:error.message});}
 });
 
 router.get('/schedules', async (req,res) => {
