@@ -168,6 +168,43 @@ const makeCachedResponse = (entry, config = {}) => ({
 
 const rawGet = API.get.bind(API);
 
+// Public storefront requests can occasionally fail on the first hit when the
+// production API is waking up or a mobile in-app browser briefly changes
+// networks. Never convert those transient failures into a false "not found".
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const isTransientGetError = (error) => {
+  const status = Number(error?.response?.status || 0);
+  return (
+    !error?.response ||
+    error?.code === 'ECONNABORTED' ||
+    error?.code === 'ERR_NETWORK' ||
+    status === 408 ||
+    status === 425 ||
+    status === 429 ||
+    status >= 500
+  );
+};
+
+const getWithRetry = async (url, config = {}) => {
+  const maxAttempts = Math.max(1, Number(config.retryAttempts || 3));
+  let lastError;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await rawGet(url, config);
+    } catch (error) {
+      lastError = error;
+      if (!isTransientGetError(error) || attempt === maxAttempts) throw error;
+
+      // Short exponential delay: 350ms, 700ms. This is long enough for a
+      // transient gateway/cold-start failure but remains fast for ad visitors.
+      await sleep(350 * (2 ** (attempt - 1)));
+    }
+  }
+
+  throw lastError;
+};
+
 API.get = (url, config = {}) => {
   const path = getPath(url);
   const shouldCache =
@@ -175,7 +212,7 @@ API.get = (url, config = {}) => {
     isPublicGetPath(path) &&
     !(config.headers && (config.headers.Authorization || config.headers.authorization));
 
-  if (!shouldCache) return rawGet(url, config);
+  if (!shouldCache) return getWithRetry(url, config);
 
   const key = cacheKeyFor(url, config);
   const ttl = Number.isFinite(config.cacheTtl) ? config.cacheTtl : ttlForPath(path);
@@ -194,7 +231,7 @@ API.get = (url, config = {}) => {
 
   if (pendingPublicGets.has(key)) return pendingPublicGets.get(key);
 
-  const request = rawGet(url, config)
+  const request = getWithRetry(url, config)
     .then((res) => {
       const entry = {
         data: res.data,
