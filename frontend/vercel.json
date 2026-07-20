@@ -147,35 +147,35 @@
     },
     {
       "source": "/",
-      "destination": "https://shopzen-production.up.railway.app/"
+      "destination": "/index.html"
     },
     {
       "source": "/product/:slug",
-      "destination": "https://shopzen-production.up.railway.app/product/:slug"
+      "destination": "/index.html"
     },
     {
       "source": "/category/:slug",
-      "destination": "https://shopzen-production.up.railway.app/category/:slug"
+      "destination": "/index.html"
     },
     {
       "source": "/brand/:slug",
-      "destination": "https://shopzen-production.up.railway.app/brand/:slug"
+      "destination": "/index.html"
     },
     {
       "source": "/shop",
-      "destination": "https://shopzen-production.up.railway.app/shop"
+      "destination": "/index.html"
     },
     {
       "source": "/gift-cards",
-      "destination": "https://shopzen-production.up.railway.app/gift-cards"
+      "destination": "/index.html"
     },
     {
       "source": "/page/:slug",
-      "destination": "https://shopzen-production.up.railway.app/page/:slug"
+      "destination": "/index.html"
     },
     {
       "source": "/campaign/:slug",
-      "destination": "https://shopzen-production.up.railway.app/campaign/:slug"
+      "destination": "/index.html"
     },
     {
       "source": "/admin/:path*",
@@ -255,25 +255,37 @@
     {
       "source": "/admin/:path*",
       "headers": [
-        { "key": "X-Robots-Tag", "value": "noindex, nofollow, nosnippet" }
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow, nosnippet"
+        }
       ]
     },
     {
       "source": "/:private(login|register|forgot-password|cart|checkout|wishlist|returns|account|my-orders)",
       "headers": [
-        { "key": "X-Robots-Tag", "value": "noindex, nofollow, nosnippet" }
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow, nosnippet"
+        }
       ]
     },
     {
       "source": "/order-success/:id",
       "headers": [
-        { "key": "X-Robots-Tag", "value": "noindex, nofollow, nosnippet" }
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow, nosnippet"
+        }
       ]
     },
     {
       "source": "/track-order/:id",
       "headers": [
-        { "key": "X-Robots-Tag", "value": "noindex, nofollow, nosnippet" }
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow, nosnippet"
+        }
       ]
     },
     {
@@ -332,8 +344,14 @@
     {
       "source": "/shopzen-favicon-v7-:size.png",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=3600, must-revalidate" },
-        { "key": "Content-Type", "value": "image/png" }
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600, must-revalidate"
+        },
+        {
+          "key": "Content-Type",
+          "value": "image/png"
+        }
       ]
     },
     {
@@ -378,22 +396,40 @@
     {
       "source": "/favicon-16x16.png",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=3600, must-revalidate" },
-        { "key": "Content-Type", "value": "image/png" }
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600, must-revalidate"
+        },
+        {
+          "key": "Content-Type",
+          "value": "image/png"
+        }
       ]
     },
     {
       "source": "/android-chrome-192x192.png",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=3600, must-revalidate" },
-        { "key": "Content-Type", "value": "image/png" }
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600, must-revalidate"
+        },
+        {
+          "key": "Content-Type",
+          "value": "image/png"
+        }
       ]
     },
     {
       "source": "/android-chrome-512x512.png",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=3600, must-revalidate" },
-        { "key": "Content-Type", "value": "image/png" }
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600, must-revalidate"
+        },
+        {
+          "key": "Content-Type",
+          "value": "image/png"
+        }
       ]
     },
     {

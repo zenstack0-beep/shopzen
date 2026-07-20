@@ -8,6 +8,23 @@ import React, {
 import API from '../utils/api';
 
 const ThemeContext = createContext();
+
+const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+async function loadSettingsWithRetry(attempts = 3) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      // Bypass a stale/default browser cache on initial storefront bootstrap.
+      return await API.get('/settings', { cache: false });
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts || (error?.response?.status && error.response.status < 500)) throw error;
+      await wait(500 * attempt);
+    }
+  }
+  throw lastError;
+}
 const LS_KEY = 'shopzen_theme_v3';
 
 try { localStorage.removeItem('shopzen_theme_v2'); } catch {}
@@ -185,7 +202,7 @@ export const ThemeProvider = ({ children }) => {
     // Don't overwrite a theme that was just saved (5s grace period)
     if (Date.now() - lastSaveRef.current < 5000) return;
     try {
-      const { data } = await API.get('/settings', { cacheTtl: 30 * 60 * 1000 });
+      const { data } = await loadSettingsWithRetry();
       if (!data || typeof data !== 'object' || Array.isArray(data)) return;
       if (!('storeName' in data || 'theme' in data)) return;
       setSettings(data);

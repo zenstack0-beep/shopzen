@@ -15,6 +15,25 @@ import { WhatsAppProductInquiry } from '../../components/WhatsAppWidget';
 
 gsap.registerPlugin(ScrollTrigger);
 
+// A direct ad/deep-link can arrive while the production API is waking up or
+// during a brief network/CDN interruption. Retry only transient failures; a
+// confirmed 404 remains a real "Product not found" response.
+const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+async function loadProductWithRetry(slug, attempts = 3) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await API.get(`/products/${encodeURIComponent(slug)}`, { cache: false });
+    } catch (error) {
+      lastError = error;
+      if (error?.response?.status === 404 || attempt === attempts) throw error;
+      await wait(500 * attempt);
+    }
+  }
+  throw lastError;
+}
+
 // Strip external inline styles and class names from pasted HTML so it
 // renders cleanly with the store theme instead of Sony/Apple/etc. styles.
 function sanitizeHtml(html) {
@@ -179,7 +198,8 @@ export default function ProductDetail() {
   useEffect(() => {
     setLoading(true); setSelVars({}); setSimilarLoading(true);
     if (window.location.hash === '#reviews') setTab('reviews'); else setTab('description');
-    API.get(`/products/${slug}`).then(r => {
+    setProduct(null);
+    loadProductWithRetry(slug).then(r => {
       setProduct(r.data);
       trackViewItem(r.data);
       trackMarketingEvent('product_viewed', { productId: r.data._id, categoryId: r.data.category?._id });
@@ -289,7 +309,10 @@ export default function ProductDetail() {
         localStorage.setItem(key, JSON.stringify(updated));
         setRecentlyViewed(updated.filter(p => p._id !== r.data._id).slice(0, 4));
       } catch (_) {}
-    }).catch(() => toast.error('Product not found')).finally(() => setLoading(false));
+    }).catch((err) => {
+      if (err?.response?.status === 404) toast.error('Product not found');
+      else toast.error('Unable to load this product. Please try again.');
+    }).finally(() => setLoading(false));
     if (user) API.get('/auth/wishlist').then(r => setWishlist(r.data.map(p => p._id))).catch(() => {});
     API.get('/whatsapp/config').then(r => setWaConfig(r.data)).catch(() => {});
   }, [slug, user]);
@@ -417,7 +440,7 @@ export default function ProductDetail() {
       setReviewForm({ rating: 5, title: '', comment: '' });
       setReviewableOrderId(null);
       API.get(`/reviews/product/${product._id}`).then(rr => setReviews(rr.data || [])).catch(() => {});
-      API.get(`/products/${slug}`).then(r => setProduct(r.data)).catch(() => {});
+      loadProductWithRetry(slug, 2).then(r => setProduct(r.data)).catch(() => {});
     } catch (err) { toast.error(err.response?.data?.message || 'Failed'); }
     finally { setSubmittingReview(false); }
   };
