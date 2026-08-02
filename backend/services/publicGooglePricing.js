@@ -6,10 +6,12 @@
 // Checkout remains the source of truth for applying the actual coupon.
 function publicCouponDiscount(product, coupons = []) {
   const productId = String(product._id || '');
-  const categoryId = String(product.category?._id || product.category || '');
-  const brand = String(product.brand || '');
-  const base = Number(product.salePrice > 0 && product.salePrice < product.price ? product.salePrice : product.price);
+  const hasDirectSale = Number(product.salePrice) > 0 && Number(product.salePrice) < Number(product.price);
+  const base = Number(hasDirectSale ? product.salePrice : product.price);
   if (!Number.isFinite(base) || base <= 0) return 0;
+  // A manual product sale is already the merchant-approved final price. Never
+  // stack a coupon on top of it for product cards, SEO, or installments.
+  if (hasDirectSale) return 0;
 
   let best = 0;
   for (const coupon of coupons) {
@@ -26,13 +28,9 @@ function publicCouponDiscount(product, coupons = []) {
     // product/category/brand coupon can change the product-card quote.
     const hasScope = products.length || categories.length || brands.length;
     if (!hasScope) continue;
-    if (hasScope) {
-      const productMatch = products.length && products.includes(productId);
-      const categoryMatch = categories.length && categories.includes(categoryId);
-      const brandMatch = brands.length && brands.includes(brand);
-      const matches = products.length ? productMatch : (categories.length && brands.length ? categoryMatch && brandMatch : categoryMatch || brandMatch);
-      if (!matches || (coupon.excludedProducts || []).map(String).includes(productId)) continue;
-    }
+    // Product-card pricing cannot know cart context for category/brand
+    // coupons. Only an explicit product assignment is safe to publish.
+    if (!products.length || !products.includes(productId) || (coupon.excludedProducts || []).map(String).includes(productId)) continue;
 
     const discount = coupon.type === 'percentage'
       ? Math.min(base * Number(coupon.value || 0) / 100, Number(coupon.maxDiscount || Infinity))
