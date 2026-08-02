@@ -130,6 +130,16 @@ function extractJSON(raw, type = 'object') {
   const close = type === 'array' ? ']' : '}';
   const start = raw.indexOf(open);
   const end   = raw.lastIndexOf(close);
+  if (type === 'array' && start !== -1 && (end === -1 || end <= start)) {
+    // OpenRouter can truncate a long grounded response before the closing
+    // bracket. Recover complete objects and discard only the incomplete tail.
+    const recovered = [];
+    const objectPattern = /\{(?:[^{}"']|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')*\}/g;
+    for (const match of String(raw).slice(start).matchAll(objectPattern)) {
+      try { recovered.push(JSON.parse(match[0])); } catch {}
+    }
+    if (recovered.length) return recovered;
+  }
   if (start === -1 || end === -1 || end <= start)
     throw new Error(`No JSON ${type} in response: ` + raw.slice(0, 120));
   return JSON.parse(raw.slice(start, end + 1));
@@ -433,7 +443,8 @@ router.post('/specs', async (req, res) => {
     'STRICT VERIFICATION RULES:',
     '- First confirm the exact model or part number. Do not combine facts from similar products, another phone size, another generation, or a regional variant.',
     '- Prefer the official manufacturer product page, official manual, official support page, or exact product packaging documentation.',
-    '- Include at most 8 useful marketing specifications that are explicitly written in a source.',
+    '- Include at most 6 useful marketing specifications that are explicitly written in a source.',
+    '- Keep each sourceUrl under 300 characters and each sourceTitle under 100 characters.',
     '- Never infer material, compatibility, dimensions, weight, output, warranty, safety certification, or regulatory certification.',
     '- Never convert units unless the source provides both units.',
     '- Do not use generic values. Omit any field that is absent, ambiguous, conflicting, or belongs to a similar model.',
@@ -442,7 +453,7 @@ router.post('/specs', async (req, res) => {
   ].join('\n');
 
   try {
-    const grounded = await callOpenRouterWithWebSearch(researchPrompt);
+    const grounded = await callOpenRouterWithWebSearch(researchPrompt, 1200);
     const parsed = extractJSON(grounded.text, 'array');
     const specs = parsed
       .filter(item => item && typeof item.key === 'string' && typeof item.value === 'string')
