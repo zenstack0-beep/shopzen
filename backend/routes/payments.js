@@ -125,7 +125,14 @@ const PAYZY_FIELDS = ['x_test_mode','x_shopid','x_amount','x_order_id','x_respon
 const payzyValue = v => String(v ?? '').replace(/[\r\n]/g, ' ').trim();
 function payzySignature(data, secret, responseCode) {
   const names = responseCode !== undefined ? ['response_code', ...PAYZY_FIELDS] : PAYZY_FIELDS;
-  const values = names.map(name => `${name}=${payzyValue(name === 'response_code' ? responseCode : data[name])}`);
+  const values = names.map(name => {
+    const value = name === 'response_code'
+      ? responseCode
+      : name === 'signed_field_names' && responseCode !== undefined
+        ? names.join(',')
+        : data[name];
+    return `${name}=${payzyValue(value)}`;
+  });
   return crypto.createHmac('sha256', secret).update(values.join(',')).digest('base64');
 }
 // Payzy's supplied custom-web sample uses a legacy request-signature format:
