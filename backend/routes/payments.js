@@ -106,7 +106,13 @@ router.get('/installment-quote/:productId', async (req, res) => {
     const quote = publicGooglePrice(product, coupons);
     const plans = gateways.flatMap(g => (g.config?.installmentPlans || [])
       .filter(p => p.active !== false)
-      .map(p => ({ ...(p.toObject ? p.toObject() : p), provider: p.provider || g.gateway, providerLogo: p.providerLogo || g.config?.logoUrl || g.logo || null })));
+      .map(p => {
+        const plan = { ...(p.toObject ? p.toObject() : p), provider: p.provider || g.gateway, providerLogo: p.providerLogo || g.config?.logoUrl || g.logo || null };
+        const months = Math.max(1, Number(plan.months) || 1);
+        const interestRate = Number(plan.interestRate || 0);
+        const totalPayable = Math.round((Number(quote.publicSalePrice || quote.price) * (1 + interestRate / 100)) * 100) / 100;
+        return { ...plan, months, interestRate, totalPayable, monthlyAmount: Math.round((totalPayable / months) * 100) / 100 };
+      }));
     res.json({ amount: quote.publicSalePrice || quote.price, originalAmount: quote.price, discounted: Boolean(quote.publicSalePrice), plans });
   } catch (err) {
     console.error('[installment quote]', err.message);
