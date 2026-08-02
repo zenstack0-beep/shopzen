@@ -158,7 +158,10 @@ router.post('/payzy/init', requireAuth, paymentInitLimiter, async (req,res) => {
     const gw = await PaymentGateway.findOne({gateway:'payzy',isEnabled:true});
     if (!order || order.paymentMethod !== 'payzy' || (order.customer && String(order.customer) !== String(req.user.id))) return res.status(404).json({message:'Payzy order not found'});
     if (!gw?.config?.shopId || !gw?.config?.secretKey) return res.status(503).json({message:'Payzy is not fully configured.'});
-    const base = process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || 'https://shopzen.lk';
+    // Set PAYZY_RESPONSE_BASE_URL to the publicly reachable ShopZen origin.
+    // This prevents an old local/ngrok PUBLIC_APP_URL from being sent to Payzy
+    // after deployment.
+    const base = process.env.PAYZY_RESPONSE_BASE_URL || (gw.isLive ? process.env.FRONTEND_URL : (process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL)) || 'https://shopzen.lk';
     const b = order.billing || {}, s = order.shipping || b, company = sanitise(gw.config.companyName || 'ShopZen');
     const data={x_test_mode:gw.isLive?'off':'on',x_shopid:payzyValue(gw.config.shopId),x_amount:Number(order.total).toFixed(2),x_order_id:payzyValue(order.orderNumber),x_response_url:`${base}/api/payments/payzy/response`,x_first_name:sanitise(b.firstName),x_last_name:sanitise(b.lastName),x_company:company,x_address:sanitise(b.street),x_country:sanitise(b.country),x_state:sanitise(b.state),x_city:sanitise(b.city),x_zip:sanitise(b.zip),x_phone:sanitise(b.phone),x_email:sanitise(b.email),x_ship_to_first_name:sanitise(s.firstName||b.firstName),x_ship_to_last_name:sanitise(s.lastName||b.lastName),x_ship_to_company:company,x_ship_to_address:sanitise(s.street||b.street),x_ship_to_country:sanitise(s.country||b.country),x_ship_to_state:sanitise(s.state||b.state),x_ship_to_city:sanitise(s.city||b.city),x_ship_to_zip:sanitise(s.zip||b.zip),x_freight:Number(order.shippingCost||0).toFixed(2),x_platform:'custom',x_version:'1.0'};
     data.signed_field_names=PAYZY_FIELDS.join(','); data.signature=payzyInitSignature(data,gw.config.secretKey); await require('../models/Order').findByIdAndUpdate(order._id,{paymentMetadata:data}); const payzyBaseUrl=gw.isLive?'https://api.payzy.lk':'https://api.payzypay.xyz'; upstreamEndpoint=`${payzyBaseUrl}/checkout/custom-checkout`; const response=await fetch(upstreamEndpoint,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(data)}); const raw=await response.text(); let json={}; try{json=JSON.parse(raw)}catch{} const checkoutUrl=(typeof json==='string'?json:'')||json?.data?.url||json?.data?.redirect_url||json?.data?.checkout_url||json?.data?.data?.url||json?.response?.data?.url||json?.url||json?.redirect_url||json?.checkout_url||(raw.match(/https?:\/\/[^\s"'<>]+/i)||[])[0]; if(!response.ok||!checkoutUrl) { console.error('[Payzy init] Unexpected response',{endpoint:upstreamEndpoint,status:response.status,body:raw.slice(0,1000)}); await rollbackOrder(); return res.status(502).json({message:`Payzy production API returned HTTP ${response.status} without a checkout URL. The order was cancelled.`}); } res.json({url:checkoutUrl});
@@ -188,6 +191,25 @@ async function handlePayzyResponse(req, res) {
         { new: true }
       );
       confirmed = Boolean(updated) || order.paymentStatus === 'paid';
+      if (updated) {
+        const { Notification } = require('../models/index');
+        const { sendOrderWhatsAppNotification } = require('../services/whatsappOrderNotify');
+        const { sendMail, getAdminEmail, orderConfirmHtml, newOrderAdminHtml, isEmailEnabled } = require('../utils/mailer');
+        await Notification.create({
+          type: 'new_order', title: '🛒 Payzy Payment Received!',
+          message: `Order ${updated.orderNumber} from ${updated.billing?.firstName || ''} ${updated.billing?.lastName || ''} — Rs. ${Number(updated.total || 0).toLocaleString()}`,
+          link: `/admin/orders/${updated._id}`,
+          data: { orderId: updated._id, total: updated.total, paymentMethod: 'payzy' },
+        }).catch(error => console.error('[PAYZY CALLBACK notification]', error.message));
+        sendOrderWhatsAppNotification(updated).catch(error => console.error('[PAYZY CALLBACK WhatsApp]', error.message));
+        if (updated.billing?.email && await isEmailEnabled('order_placed_customer')) {
+          sendMail({ to: updated.billing.email, subject: `Order Confirmed — ${updated.orderNumber} | ShopZen`, html: await orderConfirmHtml(updated) }).catch(error => console.error('[PAYZY CALLBACK customer email]', error.message));
+        }
+        const adminEmail = await getAdminEmail();
+        if (adminEmail && await isEmailEnabled('order_placed_admin')) {
+          sendMail({ to: adminEmail, subject: `🛒 Payzy Order ${updated.orderNumber} — Rs. ${Number(updated.total || 0).toLocaleString()} | ShopZen`, html: await newOrderAdminHtml(updated) }).catch(error => console.error('[PAYZY CALLBACK admin email]', error.message));
+        }
+      }
       console.log(`[PAYZY CALLBACK] ${order.orderNumber} signature verified; order ${confirmed ? 'confirmed' : 'already confirmed'}`);
     } else {
       console.error('[PAYZY CALLBACK] Verification failed', { orderId: params.x_order_id, responseCode: params.response_code, hasSignature: Boolean(suppliedSignature) });
