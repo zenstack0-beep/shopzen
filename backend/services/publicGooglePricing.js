@@ -21,7 +21,11 @@ function publicCouponDiscount(product, coupons = []) {
     const products = (coupon.applicableProducts || []).map(String);
     const categories = (coupon.applicableCategories || []).map(String);
     const brands = (coupon.applicableBrands || []).map(String);
+    // A general/site-wide coupon requires cart/customer context and must not
+    // be published as a permanent product discount. Only an explicitly scoped
+    // product/category/brand coupon can change the product-card quote.
     const hasScope = products.length || categories.length || brands.length;
+    if (!hasScope) continue;
     if (hasScope) {
       const productMatch = products.length && products.includes(productId);
       const categoryMatch = categories.length && categories.includes(categoryId);
