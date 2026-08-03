@@ -93,6 +93,10 @@ const helmetMiddleware = helmet({
       // Allow GA4/GTM beacons, Meta Pixel XHR, and your own APIs.
       connectSrc: [
         "'self'",
+        // Production React storefront calls the public API directly on Railway.
+        // Without this origin, deep links load the shell but the DB bootstrap
+        // request is blocked by CSP and the fail-closed screen is shown.
+        'https://shopzen-production.up.railway.app',
         'https://www.google-analytics.com',
         'https://analytics.google.com',
         'https://stats.g.doubleclick.net',
