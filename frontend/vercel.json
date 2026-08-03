@@ -54,6 +54,16 @@
       "source": "/shop/:category",
       "destination": "/category/:category",
       "permanent": true
+    },
+    {
+      "source": "/page/terms-and-conditions",
+      "destination": "/page/terms",
+      "permanent": true
+    },
+    {
+      "source": "/page/privacy-policy",
+      "destination": "/page/privacy",
+      "permanent": true
     }
   ],
   "rewrites": [
@@ -88,6 +98,22 @@
     {
       "source": "/robots.txt",
       "destination": "https://shopzen-production.up.railway.app/api/seo/robots.txt"
+    },
+    {
+      "source": "/page/:slug",
+      "destination": "https://shopzen-production.up.railway.app/page/:slug"
+    },
+    {
+      "source": "/product/:slug",
+      "destination": "https://shopzen-production.up.railway.app/product/:slug"
+    },
+    {
+      "source": "/category/:slug",
+      "destination": "https://shopzen-production.up.railway.app/category/:slug"
+    },
+    {
+      "source": "/brand/:slug",
+      "destination": "https://shopzen-production.up.railway.app/brand/:slug"
     },
     {
       "source": "/favicon.png",
