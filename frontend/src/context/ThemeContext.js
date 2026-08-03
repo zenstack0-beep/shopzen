@@ -198,6 +198,7 @@ export const ThemeProvider = ({ children }) => {
   const loadAndApply = useCallback(async () => {
     // Don't overwrite a theme that was just saved (5s grace period)
     if (Date.now() - lastSaveRef.current < 5000) return;
+    setSettingsError(false);
     try {
       const { data } = await loadSettingsWithRetry();
       if (!data || typeof data !== 'object' || Array.isArray(data)) return;
@@ -302,9 +303,11 @@ export const ThemeProvider = ({ children }) => {
     return (
       <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 24, background: '#f8fafc', fontFamily: 'Arial, sans-serif' }}>
         <div style={{ maxWidth: 520, textAlign: 'center', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, padding: 32, boxShadow: '0 10px 30px rgba(15,23,42,.08)' }}>
-          <h1 style={{ margin: '0 0 12px', color: '#0f172a', fontSize: 24 }}>ShopZen is temporarily unavailable</h1>
+          <h1 style={{ margin: '0 0 12px', color: '#0f172a', fontSize: 24 }}>{settingsError ? 'ShopZen is temporarily unavailable' : 'Loading ShopZen…'}</h1>
           <p style={{ margin: '0 0 20px', color: '#64748b', lineHeight: 1.6 }}>
-            We are connecting to the store database. No default or incomplete store data will be shown.
+            {settingsError
+              ? 'We could not connect to the store database. No default or incomplete store data is being shown.'
+              : 'Connecting securely to the store database…'}
           </p>
           {settingsError && <button type="button" onClick={() => { setSettingsError(false); loadAndApply(); }} style={{ border: 0, borderRadius: 10, padding: '11px 18px', color: '#fff', background: '#15803d', cursor: 'pointer', fontWeight: 700 }}>Try again</button>}
         </div>
