@@ -90,10 +90,6 @@ export const FONTS = {
 };
 
 /* ── localStorage helpers ─────────────────────────────────────────────── */
-const readCache = () => {
-  try { const r = localStorage.getItem(LS_KEY); return r ? JSON.parse(r) : null; }
-  catch { return null; }
-};
 export const writeCache = (data) => {
   try { localStorage.setItem(LS_KEY, JSON.stringify(data)); } catch {}
 };
@@ -182,18 +178,19 @@ export const applyTheme = (settings) => {
 /* ── IIFE: runs before React ─────────────────────────────────────────── */
 // Only apply cache if index.html bootstrap hasn't already fetched the real
 // theme from the API (window.__szApiFetched is set by index.html on success).
-try { if (!window.__szApiFetched) { applyTheme(readCache()); } } catch {}
-
 /* ── ThemeProvider ───────────────────────────────────────────────────── */
 export const ThemeProvider = ({ children }) => {
-  const [settings, setSettings] = useState(() => readCache());
-  const [themeKey, setThemeKey] = useState(() => readCache()?.theme || 'default');
-  const [darkMode, setDarkModeState] = useState(() => readCache()?.darkMode || false);
+  // Storefront rendering is deliberately gated on a successful database
+  // response. Rendering the cached/default theme while the API is unavailable
+  // makes a deep link look like a different, empty store.
+  const [settings, setSettings] = useState(null);
+  const [themeKey, setThemeKey] = useState('default');
+  const [darkMode, setDarkModeState] = useState(false);
+  const [settingsReady, setSettingsReady] = useState(false);
+  const [settingsError, setSettingsError] = useState(false);
 
   useLayoutEffect(() => {
-    // Skip if index.html already fetched the real theme from API —
-    // applying cache here would overwrite it with stale/default data.
-    if (!window.__szApiFetched) { applyTheme(readCache()); }
+    // Do not apply a local/default theme before the database responds.
   }, []);
 
   const lastSaveRef = React.useRef(0);
@@ -206,6 +203,8 @@ export const ThemeProvider = ({ children }) => {
       if (!data || typeof data !== 'object' || Array.isArray(data)) return;
       if (!('storeName' in data || 'theme' in data)) return;
       setSettings(data);
+      setSettingsReady(true);
+      setSettingsError(false);
       setThemeKey(data.theme || 'default');
       setDarkModeState(data.darkMode || false);
       applyTheme(data);
@@ -237,7 +236,8 @@ export const ThemeProvider = ({ children }) => {
       };
       window.dispatchEvent(new CustomEvent('shopzen:seo-ready'));
     } catch (err) {
-      // Silently ignore ECONNREFUSED / network errors (backend not yet started)
+      setSettingsReady(false);
+      setSettingsError(true);
       if (err?.code !== 'ERR_NETWORK' && err?.response) {
         console.warn('[ThemeContext] settings fetch error:', err.message);
       }
@@ -297,6 +297,20 @@ export const ThemeProvider = ({ children }) => {
     lastSaveRef.current = 0; // bypass grace period for explicit refresh
     loadAndApply();
   }, [loadAndApply]);
+
+  if (!settingsReady) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 24, background: '#f8fafc', fontFamily: 'Arial, sans-serif' }}>
+        <div style={{ maxWidth: 520, textAlign: 'center', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, padding: 32, boxShadow: '0 10px 30px rgba(15,23,42,.08)' }}>
+          <h1 style={{ margin: '0 0 12px', color: '#0f172a', fontSize: 24 }}>ShopZen is temporarily unavailable</h1>
+          <p style={{ margin: '0 0 20px', color: '#64748b', lineHeight: 1.6 }}>
+            We are connecting to the store database. No default or incomplete store data will be shown.
+          </p>
+          {settingsError && <button type="button" onClick={() => { setSettingsError(false); loadAndApply(); }} style={{ border: 0, borderRadius: 10, padding: '11px 18px', color: '#fff', background: '#15803d', cursor: 'pointer', fontWeight: 700 }}>Try again</button>}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <ThemeContext.Provider value={{ settings, themeKey, darkMode, setDarkMode, saveTheme, THEMES, THEME_CATEGORIES, FONTS, refreshTheme, applyTheme }}>
