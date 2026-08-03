@@ -355,7 +355,10 @@ ${brandEntries.join('\n')}
 // ── GET /api/seo/pages-sitemap.xml — Static pages ─────────────────────────────
 router.get('/pages-sitemap.xml', async (req, res) => {
   try {
-    const siteUrl = await getSiteUrl();
+    const [siteUrl, businessPages] = await Promise.all([
+      getSiteUrl(),
+      BusinessPage.find({ isActive: true }, 'slug updatedAt').lean(),
+    ]);
     const today   = new Date().toISOString().split('T')[0];
 
     const staticPages = [
@@ -367,6 +370,18 @@ router.get('/pages-sitemap.xml', async (req, res) => {
     const entries = staticPages.map(p =>
       urlEntry(`${siteUrl}${p.path}`, today, p.freq, p.pri)
     );
+
+    // Include only active pages that the public frontend can render.
+    // This keeps the sitemap aligned with the database instead of leaving
+    // valid business pages undiscoverable by Google.
+    for (const page of businessPages) {
+      if (!page.slug) continue;
+      entries.push(urlEntry(
+        `${siteUrl}/page/${page.slug}`,
+        page.updatedAt ? new Date(page.updatedAt).toISOString().split('T')[0] : today,
+        'monthly', '0.5'
+      ));
+    }
 
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -1624,6 +1639,16 @@ const seoRenderMiddleware = async (req, res) => {
   // ── /page/:slug ────────────────────────────────────────────────────────────
   const pageMatch = req.path.match(/^\/page\/([^/]+)$/);
   if (pageMatch) {
+    // Preserve links indexed under the old slugs. These are real pages, so a
+    // permanent redirect prevents Google from treating the old URLs as soft
+    // 404s while keeping existing bookmarks and links working.
+    const legacyPageSlugs = {
+      'terms-and-conditions': 'terms',
+      'privacy-policy': 'privacy',
+    };
+    if (legacyPageSlugs[pageMatch[1]]) {
+      return res.redirect(301, `/page/${legacyPageSlugs[pageMatch[1]]}`);
+    }
     const page = await BusinessPage.findOne({ slug: pageMatch[1], isActive: true }).lean();
     if (!page) {
       const missing = injectMeta(html, {
