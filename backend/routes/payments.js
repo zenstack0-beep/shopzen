@@ -199,11 +199,12 @@ router.post('/koko/init', requireAuth, paymentInitLimiter, async (req, res) => {
     const c = gw?.config || {};
     if (!order || order.paymentMethod !== 'koko' || String(order.customer) !== String(req.user.id)) return res.status(404).json({ message: 'Koko order not found' });
     if (!c.merchantId || !c.apiKey || !c.privateKey || !c.publicKey) return res.status(503).json({ message: 'Koko is not fully configured.' });
-    if (String(c.privateKey).length < 100 || !String(c.privateKey).includes('PRIVATE KEY')) return res.status(503).json({ message: 'Koko private key is invalid.' });
     const base = (process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
     const backend = (process.env.BACKEND_URL || base).replace(/\/$/, '');
     const data = { merchantId: String(c.merchantId), amount: Number(order.total).toFixed(2), currency: 'LKR', pluginName: c.pluginName || 'customapi', pluginVersion: Number(c.pluginVersion || 1), returnUrl: `${base}/my-orders?new=${order._id}&payment=koko`, cancelUrl: `${base}/checkout?payment=cancelled`, responseUrl: `${backend}/api/payments/koko/response`, orderId: order.orderNumber, reference: order.orderNumber, firstName: order.billing?.firstName, lastName: order.billing?.lastName, email: order.billing?.email, description: `ShopZen order ${order.orderNumber}`, apiKey: String(c.apiKey), mobileNo: order.billing?.phone };
-    const signature = crypto.sign('RSA-SHA256', Buffer.from(kokoSignaturePayload(data)), String(c.privateKey)).toString('base64');
+    let signature;
+    try { signature = crypto.sign('RSA-SHA256', Buffer.from(kokoSignaturePayload(data)), String(c.privateKey).replace(/\\n/g, '\n')).toString('base64'); }
+    catch { return res.status(503).json({ message: 'Koko private key is invalid. Paste the complete RSA PEM key, including BEGIN/END lines.' }); }
     await Order.updateOne({ _id: order._id }, { $set: { paymentMetadata: { ...data, signature } } });
     const endpoint = c.endpoint || (gw.isLive ? 'https://api.paykoko.com/api/merchants/orderCreate' : 'https://qaapi.paykoko.com/api/merchants/orderCreate');
     const fields = { _mId:data.merchantId, api_key:data.apiKey, _returnUrl:data.returnUrl, _responseUrl:data.responseUrl, _currency:data.currency, _amount:data.amount, _reference:data.reference, _pluginName:data.pluginName, _pluginVersion:String(data.pluginVersion), _cancelUrl:data.cancelUrl, _orderId:data.orderId, _firstName:data.firstName || '', _lastName:data.lastName || '', _email:data.email || '', _description:data.description, dataString:kokoSignaturePayload(data), signature, _mobileNo:data.mobileNo || '' };
