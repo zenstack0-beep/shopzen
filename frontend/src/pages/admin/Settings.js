@@ -41,7 +41,7 @@ const GATEWAY_PRESETS = {
   stripe: { name: 'Stripe', logo: '💜', color: '#635bff', fields: [{ key:'publicKey', label:'Publishable Key', type:'text', hint:'pk_test_... or pk_live_...' }, { key:'secretKey', label:'Secret Key', type:'password', hint:'sk_test_... or sk_live_...' }, { key:'webhookSecret', label:'Webhook Secret', type:'password' }] },
   paypal: { name: 'PayPal', logo: '🅿️', color: '#003087', fields: [{ key:'clientId', label:'Client ID', type:'text' }, { key:'clientSecret', label:'Client Secret', type:'password' }] },
   payzy: { name: 'Payzy', logo: '🟣', color: '#6d28d9', fields: [{ key:'shopId', label:'Shop ID', type:'text' }, { key:'secretKey', label:'Secret API Key', type:'password' }, { key:'companyName', label:'Company Name', type:'text' }, { key:'logoUrl', label:'Payzy Logo (upload or URL)', type:'image', hint:'Upload the logo or paste a public HTTPS image URL. It will appear to customers.' }] },
-  koko: { name: 'Koko', logo: '🟦', color: '#2563eb', fields: [{ key:'merchantId', label:'Merchant ID', type:'text' }, { key:'secretKey', label:'Secret Key', type:'password' }] },
+  koko: { name: 'Koko', logo: '🟦', color: '#2563eb', fields: [{ key:'merchantId', label:'Merchant ID', type:'text' }, { key:'apiKey', label:'API Key', type:'password' }, { key:'privateKey', label:'Private Key (PEM)', type:'textarea', hint:'Paste the RSA private key supplied by Koko. Keep this server-side.' }, { key:'publicKey', label:'Koko Public Key (PEM)', type:'textarea', hint:'Used to verify Koko callbacks.' }] },
 };
 
 
@@ -923,6 +923,9 @@ export default function AdminSettings() {
                                     <input type="url" value={cfg[field.key] || ''} onChange={e => setGwConfigs(p => ({ ...p, [gwKey]: { ...p[gwKey], [field.key]: e.target.value } }))}
                                       className="form-input text-sm mt-2" placeholder="https://example.com/payzy-logo.png" />
                                   </>
+                                ) : field.type === 'textarea' ? (
+                                  <textarea rows={5} value={cfg[field.key]||''} onChange={e=>setGwConfigs(p=>({...p,[gwKey]:{...p[gwKey],[field.key]:e.target.value}}))}
+                                    className="form-input text-sm font-mono" placeholder="-----BEGIN KEY-----" />
                                 ) : (
                                   <input type={field.type} value={cfg[field.key]||''} onChange={e=>setGwConfigs(p=>({...p,[gwKey]:{...p[gwKey],[field.key]:e.target.value}}))}
                                     className="form-input text-sm" placeholder={field.type==='password'?'••••••••':''}/>

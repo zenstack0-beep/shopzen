@@ -833,7 +833,7 @@ export default function Checkout() {
         return;
       }
 
-      // ── COD / bank_transfer / Payzy / free — create order now ───────────────
+      // ── COD / bank_transfer / Payzy / Koko / free — create order now ────────
       const _purchaseEventId = generateEventId('Purchase', Date.now());
       const { fbp: _fbp, fbc: _fbc } = getFbCookies();
       const { data } = await API.post('/orders', {
@@ -851,6 +851,20 @@ export default function Checkout() {
         } catch (payzyError) {
           await API.post('/payments/payzy/abort', { orderId: data.orderId }).catch(() => {});
           throw payzyError;
+        }
+        return;
+      }
+
+      if (effectivePaymentMethod === 'koko') {
+        try {
+          const koko = await API.post('/payments/koko/init', { orderId: data.orderId });
+          if (!koko.data?.url || !koko.data?.fields) throw new Error('Koko returned no checkout form');
+          const form = document.createElement('form'); form.method = 'POST'; form.action = koko.data.url;
+          Object.entries(koko.data.fields).forEach(([key, value]) => { const input = document.createElement('input'); input.type = 'hidden'; input.name = key; input.value = value ?? ''; form.appendChild(input); });
+          document.body.appendChild(form); form.submit();
+        } catch (kokoError) {
+          await API.post('/payments/koko/abort', { orderId: data.orderId }).catch(() => {});
+          throw kokoError;
         }
         return;
       }
@@ -1482,6 +1496,7 @@ export default function Checkout() {
                           {gw.gateway === 'stripe'  && 'Enter your card details securely via Stripe'}
                           {gw.gateway === 'paypal'  && 'Complete payment via PayPal'}
                           {gw.gateway === 'payzy'   && 'Pay securely with Payzy installments'}
+                          {gw.gateway === 'koko'    && 'Pay securely with Koko Buy Now Pay Later'}
                         </div>
                         {gw.gateway === 'payzy' && (gw.installmentPlans || []).length > 0 && <div className="text-xs text-gray-500 mt-1">{gw.installmentPlans.slice(0, 3).map((p, i) => <span key={i} className="mr-3">{p.months} × {(total * (1 + Number(p.interestRate || 0) / 100) / Number(p.months || 1)).toFixed(2)} {(p.provider || 'payzy').toUpperCase()}</span>)}</div>}
                       </div>
@@ -1518,12 +1533,12 @@ export default function Checkout() {
                 {loading ? (
                   <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>Placing Order...</>
                 ) : user ? (
-                <>Place Order — {sym} {total.toLocaleString()}{['payhere', 'stripe', 'paypal', 'payzy'].includes(paymentMethod) ? ' →' : ''}</>
+                <>Place Order — {sym} {total.toLocaleString()}{['payhere', 'stripe', 'paypal', 'payzy', 'koko'].includes(paymentMethod) ? ' →' : ''}</>
                 ) : (
                   <>Create Account &amp; Place Order — {sym} {total.toLocaleString()}</>
                 )}
               </button>
-              {total > 0 && ['payhere', 'stripe', 'paypal', 'payzy'].includes(paymentMethod) && (
+              {total > 0 && ['payhere', 'stripe', 'paypal', 'payzy', 'koko'].includes(paymentMethod) && (
                 <p className="text-xs text-gray-400 text-center mt-2 flex items-center justify-center gap-1">
                   🔒 Secure payment via {gateways.find(g => g.gateway === paymentMethod)?.displayName}
                 </p>

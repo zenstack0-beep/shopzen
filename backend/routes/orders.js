@@ -563,10 +563,10 @@ const orderRateLimiter = rateLimit({
 });
 
 // Whitelist of allowed payment methods — reject anything not on this list
-const ALLOWED_PAYMENT_METHODS = ['free', 'cod', 'bank_transfer', 'payhere', 'stripe', 'paypal', 'payzy'];
+const ALLOWED_PAYMENT_METHODS = ['free', 'cod', 'bank_transfer', 'payhere', 'stripe', 'paypal', 'payzy', 'koko'];
 
 // Allowed payment references per gateway — verified server-side before accepting
-const GATEWAY_METHODS = ['payhere', 'stripe', 'paypal', 'payzy'];
+const GATEWAY_METHODS = ['payhere', 'stripe', 'paypal', 'payzy', 'koko'];
 
 router.post('/', orderRateLimiter, async (req, res) => {
   try {
@@ -884,7 +884,7 @@ router.post('/', orderRateLimiter, async (req, res) => {
     // Payzy orders are only drafts until Payzy confirms payment. Do not show
     // a new-order notification for a draft, otherwise a failed provider
     // redirect leaves a false notification after the order is rolled back.
-    if (paymentMethod !== 'payzy') {
+    if (!['payzy', 'koko'].includes(paymentMethod)) {
       await Notification.create({
         type:    'new_order',
         title:   '🛒 New Order Received!',
@@ -898,7 +898,7 @@ router.post('/', orderRateLimiter, async (req, res) => {
     // Fire-and-forget — never delays or fails the order response.
     // Payzy orders are only drafts until the provider callback confirms them;
     // do not send “new order” alerts for a payment that may still fail.
-    if (paymentMethod !== 'payzy') {
+    if (!['payzy', 'koko'].includes(paymentMethod)) {
       sendOrderWhatsAppNotification(order).catch(err => console.error('[WHATSAPP ORDER ALERT]', err.message));
     }
 
@@ -925,7 +925,7 @@ router.post('/', orderRateLimiter, async (req, res) => {
     }).catch(err => console.error('[CAPI order]', err.message));
 
     // ── Email customer: order confirmation ─────────────────────────────────────
-    if (billing?.email && paymentMethod !== 'payzy') {
+    if (billing?.email && !['payzy', 'koko'].includes(paymentMethod)) {
       if (await isEmailEnabled('order_placed_customer')) sendMail({
         to:      billing.email,
         subject: `Order Confirmed — ${order.orderNumber} | ShopZen`,
@@ -935,7 +935,7 @@ router.post('/', orderRateLimiter, async (req, res) => {
 
     // ── Email admin: new order alert ───────────────────────────────────────────
     const adminEmail = await getAdminEmail();
-    if (adminEmail && paymentMethod !== 'payzy') {
+    if (adminEmail && !['payzy', 'koko'].includes(paymentMethod)) {
       if (await isEmailEnabled('order_placed_admin')) sendMail({
         to:      adminEmail,
         subject: `🛒 New Order ${order.orderNumber} — Rs. ${totals.total.toLocaleString()} | ShopZen`,

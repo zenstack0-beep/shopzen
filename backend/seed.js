@@ -125,6 +125,7 @@ async function seed() {
     { gateway: 'payhere', displayName: 'PayHere', description: 'Sri Lanka\'s leading payment gateway', logo: 'https://www.payhere.lk/downloads/images/payhere_short_logo.png', isEnabled: false, isLive: false, supportedCurrencies: ['LKR','USD'], config: { merchantId: '', merchantSecret: '', appId: '', appSecret: '' } },
     { gateway: 'stripe', displayName: 'Stripe', description: 'Global payments with cards', logo: 'https://upload.wikimedia.org/wikipedia/commons/b/ba/Stripe_Logo%2C_revised_2016.svg', isEnabled: false, isLive: false, supportedCurrencies: ['USD','EUR','GBP','AUD'], config: { publicKey: '', secretKey: '', webhookSecret: '' } },
     { gateway: 'paypal', displayName: 'PayPal', description: 'PayPal checkout', logo: 'https://upload.wikimedia.org/wikipedia/commons/b/b5/PayPal.svg', isEnabled: false, isLive: false, supportedCurrencies: ['USD','EUR','GBP'], config: { clientId: '', clientSecret: '' } },
+    { gateway: 'koko', displayName: 'Koko', description: 'Koko Buy Now Pay Later', isEnabled: false, isLive: false, supportedCurrencies: ['LKR'], config: { merchantId: '', apiKey: '', privateKey: '', publicKey: '', pluginName: 'customapi', pluginVersion: 1 } },
   ];
   for (const gw of gateways) {
     await PaymentGateway.findOneAndUpdate({ gateway: gw.gateway }, gw, { upsert: true });

@@ -177,6 +177,43 @@ router.post('/payzy/init', requireAuth, paymentInitLimiter, async (req,res) => {
   } catch(e){console.error('[Payzy init]',{endpoint:upstreamEndpoint,error:e.message}); try { await rollbackOrder(); } catch (rollbackError) { console.error('[Payzy rollback]', rollbackError.message); } res.status(502).json({message:`Could not connect to Payzy${upstreamEndpoint ? ` (${upstreamEndpoint})` : ''}. The order was cancelled.`});}
 });
 router.post('/payzy/abort', requireAuth, async (req,res) => { try { const Order=require('../models/Order'); const Product=require('../models/Product'); const order=await Order.findOne({_id:req.body.orderId,customer:req.user.id,paymentMethod:'payzy',paymentStatus:'pending'}); if(order){for(const item of order.items||[]) await Product.findByIdAndUpdate(item.product,{$inc:{stock:Number(item.quantity)||0,soldCount:-(Number(item.quantity)||0)}}); await Order.deleteOne({_id:order._id});} res.json({success:true}); } catch(e){res.status(500).json({message:'Could not cancel Payzy draft order'});} });
+
+// Koko BNPL: the request is signed with the merchant RSA private key. The
+// callback is verified with Koko's public key and matched to our immutable
+// order amount before the order is marked paid.
+const kokoValue = value => String(value ?? '').replace(/[\r\n]/g, ' ').trim();
+function kokoSignaturePayload(data) {
+  return [data.merchantId, data.amount, data.currency, data.pluginName, data.pluginVersion,
+    data.returnUrl, data.cancelUrl, data.orderId, data.reference, data.firstName,
+    data.lastName, data.email, data.description, data.apiKey, data.responseUrl].map(kokoValue).join('');
+}
+function kokoVerify(publicKey, payload, signature) {
+  try { return crypto.verify('RSA-SHA256', Buffer.from(payload), publicKey, Buffer.from(String(signature || ''), 'base64')); }
+  catch { return false; }
+}
+router.post('/koko/init', requireAuth, paymentInitLimiter, async (req, res) => {
+  const Order = require('../models/Order');
+  try {
+    const order = await Order.findById(req.body.orderId);
+    const gw = await PaymentGateway.findOne({ gateway: 'koko', isEnabled: true });
+    const c = gw?.config || {};
+    if (!order || order.paymentMethod !== 'koko' || String(order.customer) !== String(req.user.id)) return res.status(404).json({ message: 'Koko order not found' });
+    if (!c.merchantId || !c.apiKey || !c.privateKey || !c.publicKey) return res.status(503).json({ message: 'Koko is not fully configured.' });
+    if (String(c.privateKey).length < 100 || !String(c.privateKey).includes('PRIVATE KEY')) return res.status(503).json({ message: 'Koko private key is invalid.' });
+    const base = (process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
+    const backend = (process.env.BACKEND_URL || base).replace(/\/$/, '');
+    const data = { merchantId: String(c.merchantId), amount: Number(order.total).toFixed(2), currency: 'LKR', pluginName: c.pluginName || 'customapi', pluginVersion: Number(c.pluginVersion || 1), returnUrl: `${base}/my-orders?new=${order._id}&payment=koko`, cancelUrl: `${base}/checkout?payment=cancelled`, responseUrl: `${backend}/api/payments/koko/response`, orderId: order.orderNumber, reference: order.orderNumber, firstName: order.billing?.firstName, lastName: order.billing?.lastName, email: order.billing?.email, description: `ShopZen order ${order.orderNumber}`, apiKey: String(c.apiKey), mobileNo: order.billing?.phone };
+    const signature = crypto.sign('RSA-SHA256', Buffer.from(kokoSignaturePayload(data)), String(c.privateKey)).toString('base64');
+    await Order.updateOne({ _id: order._id }, { $set: { paymentMetadata: { ...data, signature } } });
+    const endpoint = c.endpoint || (gw.isLive ? 'https://api.paykoko.com/api/merchants/orderCreate' : 'https://qaapi.paykoko.com/api/merchants/orderCreate');
+    const fields = { _mId:data.merchantId, api_key:data.apiKey, _returnUrl:data.returnUrl, _responseUrl:data.responseUrl, _currency:data.currency, _amount:data.amount, _reference:data.reference, _pluginName:data.pluginName, _pluginVersion:String(data.pluginVersion), _cancelUrl:data.cancelUrl, _orderId:data.orderId, _firstName:data.firstName || '', _lastName:data.lastName || '', _email:data.email || '', _description:data.description, dataString:kokoSignaturePayload(data), signature, _mobileNo:data.mobileNo || '' };
+    res.json({ url: endpoint, fields });
+  } catch (e) { console.error('[Koko init]', e.message); res.status(502).json({ message: 'Could not initialise Koko payment.' }); }
+});
+router.post('/koko/abort', requireAuth, async (req,res) => { try { await require('../models/Order').deleteOne({ _id:req.body.orderId, customer:req.user.id, paymentMethod:'koko', paymentStatus:'pending' }); res.json({success:true}); } catch { res.status(500).json({message:'Could not cancel Koko order'}); } });
+router.all('/koko/response', async (req,res) => {
+  try { const p={...(req.query||{}),...(req.body||{})}; const Order=require('../models/Order'); const order=await Order.findOne({orderNumber:p.orderId||p._orderId,paymentMethod:'koko'}); const gw=await PaymentGateway.findOne({gateway:'koko'}); const c=gw?.config||{}; const ok=Boolean(order && p.status==='SUCCESS' && p.trnId && kokoVerify(c.publicKey, String(p.orderId||p._orderId)+String(p.trnId)+String(p.status)+String(p.desc||''), p.signature) && Number(order.total).toFixed(2)===Number(p.amount||order.total).toFixed(2)); if(ok) await Order.updateOne({_id:order._id,paymentStatus:{$ne:'paid'}},{$set:{paymentStatus:'paid',orderStatus:'confirmed',paymentReference:String(p.trnId)},$push:{statusHistory:{status:'confirmed',note:'Payment confirmed via Koko',updatedBy:'koko'}}}); const front=(process.env.FRONTEND_URL||process.env.PUBLIC_APP_URL||'https://shopzen.lk').replace(/\/$/,''); res.redirect(`${front}/my-orders?new=${order?._id||''}&payment=koko&status=${ok?'success':'failed'}`); } catch(e){ console.error('[Koko response]',e.message); res.redirect(`${process.env.FRONTEND_URL||'https://shopzen.lk'}/checkout?payment=failed`); }
+});
 async function handlePayzyResponse(req, res) {
   const params = { ...(req.query || {}), ...(req.body || {}) };
   const frontendUrl = (process.env.FRONTEND_URL || process.env.PUBLIC_APP_URL || 'https://shopzen.lk').replace(/\/$/, '');
