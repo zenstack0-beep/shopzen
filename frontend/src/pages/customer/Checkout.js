@@ -1498,7 +1498,7 @@ export default function Checkout() {
                           {gw.gateway === 'payzy'   && 'Pay securely with Payzy installments'}
                           {gw.gateway === 'koko'    && 'Pay securely with Koko Buy Now Pay Later'}
                         </div>
-                        {gw.gateway === 'payzy' && (gw.installmentPlans || []).length > 0 && <div className="text-xs text-gray-500 mt-1">{gw.installmentPlans.slice(0, 3).map((p, i) => <span key={i} className="mr-3">{p.months} × {(total * (1 + Number(p.interestRate || 0) / 100) / Number(p.months || 1)).toFixed(2)} {(p.provider || 'payzy').toUpperCase()}</span>)}</div>}
+                        {(gw.installmentPlans || []).length > 0 && <div className="text-xs text-gray-500 mt-1">{gw.installmentPlans.slice(0, 3).map((p, i) => <span key={i} className="mr-3">{p.months} × {(total * (1 + Number(p.interestRate || 0) / 100) / Number(p.months || 1)).toFixed(2)} {(p.provider || gw.gateway).toUpperCase()}</span>)}</div>}
                       </div>
                     </div>
                   ))}
