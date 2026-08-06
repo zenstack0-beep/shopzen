@@ -158,7 +158,7 @@ export default function AdminOrders() {
                       <td>
                         <div className="space-y-1">
                           <span className={`badge ${PAYMENT_COLORS[order.paymentStatus] || ''} text-xs capitalize`}>{order.paymentStatus}</span>
-                          <p className="text-xs text-gray-400">{order.paymentMethod === 'bank_transfer' ? 'Bank' : 'COD'}</p>
+                          <p className="text-xs text-gray-400">{{ bank_transfer: 'Bank', cod: 'COD', koko: 'Koko', payzy: 'Payzy', payhere: 'PayHere', stripe: 'Stripe', paypal: 'PayPal' }[order.paymentMethod] || order.paymentMethod || 'Unknown'}</p>
                         </div>
                       </td>
                       <td><span className={`badge ${STATUS_COLORS[order.orderStatus] || ''} capitalize text-xs`}>{order.orderStatus?.replace(/_/g,' ')}</span></td>
