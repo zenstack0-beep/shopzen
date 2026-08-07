@@ -226,11 +226,11 @@ setTimeout(runAutoCancelDecisions, 5000);
 const expireUnpaidPayzyDrafts = async () => {
   try {
     const cutoff = new Date(Date.now() - 60 * 60 * 1000);
-    const drafts = await Order.find({ paymentMethod: 'payzy', paymentStatus: 'pending', createdAt: { $lte: cutoff } }).limit(100);
+    const drafts = await Order.find({ paymentMethod: { $in: ['payzy', 'koko'] }, paymentStatus: 'pending', createdAt: { $lte: cutoff } }).limit(100);
     for (const draft of drafts) {
       const claimed = await Order.findOneAndUpdate(
-        { _id: draft._id, paymentMethod: 'payzy', paymentStatus: 'pending' },
-        { $set: { paymentStatus: 'failed', orderStatus: 'cancelled', 'paymentMetadata.payzyExpiredAt': new Date() }, $push: { statusHistory: { status: 'cancelled', note: 'Payzy payment was not completed within one hour; stock was released automatically.', updatedBy: 'system' } } },
+        { _id: draft._id, paymentMethod: draft.paymentMethod, paymentStatus: 'pending' },
+        { $set: { paymentStatus: 'failed', orderStatus: 'cancelled', [`paymentMetadata.${draft.paymentMethod}ExpiredAt`]: new Date() }, $push: { statusHistory: { status: 'cancelled', note: `${draft.paymentMethod === 'koko' ? 'Koko' : 'Payzy'} payment was not completed within one hour; stock was released automatically.`, updatedBy: 'system' } } },
         { new: true }
       );
       if (!claimed) continue;
@@ -238,7 +238,7 @@ const expireUnpaidPayzyDrafts = async () => {
         await Product.findByIdAndUpdate(item.product, { $inc: { stock: Number(item.quantity) || 0, soldCount: -(Number(item.quantity) || 0) } }).catch(() => {});
       }
       await Order.deleteOne({ _id: claimed._id });
-      console.log(`[PAYZY EXPIRY] ${claimed.orderNumber} expired after one hour; stock restored`);
+      console.log(`[PAYMENT DRAFT EXPIRY] ${claimed.orderNumber} expired after one hour; stock restored`);
     }
   } catch (err) {
     console.error('[PAYZY EXPIRY] Scheduler error:', err.message);
@@ -263,7 +263,7 @@ router.get('/admin/all', adminAuth, async (req, res) => {
     // order list; they are not confirmed orders and must not be sent to a
     // courier. Admins can inspect them explicitly when needed.
     if (req.query.includePayzyDrafts !== 'true') {
-      filter.$and = [{ $or: [{ paymentMethod: { $ne: 'payzy' } }, { paymentStatus: 'paid' }] }];
+      filter.$and = [{ $or: [{ paymentMethod: { $nin: ['payzy', 'koko'] } }, { paymentStatus: 'paid' }] }];
     }
     if (search)
       filter.$and = [...(filter.$and || []), { $or: [
@@ -614,7 +614,7 @@ router.put('/admin/:id/confirm-slip', adminAuth, async (req, res) => {
 // ── Customer — Get my orders ──────────────────────────────────────────────────
 router.get('/my-orders', auth, async (req, res) => {
   try {
-    const orders = await Order.find({ customer: req.user._id })
+    const orders = await Order.find({ customer: req.user._id, $or: [{ paymentMethod: { $nin: ['payzy', 'koko'] } }, { paymentStatus: 'paid' }] })
       .sort({ createdAt: -1 })
       .populate('items.product', 'name thumbnail slug price salePrice');
     res.json(orders);

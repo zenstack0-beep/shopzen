@@ -198,17 +198,57 @@ function kokoSignaturePayload(data) {
     data.lastName, data.email, data.description, data.apiKey, data.responseUrl].map(kokoValue).join('');
 }
 function kokoVerify(publicKey, payload, signature) {
-  try { return crypto.verify('RSA-SHA256', Buffer.from(payload), publicKey, Buffer.from(String(signature || ''), 'base64')); }
+  try { return crypto.verify('RSA-SHA256', Buffer.from(payload), normalizeKokoPem(publicKey, 'PUBLIC KEY'), Buffer.from(String(signature || '').replace(/ /g, '+'), 'base64')); }
   catch { return false; }
+}
+async function releaseKokoOrder(order, reason) {
+  if (!order || order.paymentStatus !== 'pending') return;
+  const Product = require('../models/Product');
+  for (const item of order.items || []) await Product.findByIdAndUpdate(item.product, { $inc: { stock: Number(item.quantity) || 0, soldCount: -(Number(item.quantity) || 0) } });
+  await require('../models/Order').deleteOne({ _id: order._id, paymentMethod: 'koko', paymentStatus: 'pending' });
+  console.log(`[Koko] Released draft ${order.orderNumber}: ${reason}`);
+}
+function kokoPrivateKey(config) {
+  return crypto.createPrivateKey({ key: normalizeKokoPem(config.privateKey, 'RSA PRIVATE KEY'), format: 'pem', type: 'pkcs1' });
+}
+async function confirmKokoOrder(order, trnId, status = 'SUCCESS') {
+  if (!order) return null;
+  if (order.paymentStatus === 'paid') return order;
+  const updated = await require('../models/Order').findOneAndUpdate(
+    { _id: order._id, paymentMethod: 'koko', paymentStatus: 'pending' },
+    { $set: { paymentStatus: 'paid', orderStatus: 'confirmed', paymentReference: String(trnId), 'paymentMetadata.kokoStatus': status, 'paymentMetadata.confirmedAt': new Date() }, $push: { statusHistory: { status: 'confirmed', note: 'Payment confirmed via Koko', updatedBy: 'koko' } } },
+    { new: true }
+  );
+  if (updated) {
+    const { Notification } = require('../models/index');
+    const { sendOrderWhatsAppNotification } = require('../services/whatsappOrderNotify');
+    const { sendMail, getAdminEmail, orderConfirmHtml, newOrderAdminHtml, isEmailEnabled } = require('../utils/mailer');
+    await Notification.create({ type:'new_order', title:'🛒 Koko Payment Received!', message:`Order ${updated.orderNumber} — Rs. ${Number(updated.total||0).toLocaleString()}`, link:`/admin/orders/${updated._id}`, data:{orderId:updated._id,total:updated.total,paymentMethod:'koko'} }).catch(()=>{});
+    sendOrderWhatsAppNotification(updated).catch(()=>{});
+    if(updated.billing?.email && await isEmailEnabled('order_placed_customer')) sendMail({to:updated.billing.email,subject:`Order Confirmed — ${updated.orderNumber} | ShopZen`,html:await orderConfirmHtml(updated)}).catch(()=>{});
+    const adminEmail=await getAdminEmail(); if(adminEmail && await isEmailEnabled('order_placed_admin')) sendMail({to:adminEmail,subject:`Koko Order ${updated.orderNumber} | ShopZen`,html:await newOrderAdminHtml(updated)}).catch(()=>{});
+  }
+  return updated;
+}
+async function viewKokoOrder(order, gateway) {
+  const c = gateway.config || {}, pluginName = c.pluginName || 'customapi', pluginVersion = String(c.pluginVersion || 1);
+  const dataString = `${c.merchantId}${pluginName}${pluginVersion}${order.orderNumber}${c.apiKey}`;
+  const signature = crypto.sign('RSA-SHA256', Buffer.from(dataString), kokoPrivateKey(c)).toString('base64');
+  const endpoint = c.orderViewEndpoint || (gateway.isLive ? 'https://prodapi.paykoko.com/api/merchants/orderView' : 'https://qaapi.paykoko.com/api/merchants/orderView');
+  const response = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ _mId:String(c.merchantId), api_key:String(c.apiKey), _orderId:order.orderNumber, _pluginName:pluginName, _pluginVersion:pluginVersion, signature }) });
+  const raw = await response.text(); let result={}; try { result=JSON.parse(raw); } catch {}
+  if (!response.ok) throw new Error(`Koko orderView returned HTTP ${response.status}`);
+  const status=String(result.status||'').toUpperCase(), orderId=String(result.orderId||''), trnId=String(result.trnId||''), desc=String(result.desc||'');
+  const valid=orderId===order.orderNumber && trnId && result.signature && kokoVerify(c.publicKey, orderId+trnId+status+desc, result.signature);
+  if (!valid) throw new Error('Koko orderView response signature is invalid');
+  return { status, trnId, desc };
 }
 router.post('/koko/init', requireAuth, paymentInitLimiter, async (req, res) => {
   const Order = require('../models/Order');
   let order;
   const rollback = async () => {
     if (!order) return;
-    const Product = require('../models/Product');
-    for (const item of order.items || []) await Product.findByIdAndUpdate(item.product, { $inc: { stock: Number(item.quantity) || 0, soldCount: -(Number(item.quantity) || 0) } });
-    await Order.deleteOne({ _id: order._id, paymentMethod: 'koko', paymentStatus: 'pending' });
+    await releaseKokoOrder(order, 'initialization failed');
   };
   try {
     order = await Order.findById(req.body.orderId);
@@ -218,17 +258,15 @@ router.post('/koko/init', requireAuth, paymentInitLimiter, async (req, res) => {
     if (!c.merchantId || !c.apiKey || !c.privateKey || !c.publicKey) { await rollback(); return res.status(503).json({ message: 'Koko is not fully configured.' }); }
     const base = (process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
     const backend = (process.env.BACKEND_URL || base).replace(/\/$/, '');
-    const data = { merchantId: String(c.merchantId), amount: Number(order.total).toFixed(2), currency: 'LKR', pluginName: c.pluginName || 'customapi', pluginVersion: Number(c.pluginVersion || 1), returnUrl: `${base}/my-orders?new=${order._id}&payment=koko`, cancelUrl: `${base}/checkout?payment=cancelled`, responseUrl: `${backend}/api/payments/koko/response`, orderId: order.orderNumber, reference: order.orderNumber, firstName: order.billing?.firstName, lastName: order.billing?.lastName, email: order.billing?.email, description: `ShopZen order ${order.orderNumber}`, apiKey: String(c.apiKey), mobileNo: order.billing?.phone };
+    const cancelToken = crypto.randomBytes(24).toString('hex');
+    const data = { merchantId: String(c.merchantId), amount: Number(order.total).toFixed(2), currency: 'LKR', pluginName: c.pluginName || 'customapi', pluginVersion: String(c.pluginVersion || 1), returnUrl: `${backend}/api/payments/koko/return?draftId=${order._id}`, cancelUrl: `${backend}/api/payments/koko/cancel?draftId=${order._id}&token=${cancelToken}`, responseUrl: `${backend}/api/payments/koko/response`, orderId: order.orderNumber, reference: order.orderNumber, firstName: order.billing?.firstName, lastName: order.billing?.lastName, email: order.billing?.email, description: `ShopZen order ${order.orderNumber}`, apiKey: String(c.apiKey), mobileNo: order.billing?.phone };
     let signature;
     try {
-      const privateKey = crypto.createPrivateKey({ key: normalizeKokoPem(c.privateKey, 'RSA PRIVATE KEY'), format: 'pem', type: 'pkcs1' });
-      const configuredPublic = crypto.createPublicKey(normalizeKokoPem(c.publicKey, 'PUBLIC KEY')).export({ format: 'der', type: 'spki' });
-      const derivedPublic = crypto.createPublicKey(privateKey).export({ format: 'der', type: 'spki' });
-      if (!Buffer.from(configuredPublic).equals(Buffer.from(derivedPublic))) { await rollback(); return res.status(503).json({ message: 'Koko private key and public key do not match. Request a matching RSA key pair from Koko.' }); }
+      const privateKey = kokoPrivateKey(c);
       signature = crypto.sign('RSA-SHA256', Buffer.from(kokoSignaturePayload(data)), privateKey).toString('base64');
     }
     catch { await rollback(); return res.status(503).json({ message: 'Koko private key is invalid. Paste the complete RSA PEM key, including BEGIN/END lines.' }); }
-    await Order.updateOne({ _id: order._id }, { $set: { paymentMetadata: { ...data, signature } } });
+    await Order.updateOne({ _id: order._id }, { $set: { paymentMetadata: { ...data, signature, cancelToken } } });
     const endpoint = c.endpoint || (gw.isLive ? 'https://prodapi.paykoko.com/api/merchants/orderCreate' : 'https://qaapi.paykoko.com/api/merchants/orderCreate');
     const fields = { _mId:data.merchantId, api_key:data.apiKey, _returnUrl:data.returnUrl, _responseUrl:data.responseUrl, _currency:data.currency, _amount:data.amount, _reference:data.reference, _pluginName:data.pluginName, _pluginVersion:String(data.pluginVersion), _cancelUrl:data.cancelUrl, _orderId:data.orderId, _firstName:data.firstName || '', _lastName:data.lastName || '', _email:data.email || '', _description:data.description, dataString:kokoSignaturePayload(data), signature, _mobileNo:data.mobileNo || '' };
     res.json({ url: endpoint, fields });
@@ -236,8 +274,10 @@ router.post('/koko/init', requireAuth, paymentInitLimiter, async (req, res) => {
 });
 router.post('/koko/abort', requireAuth, async (req,res) => { try { const Order=require('../models/Order'); const Product=require('../models/Product'); const order=await Order.findOne({ _id:req.body.orderId, customer:req.user.id, paymentMethod:'koko', paymentStatus:'pending' }); if(order){ for(const item of order.items||[]) await Product.findByIdAndUpdate(item.product,{$inc:{stock:Number(item.quantity)||0,soldCount:-(Number(item.quantity)||0)}}); await Order.deleteOne({_id:order._id}); } res.json({success:true}); } catch { res.status(500).json({message:'Could not cancel Koko order'}); } });
 router.all('/koko/response', async (req,res) => {
-  try { const p={...(req.query||{}),...(req.body||{})}; const Order=require('../models/Order'); const order=await Order.findOne({orderNumber:p.orderId||p._orderId,paymentMethod:'koko'}); const gw=await PaymentGateway.findOne({gateway:'koko'}); const c=gw?.config||{}; const ok=Boolean(order && p.status==='SUCCESS' && p.trnId && kokoVerify(c.publicKey, String(p.orderId||p._orderId)+String(p.trnId)+String(p.status)+String(p.desc||''), p.signature) && Number(order.total).toFixed(2)===Number(p.amount||order.total).toFixed(2)); if(ok) await Order.updateOne({_id:order._id,paymentStatus:{$ne:'paid'}},{$set:{paymentStatus:'paid',orderStatus:'confirmed',paymentReference:String(p.trnId)},$push:{statusHistory:{status:'confirmed',note:'Payment confirmed via Koko',updatedBy:'koko'}}}); const front=(process.env.FRONTEND_URL||process.env.PUBLIC_APP_URL||'https://shopzen.lk').replace(/\/$/,''); res.redirect(`${front}/my-orders?new=${order?._id||''}&payment=koko&status=${ok?'success':'failed'}`); } catch(e){ console.error('[Koko response]',e.message); res.redirect(`${process.env.FRONTEND_URL||'https://shopzen.lk'}/checkout?payment=failed`); }
+  try { const p={...(req.query||{}),...(req.body||{})}; const Order=require('../models/Order'); const orderId=String(p.orderId||p._orderId||''),trnId=String(p.trnId||''),status=String(p.status||'').toUpperCase(),desc=String(p.desc||''); const order=await Order.findOne({orderNumber:orderId,paymentMethod:'koko'}); const gw=await PaymentGateway.findOne({gateway:'koko'}); const valid=Boolean(order&&trnId&&p.signature&&kokoVerify(gw?.config?.publicKey,orderId+trnId+status+desc,p.signature)); if(!valid)return res.status(400).json({success:false}); if(status==='SUCCESS')await confirmKokoOrder(order,trnId,status);else if(['FAILED','FAILURE','CANCELED','CANCELLED'].includes(status))await releaseKokoOrder(order,`verified callback status ${status}`); return res.json({success:status==='SUCCESS'}); } catch(e){ console.error('[Koko response]',e.message); return res.status(500).json({success:false}); }
 });
+router.get('/koko/return', async (req,res) => { const front=(process.env.FRONTEND_URL||process.env.PUBLIC_APP_URL||'https://shopzen.lk').replace(/\/$/,''); try { let order=await require('../models/Order').findOne({_id:req.query.draftId,paymentMethod:'koko'}); if(!order) return res.redirect(`${front}/checkout?payment=failed`); if(order.paymentStatus!=='paid'){ const gw=await PaymentGateway.findOne({gateway:'koko',isEnabled:true}); const result=await viewKokoOrder(order,gw); if(result.status==='SUCCESS') order=await confirmKokoOrder(order,result.trnId,result.status); else if(['FAILED','FAILURE','CANCELED','CANCELLED'].includes(result.status)){await releaseKokoOrder(order,`orderView status ${result.status}`);return res.redirect(`${front}/checkout?payment=failed`);} } if(order?.paymentStatus==='paid') return res.redirect(`${front}/my-orders?new=${order._id}&payment=koko&status=success`); return res.redirect(`${front}/checkout?payment=koko_pending`); } catch(e) { console.error('[Koko return]',e.message); return res.redirect(`${front}/checkout?payment=failed`); } });
+router.get('/koko/cancel', async (req,res) => { const front=(process.env.FRONTEND_URL||process.env.PUBLIC_APP_URL||'https://shopzen.lk').replace(/\/$/,''); try { const order=await require('../models/Order').findOne({_id:req.query.draftId,paymentMethod:'koko',paymentStatus:'pending'}); if(order && safeEqual(String(order.paymentMetadata?.cancelToken||''),String(req.query.token||''))) await releaseKokoOrder(order,'customer cancelled payment'); return res.redirect(`${front}/checkout?payment=cancelled`); } catch { return res.redirect(`${front}/checkout?payment=failed`); } });
 async function handlePayzyResponse(req, res) {
   const params = { ...(req.query || {}), ...(req.body || {}) };
   const frontendUrl = (process.env.FRONTEND_URL || process.env.PUBLIC_APP_URL || 'https://shopzen.lk').replace(/\/$/, '');

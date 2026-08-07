@@ -1,10 +1,11 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import useSEO from '../../hooks/useSEO';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import API from '../../utils/api';
 import toast from 'react-hot-toast';
+import { useCart } from '../../context/CartContext';
 
 const statusColors = {
   pending: 'status-pending', confirmed: 'status-confirmed',
@@ -336,6 +337,7 @@ function GiftCardSlipUpload({ cardId, cardCode, onUploaded }) {
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function MyOrders() {
   const { user }       = useAuth();
+  const { clearCart }  = useCart();
   useSEO({ title: 'My Orders', noindex: true });
   const { settings }   = useTheme();
   const [searchParams] = useSearchParams();
@@ -357,6 +359,17 @@ export default function MyOrders() {
   const primary  = 'var(--color-primary)';
   const newOrderId    = searchParams.get('new');
   const newPaymentMethod = searchParams.get('payment'); // e.g. 'bank_transfer'
+  const paymentStatus = searchParams.get('status');
+  const kokoSuccessHandled = useRef(false);
+
+  useEffect(() => {
+    if (!kokoSuccessHandled.current && newPaymentMethod === 'koko' && paymentStatus === 'success') {
+      kokoSuccessHandled.current = true;
+      clearCart();
+      sessionStorage.removeItem('checkout_state');
+      toast.success('Koko payment successful — your order is confirmed!');
+    }
+  }, [newPaymentMethod, paymentStatus, clearCart]);
 
   const fetchOrders = useCallback(() => {
     setLoading(true);
