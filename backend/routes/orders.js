@@ -1285,6 +1285,11 @@ router.get('/:id', async (req, res) => {
       .populate('items.product', 'name thumbnail slug price salePrice')
       .populate('customer', 'firstName lastName email');
     if (!order) return res.status(404).json({ message: 'Order not found' });
+    // Koko/Payzy records are internal stock-reservation drafts until the
+    // provider verifies payment. Never expose them as customer orders.
+    if (['koko', 'payzy'].includes(order.paymentMethod) && order.paymentStatus !== 'paid') {
+      return res.status(404).json({ message: 'Order not found' });
+    }
     res.json(order);
   } catch (err) {
     res.status(500).json({ message: err.message });
