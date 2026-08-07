@@ -220,7 +220,13 @@ router.post('/koko/init', requireAuth, paymentInitLimiter, async (req, res) => {
     const backend = (process.env.BACKEND_URL || base).replace(/\/$/, '');
     const data = { merchantId: String(c.merchantId), amount: Number(order.total).toFixed(2), currency: 'LKR', pluginName: c.pluginName || 'customapi', pluginVersion: Number(c.pluginVersion || 1), returnUrl: `${base}/my-orders?new=${order._id}&payment=koko`, cancelUrl: `${base}/checkout?payment=cancelled`, responseUrl: `${backend}/api/payments/koko/response`, orderId: order.orderNumber, reference: order.orderNumber, firstName: order.billing?.firstName, lastName: order.billing?.lastName, email: order.billing?.email, description: `ShopZen order ${order.orderNumber}`, apiKey: String(c.apiKey), mobileNo: order.billing?.phone };
     let signature;
-    try { signature = crypto.sign('RSA-SHA256', Buffer.from(kokoSignaturePayload(data)), crypto.createPrivateKey({ key: normalizeKokoPem(c.privateKey, 'RSA PRIVATE KEY'), format: 'pem', type: 'pkcs1' })).toString('base64'); }
+    try {
+      const privateKey = crypto.createPrivateKey({ key: normalizeKokoPem(c.privateKey, 'RSA PRIVATE KEY'), format: 'pem', type: 'pkcs1' });
+      const configuredPublic = crypto.createPublicKey(normalizeKokoPem(c.publicKey, 'PUBLIC KEY')).export({ format: 'der', type: 'spki' });
+      const derivedPublic = crypto.createPublicKey(privateKey).export({ format: 'der', type: 'spki' });
+      if (!Buffer.from(configuredPublic).equals(Buffer.from(derivedPublic))) { await rollback(); return res.status(503).json({ message: 'Koko private key and public key do not match. Request a matching RSA key pair from Koko.' }); }
+      signature = crypto.sign('RSA-SHA256', Buffer.from(kokoSignaturePayload(data)), privateKey).toString('base64');
+    }
     catch { await rollback(); return res.status(503).json({ message: 'Koko private key is invalid. Paste the complete RSA PEM key, including BEGIN/END lines.' }); }
     await Order.updateOne({ _id: order._id }, { $set: { paymentMetadata: { ...data, signature } } });
     const endpoint = c.endpoint || (gw.isLive ? 'https://prodapi.paykoko.com/api/merchants/orderCreate' : 'https://qaapi.paykoko.com/api/merchants/orderCreate');
