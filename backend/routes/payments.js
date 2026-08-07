@@ -231,11 +231,11 @@ async function confirmKokoOrder(order, trnId, status = 'SUCCESS') {
   return updated;
 }
 async function viewKokoOrder(order, gateway) {
-  const c = gateway.config || {}, pluginName = c.pluginName || 'customapi', pluginVersion = String(c.pluginVersion || 1);
-  const dataString = `${c.merchantId}${pluginName}${pluginVersion}${order.orderNumber}${c.apiKey}`;
+  const c = gateway.config || {}, merchantId=kokoValue(c.merchantId), apiKey=kokoValue(c.apiKey), pluginName = kokoValue(c.pluginName || 'customapi'), pluginVersion = kokoValue(c.pluginVersion || 1);
+  const dataString = `${merchantId}${pluginName}${pluginVersion}${order.orderNumber}${apiKey}`;
   const signature = crypto.sign('RSA-SHA256', Buffer.from(dataString), kokoPrivateKey(c)).toString('base64');
   const endpoint = c.orderViewEndpoint || (gateway.isLive ? 'https://prodapi.paykoko.com/api/merchants/orderView' : 'https://qaapi.paykoko.com/api/merchants/orderView');
-  const response = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ _mId:String(c.merchantId), api_key:String(c.apiKey), _orderId:order.orderNumber, _pluginName:pluginName, _pluginVersion:pluginVersion, signature }) });
+  const response = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ _mId:merchantId, api_key:apiKey, _orderId:order.orderNumber, _pluginName:pluginName, _pluginVersion:pluginVersion, signature }) });
   const raw = await response.text(); let result={}; try { result=JSON.parse(raw); } catch {}
   if (!response.ok) throw new Error(`Koko orderView returned HTTP ${response.status}`);
   const status=String(result.status||'').toUpperCase(), orderId=String(result.orderId||''), trnId=String(result.trnId||''), desc=String(result.desc||'');
@@ -256,10 +256,13 @@ router.post('/koko/init', requireAuth, paymentInitLimiter, async (req, res) => {
     const c = gw?.config || {};
     if (!order || order.paymentMethod !== 'koko' || String(order.customer) !== String(req.user.id)) return res.status(404).json({ message: 'Koko order not found' });
     if (!c.merchantId || !c.apiKey || !c.privateKey || !c.publicKey) { await rollback(); return res.status(503).json({ message: 'Koko is not fully configured.' }); }
-    const base = (process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
-    const backend = (process.env.BACKEND_URL || base).replace(/\/$/, '');
+    const base = String(process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || 'https://shopzen.lk').trim().replace(/\/$/, '');
+    const backend = String(process.env.BACKEND_URL || base).trim().replace(/\/$/, '');
     const cancelToken = crypto.randomBytes(24).toString('hex');
-    const data = { merchantId: String(c.merchantId), amount: Number(order.total).toFixed(2), currency: 'LKR', pluginName: c.pluginName || 'customapi', pluginVersion: String(c.pluginVersion || 1), returnUrl: `${backend}/api/payments/koko/return?draftId=${order._id}`, cancelUrl: `${backend}/api/payments/koko/cancel?draftId=${order._id}&token=${cancelToken}`, responseUrl: `${backend}/api/payments/koko/response`, orderId: order.orderNumber, reference: order.orderNumber, firstName: order.billing?.firstName, lastName: order.billing?.lastName, email: order.billing?.email, description: `ShopZen order ${order.orderNumber}`, apiKey: String(c.apiKey), mobileNo: order.billing?.phone };
+    // Every value posted to Koko must be byte-for-byte identical to the value
+    // concatenated into dataString. Normalise once, then use this same object
+    // for both signing and form generation.
+    const data = { merchantId: kokoValue(c.merchantId), amount: Number(order.total).toFixed(2), currency: 'LKR', pluginName: kokoValue(c.pluginName || 'customapi'), pluginVersion: kokoValue(c.pluginVersion || 1), returnUrl: `${backend}/api/payments/koko/return?draftId=${order._id}`, cancelUrl: `${backend}/api/payments/koko/cancel?draftId=${order._id}&token=${cancelToken}`, responseUrl: `${backend}/api/payments/koko/response`, orderId: kokoValue(order.orderNumber), reference: kokoValue(order.orderNumber), firstName: kokoValue(order.billing?.firstName), lastName: kokoValue(order.billing?.lastName), email: kokoValue(order.billing?.email), description: kokoValue(`ShopZen order ${order.orderNumber}`), apiKey: kokoValue(c.apiKey), mobileNo: kokoValue(order.billing?.phone) };
     let signature;
     try {
       const privateKey = kokoPrivateKey(c);
@@ -268,6 +271,7 @@ router.post('/koko/init', requireAuth, paymentInitLimiter, async (req, res) => {
     catch { await rollback(); return res.status(503).json({ message: 'Koko private key is invalid. Paste the complete RSA PEM key, including BEGIN/END lines.' }); }
     await Order.updateOne({ _id: order._id }, { $set: { paymentMetadata: { ...data, signature, cancelToken } } });
     const endpoint = c.endpoint || (gw.isLive ? 'https://prodapi.paykoko.com/api/merchants/orderCreate' : 'https://qaapi.paykoko.com/api/merchants/orderCreate');
+    console.log('[Koko init] signed request prepared', { orderNumber:order.orderNumber, endpoint, amount:data.amount, pluginName:data.pluginName, pluginVersion:data.pluginVersion, dataHash:crypto.createHash('sha256').update(kokoSignaturePayload(data)).digest('hex'), signingKeyFingerprint:crypto.createHash('sha256').update(crypto.createPublicKey(kokoPrivateKey(c)).export({format:'der',type:'spki'})).digest('hex') });
     const fields = { _mId:data.merchantId, api_key:data.apiKey, _returnUrl:data.returnUrl, _responseUrl:data.responseUrl, _currency:data.currency, _amount:data.amount, _reference:data.reference, _pluginName:data.pluginName, _pluginVersion:String(data.pluginVersion), _cancelUrl:data.cancelUrl, _orderId:data.orderId, _firstName:data.firstName || '', _lastName:data.lastName || '', _email:data.email || '', _description:data.description, dataString:kokoSignaturePayload(data), signature, _mobileNo:data.mobileNo || '' };
     res.json({ url: endpoint, fields });
   } catch (e) { await rollback().catch(() => {}); console.error('[Koko init]', e.message); res.status(502).json({ message: `Could not initialise Koko payment: ${e.message}` }); }
