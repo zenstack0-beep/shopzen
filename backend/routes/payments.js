@@ -243,6 +243,34 @@ async function viewKokoOrder(order, gateway) {
   if (!valid) throw new Error('Koko orderView response signature is invalid');
   return { status, trnId, desc };
 }
+async function createKokoForm(order, gateway) {
+  const c=gateway?.config||{};
+  if(!gateway?.isEnabled||!c.merchantId||!c.apiKey||!c.privateKey||!c.publicKey)throw new Error('Koko is not fully configured');
+  const backend=String(process.env.BACKEND_URL||'https://shopzen-production.up.railway.app').trim().replace(/\/$/,'');
+  const cancelToken=crypto.randomBytes(24).toString('hex');
+  const data={merchantId:kokoValue(c.merchantId),amount:Number(order.total).toFixed(2),currency:'LKR',pluginName:kokoValue(c.pluginName||'customapi'),pluginVersion:kokoValue(c.pluginVersion||1),returnUrl:`${backend}/api/payments/koko/return?draftId=${order._id}`,cancelUrl:`${backend}/api/payments/koko/cancel?draftId=${order._id}&token=${cancelToken}`,responseUrl:`${backend}/api/payments/koko/response`,orderId:kokoValue(order.orderNumber),reference:kokoValue(order.orderNumber),firstName:kokoValue(order.billing?.firstName),lastName:kokoValue(order.billing?.lastName),email:kokoValue(order.billing?.email),description:kokoValue(`ShopZen order ${order.orderNumber}`),apiKey:kokoValue(c.apiKey),mobileNo:kokoValue(order.billing?.phone)};
+  const signature=crypto.sign('RSA-SHA256',Buffer.from(kokoSignaturePayload(data)),kokoPrivateKey(c)).toString('base64');
+  const endpoint=c.endpoint||(gateway.isLive?'https://prodapi.paykoko.com/api/merchants/orderCreate':'https://qaapi.paykoko.com/api/merchants/orderCreate');
+  const fields={_mId:data.merchantId,api_key:data.apiKey,_returnUrl:data.returnUrl,_responseUrl:data.responseUrl,_currency:data.currency,_amount:data.amount,_reference:data.reference,_pluginName:data.pluginName,_pluginVersion:data.pluginVersion,_cancelUrl:data.cancelUrl,_orderId:data.orderId,_firstName:data.firstName,_lastName:data.lastName,_email:data.email,_description:data.description,dataString:kokoSignaturePayload(data),signature,_mobileNo:data.mobileNo};
+  await require('../models/Order').updateOne({_id:order._id},{$set:{paymentMetadata:{...(order.paymentMetadata?.toObject?.()||order.paymentMetadata||{}),...data,signature,cancelToken,redirectTokenHash:'',initIssuedAt:new Date()}}});
+  console.log('[Koko redirect] signed form prepared',{orderNumber:order.orderNumber,endpoint,amount:data.amount,dataHash:crypto.createHash('sha256').update(fields.dataString).digest('hex')});
+  return {endpoint,fields};
+}
+function htmlEscape(value){return String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));}
+
+router.get('/koko/redirect', async(req,res)=>{
+  let order;
+  try{
+    const supplied=String(req.query.token||''),hash=crypto.createHash('sha256').update(supplied).digest('hex');
+    order=await require('../models/Order').findOne({_id:req.query.draftId,paymentMethod:'koko',paymentStatus:'pending'});
+    if(!order||!safeEqual(String(order.paymentMetadata?.redirectTokenHash||''),hash))return res.status(404).send('Payment session not found');
+    const gateway=await PaymentGateway.findOne({gateway:'koko',isEnabled:true});
+    const {endpoint,fields}=await createKokoForm(order,gateway);
+    const inputs=Object.entries(fields).map(([name,value])=>`<input type="hidden" name="${htmlEscape(name)}" value="${htmlEscape(value)}">`).join('');
+    res.set('Content-Security-Policy',`default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; form-action ${new URL(endpoint).origin}; base-uri 'none'; frame-ancestors 'none'`);
+    res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Redirecting to Koko</title><style>body{font-family:system-ui;text-align:center;padding:64px;color:#334155}.s{width:32px;height:32px;border:4px solid #ddd;border-top-color:#2563eb;border-radius:50%;margin:20px auto;animation:r 1s linear infinite}@keyframes r{to{transform:rotate(360deg)}}</style></head><body><h2>Redirecting to Koko…</h2><div class="s"></div><p>Please wait. Do not close this page.</p><form id="koko" method="post" action="${htmlEscape(endpoint)}">${inputs}<noscript><button type="submit">Continue to Koko</button></noscript></form><script>document.getElementById('koko').submit()</script></body></html>`);
+  }catch(e){console.error('[Koko redirect]',e.message);if(order)await releaseKokoOrder(order,'redirect preparation failed').catch(()=>{});const front=String(process.env.FRONTEND_URL||'https://shopzen.lk').replace(/\/$/,'');return res.redirect(`${front}/checkout?payment=failed`);}
+});
 router.post('/koko/init', requireAuth, paymentInitLimiter, async (req, res) => {
   const Order = require('../models/Order');
   let order;

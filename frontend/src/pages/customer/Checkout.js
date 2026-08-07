@@ -861,6 +861,11 @@ export default function Checkout() {
 
       if (createdPaymentMethod === 'koko') {
         try {
+          if (data.paymentRedirectUrl) {
+            window.location.assign(data.paymentRedirectUrl);
+            return;
+          }
+          // Backward-compatible fallback while backend deployments roll over.
           const koko = await API.post('/payments/koko/init', { orderId: data.orderId });
           if (!koko.data?.url || !koko.data?.fields) throw new Error('Koko returned no checkout form');
           const form = document.createElement('form'); form.method = 'POST'; form.action = koko.data.url;

@@ -831,6 +831,7 @@ router.post('/', orderRateLimiter, async (req, res) => {
     // ── 5. Persist order ──────────────────────────────────────────────────────
     const hasCoupon   = benefit.couponDiscount > 0;
     const hasGiftCard = totals.giftCardDeduction > 0;
+    const kokoRedirectToken = paymentMethod === 'koko' ? crypto.randomBytes(32).toString('hex') : '';
 
     const orderData = {
       items:    orderItems,
@@ -861,6 +862,7 @@ router.post('/', orderRateLimiter, async (req, res) => {
       })(),
 
       paymentReference: paymentReference || undefined,
+      paymentMetadata: paymentMethod === 'koko' ? { redirectTokenHash: crypto.createHash('sha256').update(kokoRedirectToken).digest('hex') } : undefined,
 
       // Coupon — discount applied to subtotal
       couponCode:      hasCoupon   ? couponCode : undefined,
@@ -1013,11 +1015,13 @@ router.post('/', orderRateLimiter, async (req, res) => {
       }).catch(err => console.error('[NEW ORDER ADMIN EMAIL]', err.message));
     }
 
+    const backendBase = String(process.env.BACKEND_URL || 'https://shopzen-production.up.railway.app').trim().replace(/\/$/, '');
     res.status(201).json({
       orderId:     order._id,
       orderNumber: order.orderNumber,
       total:       totals.total,
       paymentMethod,
+      paymentRedirectUrl: paymentMethod === 'koko' ? `${backendBase}/api/payments/koko/redirect?draftId=${order._id}&token=${kokoRedirectToken}` : undefined,
       metaEventId:  order.metaEventId || metaEventId || undefined,
     });
   } catch (err) {
