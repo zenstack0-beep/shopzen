@@ -38,6 +38,8 @@ export default function AdminOrderDetail() {
   const [editingItems, setEditingItems] = useState(false);
   const [editItems, setEditItems] = useState([]);
   const [savingItems, setSavingItems] = useState(false);
+  const [productSearch, setProductSearch] = useState('');
+  const [productResults, setProductResults] = useState([]);
 
   useEffect(() => {
     API.get(`/orders/${id}`).then(r => {
@@ -60,6 +62,8 @@ export default function AdminOrderDetail() {
 
   const startEditItems = () => { setEditItems((order.items || []).filter(i => !i.isFree).map(i => ({ productId: i.product?._id || i.product, name: i.name, quantity: i.quantity, price: i.price }))); setEditingItems(true); };
   const saveItems = async () => { setSavingItems(true); try { const { data } = await API.put(`/orders/admin/${id}/items`, { items: editItems }); setOrder(data); setEditingItems(false); toast.success('Order items and total updated'); } catch (e) { toast.error(e.response?.data?.message || 'Could not update order items'); } finally { setSavingItems(false); } };
+  const searchProducts = async value => { setProductSearch(value); if (value.trim().length < 2) return setProductResults([]); try { const { data } = await API.get(`/products/admin/lookup?search=${encodeURIComponent(value.trim())}`); setProductResults(data.products || []); } catch { setProductResults([]); } };
+  const addProduct = product => { if (editItems.some(i => String(i.productId) === String(product._id))) return toast.error('This item is already in the order'); setEditItems(p => [...p, { productId: product._id, name: product.name, quantity: 1, price: product.salePrice > 0 && product.salePrice < product.price ? product.salePrice : product.price }]); setProductSearch(''); setProductResults([]); };
 
   const handleStatusUpdate = async () => {
     if (!statusUpdate.status) return;
@@ -187,6 +191,7 @@ export default function AdminOrderDetail() {
             {editingItems ? <div className="space-y-3">
               <p className="text-xs text-amber-700 bg-amber-50 rounded-lg p-2">Changing quantities updates stock. Prices are recalculated from the current product catalog.</p>
               {editItems.map((item, i) => <div key={i} className="grid sm:grid-cols-[1fr_120px_90px] gap-2 items-end"><div><label className="form-label">{item.name}</label></div><div><label className="form-label">Price (Rs.)</label><input type="number" min="0" step="0.01" value={item.price ?? ''} onChange={e => setEditItems(p => p.map((x,j) => j===i ? {...x, price:e.target.value} : x))} className="form-input" /></div><div><label className="form-label">Qty</label><input type="number" min="1" max="999" value={item.quantity} onChange={e => setEditItems(p => p.map((x,j) => j===i ? {...x, quantity:e.target.value} : x))} className="form-input" /></div><button onClick={() => setEditItems(p => p.filter((_,j) => j!==i))} className="text-sm text-red-600 py-2">Remove</button></div>)}
+              <div className="relative"><label className="form-label">Add product</label><input value={productSearch} onChange={e => searchProducts(e.target.value)} className="form-input" placeholder="Search product name…" />{productResults.length > 0 && <div className="absolute z-20 left-0 right-0 mt-1 bg-white border rounded-xl shadow-lg max-h-56 overflow-auto">{productResults.map(p => <button type="button" key={p._id} onClick={() => addProduct(p)} className="w-full text-left px-3 py-2 hover:bg-gray-50 flex justify-between gap-3 text-sm"><span>{p.name}</span><span className="text-gray-500">Rs. {Number(p.salePrice > 0 && p.salePrice < p.price ? p.salePrice : p.price).toLocaleString()}</span></button>)}</div>}</div>
               <div className="flex gap-2"><button onClick={saveItems} disabled={savingItems || !editItems.length} className="btn-primary text-sm">{savingItems ? 'Saving…' : 'Save Changes'}</button><button onClick={() => setEditingItems(false)} className="btn-outline text-sm">Cancel</button></div>
             </div> : null}
             {!editingItems && <>
