@@ -267,8 +267,18 @@ router.get('/koko/redirect', async(req,res)=>{
     const gateway=await PaymentGateway.findOne({gateway:'koko',isEnabled:true});
     const {endpoint,fields}=await createKokoForm(order,gateway);
     const inputs=Object.entries(fields).map(([name,value])=>`<input type="hidden" name="${htmlEscape(name)}" value="${htmlEscape(value)}">`).join('');
-    res.set('Content-Security-Policy',`default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; form-action ${new URL(endpoint).origin}; base-uri 'none'; frame-ancestors 'none'`);
-    res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Redirecting to Koko</title><style>body{font-family:system-ui;text-align:center;padding:64px;color:#334155}.s{width:32px;height:32px;border:4px solid #ddd;border-top-color:#2563eb;border-radius:50%;margin:20px auto;animation:r 1s linear infinite}@keyframes r{to{transform:rotate(360deg)}}</style></head><body><h2>Redirecting to Koko…</h2><div class="s"></div><p>Please wait. Do not close this page.</p><form id="koko" method="post" action="${htmlEscape(endpoint)}">${inputs}<noscript><button type="submit">Continue to Koko</button></noscript></form><script>document.getElementById('koko').submit()</script></body></html>`);
+    // Helmet/proxy CSP policies are combined by browsers using intersection.
+    // A global `form-action 'self'` therefore blocks Koko even when a second
+    // policy explicitly allows it. This document is generated entirely by the
+    // server, uses escaped values and a one-time token, so remove CSP only for
+    // this transient redirect response. All normal ShopZen pages keep CSP.
+    res.removeHeader('Content-Security-Policy');
+    res.removeHeader('Content-Security-Policy-Report-Only');
+    res.set('Cache-Control','no-store, no-cache, must-revalidate, private');
+    res.set('Pragma','no-cache');
+    res.set('Referrer-Policy','no-referrer');
+    res.set('X-Frame-Options','DENY');
+    res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Redirecting to Koko</title><style>body{font-family:system-ui;text-align:center;padding:64px;color:#334155}.s{width:32px;height:32px;border:4px solid #ddd;border-top-color:#2563eb;border-radius:50%;margin:20px auto;animation:r 1s linear infinite}@keyframes r{to{transform:rotate(360deg)}}#manual{margin:20px auto;padding:12px 22px;border:0;border-radius:10px;background:#2563eb;color:#fff;font-weight:700}</style></head><body><h2>Redirecting to Koko…</h2><div class="s"></div><p>Please wait. Do not close this page.</p><form id="koko" method="post" action="${htmlEscape(endpoint)}">${inputs}<button id="manual" type="submit" style="display:none">Continue to Koko</button><noscript><style>#manual{display:block!important}</style></noscript></form><script>var f=document.getElementById('koko'),b=document.getElementById('manual');setTimeout(function(){b.style.display='block'},3000);HTMLFormElement.prototype.submit.call(f)</script></body></html>`);
   }catch(e){console.error('[Koko redirect]',e.message);if(order)await releaseKokoOrder(order,'redirect preparation failed').catch(()=>{});const front=String(process.env.FRONTEND_URL||'https://shopzen.lk').replace(/\/$/,'');return res.redirect(`${front}/checkout?payment=failed`);}
 });
 router.post('/koko/init', requireAuth, paymentInitLimiter, async (req, res) => {
