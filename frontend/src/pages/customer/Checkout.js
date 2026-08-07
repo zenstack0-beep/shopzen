@@ -855,7 +855,11 @@ export default function Checkout() {
           window.location.href = payzy.data.url;
         } catch (payzyError) {
           await API.post('/payments/payzy/abort', { orderId: data.orderId }).catch(() => {});
-          throw payzyError;
+          // The temporary draft is removed above, so return the customer to
+          // My Orders with a clear failure result instead of leaving them on
+          // Checkout (which may redirect an empty cart back to Cart).
+          navigate('/my-orders?payment=payzy&status=failed');
+          return;
         }
         return;
       }

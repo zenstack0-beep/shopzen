@@ -426,6 +426,9 @@ router.put('/admin/:id/payment-status', adminAuth, async (req, res) => {
 
     const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).json({ message: 'Order not found' });
+    if (paymentStatus === 'paid' && CALLBACK_ONLY_METHODS.includes(order.paymentMethod)) {
+      return res.status(400).json({ message: 'Koko and Payzy payments can only be marked paid by a verified provider callback' });
+    }
 
     const previousStatus = order.paymentStatus;
     order.paymentStatus = paymentStatus;
@@ -637,6 +640,7 @@ const ALLOWED_PAYMENT_METHODS = ['free', 'cod', 'bank_transfer', 'payhere', 'str
 
 // Allowed payment references per gateway — verified server-side before accepting
 const GATEWAY_METHODS = ['payhere', 'stripe', 'paypal', 'payzy', 'koko'];
+const CALLBACK_ONLY_METHODS = ['payzy', 'koko'];
 
 router.post('/', orderRateLimiter, async (req, res) => {
   try {
@@ -681,6 +685,11 @@ router.post('/', orderRateLimiter, async (req, res) => {
       // Only gateway methods may supply a paymentReference
       if (!GATEWAY_METHODS.includes(paymentMethod)) {
         return res.status(400).json({ message: 'Payment reference not valid for this payment method' });
+      }
+      // Hosted BNPL payments are confirmed only by a provider-signed callback.
+      // A browser-supplied reference must never be able to mark them paid.
+      if (CALLBACK_ONLY_METHODS.includes(paymentMethod)) {
+        return res.status(400).json({ message: 'This payment can only be confirmed by the payment provider' });
       }
       // Sanitise — alphanumeric + common gateway chars only
       if (!/^[a-zA-Z0-9_\-\.]+$/.test(paymentReference)) {
@@ -1029,43 +1038,6 @@ router.post('/', orderRateLimiter, async (req, res) => {
     });
   } catch (err) {
     console.error('Order error:', err);
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// ── Payment gateway webhook — auto-confirm order after successful payment ──────
-router.post('/payment-success', async (req, res) => {
-  try {
-    const { orderId, paymentReference, gateway } = req.body;
-    const order = await Order.findById(orderId);
-    if (!order) return res.status(404).json({ message: 'Order not found' });
-    order.paymentStatus = 'paid';
-    order.orderStatus = 'confirmed';
-    order.paymentReference = paymentReference;
-    order.statusHistory.push({
-      status: 'confirmed',
-      note: `Payment confirmed via ${gateway}`,
-      updatedBy: 'system',
-    });
-    await order.save();
-
-    await Notification.create({
-      type: 'payment_confirmed',
-      title: '✅ Payment Confirmed',
-      message: `Order ${order.orderNumber} payment received via ${gateway}`,
-      link: `/admin/orders/${order._id}`,
-    });
-
-    if (order.billing?.email) {
-      if (await isEmailEnabled('payment_confirmed_customer')) sendMail({
-        to: order.billing.email,
-        subject: `✅ Payment Confirmed — Order ${order.orderNumber} | ShopZen`,
-        html: await paymentConfirmedHtml(order),
-      }).catch(() => {});
-    }
-
-    res.json({ success: true });
-  } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });

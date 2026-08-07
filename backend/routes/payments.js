@@ -203,9 +203,16 @@ function kokoVerify(publicKey, payload, signature) {
 }
 async function releaseKokoOrder(order, reason) {
   if (!order || order.paymentStatus !== 'pending') return;
+  const releaseId = crypto.randomBytes(16).toString('hex');
+  const claimed = await require('../models/Order').findOneAndUpdate(
+    { _id: order._id, paymentMethod: 'koko', paymentStatus: 'pending' },
+    { $set: { paymentStatus: 'failed', orderStatus: 'cancelled', 'paymentMetadata.releaseId': releaseId } },
+    { new: true }
+  );
+  if (!claimed) return;
   const Product = require('../models/Product');
-  for (const item of order.items || []) await Product.findByIdAndUpdate(item.product, { $inc: { stock: Number(item.quantity) || 0, soldCount: -(Number(item.quantity) || 0) } });
-  await require('../models/Order').deleteOne({ _id: order._id, paymentMethod: 'koko', paymentStatus: 'pending' });
+  for (const item of claimed.items || []) await Product.findByIdAndUpdate(item.product, { $inc: { stock: Number(item.quantity) || 0, soldCount: -(Number(item.quantity) || 0) } });
+  await require('../models/Order').deleteOne({ _id: claimed._id, 'paymentMetadata.releaseId': releaseId });
   console.log(`[Koko] Released draft ${order.orderNumber}: ${reason}`);
 }
 function kokoPrivateKey(config) {
@@ -279,7 +286,7 @@ router.get('/koko/redirect', async(req,res)=>{
     res.set('Referrer-Policy','no-referrer');
     res.set('X-Frame-Options','DENY');
     res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Redirecting to Koko</title><style>body{font-family:system-ui;text-align:center;padding:64px;color:#334155}.s{width:32px;height:32px;border:4px solid #ddd;border-top-color:#2563eb;border-radius:50%;margin:20px auto;animation:r 1s linear infinite}@keyframes r{to{transform:rotate(360deg)}}#manual{margin:20px auto;padding:12px 22px;border:0;border-radius:10px;background:#2563eb;color:#fff;font-weight:700}</style></head><body><h2>Redirecting to Koko…</h2><div class="s"></div><p>Please wait. Do not close this page.</p><form id="koko" method="post" action="${htmlEscape(endpoint)}">${inputs}<button id="manual" type="submit" style="display:none">Continue to Koko</button><noscript><style>#manual{display:block!important}</style></noscript></form><script>var f=document.getElementById('koko'),b=document.getElementById('manual');setTimeout(function(){b.style.display='block'},3000);HTMLFormElement.prototype.submit.call(f)</script></body></html>`);
-  }catch(e){console.error('[Koko redirect]',e.message);if(order)await releaseKokoOrder(order,'redirect preparation failed').catch(()=>{});const front=String(process.env.FRONTEND_URL||'https://shopzen.lk').replace(/\/$/,'');return res.redirect(`${front}/checkout?payment=failed`);}
+  }catch(e){console.error('[Koko redirect]',e.message);if(order)await releaseKokoOrder(order,'redirect preparation failed').catch(()=>{});const front=String(process.env.FRONTEND_URL||'https://shopzen.lk').replace(/\/$/,'');return res.redirect(`${front}/my-orders?payment=koko&status=failed`);}
 });
 router.post('/koko/init', requireAuth, paymentInitLimiter, async (req, res) => {
   const Order = require('../models/Order');
@@ -318,8 +325,8 @@ router.post('/koko/abort', requireAuth, async (req,res) => { try { const Order=r
 router.all('/koko/response', async (req,res) => {
   try { const p={...(req.query||{}),...(req.body||{})}; const Order=require('../models/Order'); const orderId=String(p.orderId||p._orderId||''),trnId=String(p.trnId||''),status=String(p.status||'').toUpperCase(),desc=String(p.desc||''); const order=await Order.findOne({orderNumber:orderId,paymentMethod:'koko'}); const gw=await PaymentGateway.findOne({gateway:'koko'}); const valid=Boolean(order&&trnId&&p.signature&&kokoVerify(gw?.config?.publicKey,orderId+trnId+status+desc,p.signature)); if(!valid)return res.status(400).json({success:false}); if(status==='SUCCESS')await confirmKokoOrder(order,trnId,status);else if(['FAILED','FAILURE','CANCELED','CANCELLED'].includes(status))await releaseKokoOrder(order,`verified callback status ${status}`); return res.json({success:status==='SUCCESS'}); } catch(e){ console.error('[Koko response]',e.message); return res.status(500).json({success:false}); }
 });
-router.get('/koko/return', async (req,res) => { const front=(process.env.FRONTEND_URL||process.env.PUBLIC_APP_URL||'https://shopzen.lk').replace(/\/$/,''); try { let order=await require('../models/Order').findOne({_id:req.query.draftId,paymentMethod:'koko'}); if(!order) return res.redirect(`${front}/checkout?payment=failed`); if(order.paymentStatus!=='paid'){ const gw=await PaymentGateway.findOne({gateway:'koko',isEnabled:true}); const result=await viewKokoOrder(order,gw); if(result.status==='SUCCESS') order=await confirmKokoOrder(order,result.trnId,result.status); else if(['FAILED','FAILURE','CANCELED','CANCELLED'].includes(result.status)){await releaseKokoOrder(order,`orderView status ${result.status}`);return res.redirect(`${front}/checkout?payment=failed`);} } if(order?.paymentStatus==='paid') return res.redirect(`${front}/my-orders?new=${order._id}&payment=koko&status=success`); return res.redirect(`${front}/checkout?payment=koko_pending`); } catch(e) { console.error('[Koko return]',e.message); return res.redirect(`${front}/checkout?payment=failed`); } });
-router.get('/koko/cancel', async (req,res) => { const front=(process.env.FRONTEND_URL||process.env.PUBLIC_APP_URL||'https://shopzen.lk').replace(/\/$/,''); try { const order=await require('../models/Order').findOne({_id:req.query.draftId,paymentMethod:'koko',paymentStatus:'pending'}); if(order && safeEqual(String(order.paymentMetadata?.cancelToken||''),String(req.query.token||''))) await releaseKokoOrder(order,'customer cancelled payment'); return res.redirect(`${front}/checkout?payment=cancelled`); } catch { return res.redirect(`${front}/checkout?payment=failed`); } });
+router.get('/koko/return', async (req,res) => { const front=(process.env.FRONTEND_URL||process.env.PUBLIC_APP_URL||'https://shopzen.lk').replace(/\/$/,''); try { let order=await require('../models/Order').findOne({_id:req.query.draftId,paymentMethod:'koko'}); if(!order) return res.redirect(`${front}/my-orders?payment=koko&status=failed`); if(order.paymentStatus!=='paid'){ const gw=await PaymentGateway.findOne({gateway:'koko',isEnabled:true}); const result=await viewKokoOrder(order,gw); if(result.status==='SUCCESS') order=await confirmKokoOrder(order,result.trnId,result.status); else if(['FAILED','FAILURE','CANCELED','CANCELLED'].includes(result.status)){await releaseKokoOrder(order,`orderView status ${result.status}`);return res.redirect(`${front}/my-orders?payment=koko&status=failed`);} } if(order?.paymentStatus==='paid') return res.redirect(`${front}/my-orders?new=${order._id}&payment=koko&status=success`); return res.redirect(`${front}/my-orders?payment=koko&status=pending`); } catch(e) { console.error('[Koko return]',e.message); return res.redirect(`${front}/my-orders?payment=koko&status=failed`); } });
+router.get('/koko/cancel', async (req,res) => { const front=(process.env.FRONTEND_URL||process.env.PUBLIC_APP_URL||'https://shopzen.lk').replace(/\/$/,''); try { const order=await require('../models/Order').findOne({_id:req.query.draftId,paymentMethod:'koko',paymentStatus:'pending'}); if(order && safeEqual(String(order.paymentMetadata?.cancelToken||''),String(req.query.token||''))) await releaseKokoOrder(order,'customer cancelled payment'); return res.redirect(`${front}/my-orders?payment=koko&status=cancelled`); } catch { return res.redirect(`${front}/my-orders?payment=koko&status=failed`); } });
 async function handlePayzyResponse(req, res) {
   const params = { ...(req.query || {}), ...(req.body || {}) };
   const frontendUrl = (process.env.FRONTEND_URL || process.env.PUBLIC_APP_URL || 'https://shopzen.lk').replace(/\/$/, '');
@@ -370,7 +377,7 @@ async function handlePayzyResponse(req, res) {
     return res.redirect(`${frontendUrl}/my-orders?new=${order?._id || ''}&payment=payzy&status=${confirmed ? 'success' : 'failed'}`);
   } catch (error) {
     console.error('[PAYZY CALLBACK]', error.message);
-    return res.redirect(`${frontendUrl}/checkout?payment=failed`);
+    return res.redirect(`${frontendUrl}/my-orders?payment=payzy&status=failed`);
   }
 }
 router.get('/payzy/response', handlePayzyResponse);

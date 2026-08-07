@@ -360,14 +360,21 @@ export default function MyOrders() {
   const newOrderId    = searchParams.get('new');
   const newPaymentMethod = searchParams.get('payment'); // e.g. 'bank_transfer'
   const paymentStatus = searchParams.get('status');
-  const kokoSuccessHandled = useRef(false);
+  const paymentResultHandled = useRef(false);
 
   useEffect(() => {
-    if (!kokoSuccessHandled.current && newPaymentMethod === 'koko' && paymentStatus === 'success') {
-      kokoSuccessHandled.current = true;
+    if (paymentResultHandled.current || !['koko', 'payzy'].includes(newPaymentMethod)) return;
+    paymentResultHandled.current = true;
+    if (paymentStatus === 'success') {
       clearCart();
       sessionStorage.removeItem('checkout_state');
-      toast.success('Koko payment successful — your order is confirmed!');
+      toast.success(`${newPaymentMethod === 'koko' ? 'Koko' : 'Payzy'} payment successful — your order is confirmed!`);
+    } else if (paymentStatus === 'cancelled') {
+      toast.error('Payment was cancelled. No order was created.');
+    } else if (paymentStatus === 'pending') {
+      toast('Payment is still being verified. Please refresh this page shortly.');
+    } else if (paymentStatus === 'failed') {
+      toast.error('Payment was not completed. No paid order was created.');
     }
   }, [newPaymentMethod, paymentStatus, clearCart]);
 
