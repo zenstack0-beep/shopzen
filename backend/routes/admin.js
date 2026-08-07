@@ -19,6 +19,14 @@ router.get('/dashboard', adminAuth, async (req, res) => {
 
     // Paid & NOT refunded = real revenue
     const revenueFilter = { paymentStatus: 'paid', orderStatus: { $ne: 'refunded' } };
+    // Koko/Payzy pending records are temporary stock reservations, not orders.
+    // Keep dashboard counters consistent with the admin order list.
+    const operationalOrderFilter = {
+      $or: [
+        { paymentMethod: { $nin: ['payzy', 'koko'] } },
+        { paymentStatus: 'paid' },
+      ],
+    };
 
     const [
       totalOrders, pendingOrders, todayOrders,
@@ -28,9 +36,9 @@ router.get('/dashboard', adminAuth, async (req, res) => {
       // Return stats
       totalReturns, pendingReturns, totalRefundedAmount,
     ] = await Promise.all([
-      Order.countDocuments(),
-      Order.countDocuments({ orderStatus: 'pending' }),
-      Order.countDocuments({ createdAt: { $gte: today } }),
+      Order.countDocuments(operationalOrderFilter),
+      Order.countDocuments({ ...operationalOrderFilter, orderStatus: 'pending' }),
+      Order.countDocuments({ ...operationalOrderFilter, createdAt: { $gte: today } }),
 
       // Revenue: paid orders that have NOT been refunded
       Order.aggregate([
@@ -50,7 +58,7 @@ router.get('/dashboard', adminAuth, async (req, res) => {
       Product.countDocuments({ isActive: true, $expr: { $lte: ['$stock', '$lowStockThreshold'] } }),
       User.countDocuments({ role: 'customer' }),
       User.countDocuments({ role: 'customer', createdAt: { $gte: thisMonth } }),
-      Order.countDocuments({ isRead: false }),
+      Order.countDocuments({ ...operationalOrderFilter, isRead: false }),
 
       // Return KPIs
       ReturnRequest.countDocuments(),
@@ -138,10 +146,11 @@ router.get('/dashboard', adminAuth, async (req, res) => {
       .select('name soldCount price thumbnail');
 
     const ordersByStatus = await Order.aggregate([
+      { $match: operationalOrderFilter },
       { $group: { _id: '$orderStatus', count: { $sum: 1 } } }
     ]);
 
-    const recentOrders = await Order.find()
+    const recentOrders = await Order.find(operationalOrderFilter)
       .sort({ createdAt: -1 })
       .limit(10)
       .populate('customer', 'firstName lastName');
