@@ -203,23 +203,30 @@ function kokoVerify(publicKey, payload, signature) {
 }
 router.post('/koko/init', requireAuth, paymentInitLimiter, async (req, res) => {
   const Order = require('../models/Order');
+  let order;
+  const rollback = async () => {
+    if (!order) return;
+    const Product = require('../models/Product');
+    for (const item of order.items || []) await Product.findByIdAndUpdate(item.product, { $inc: { stock: Number(item.quantity) || 0, soldCount: -(Number(item.quantity) || 0) } });
+    await Order.deleteOne({ _id: order._id, paymentMethod: 'koko', paymentStatus: 'pending' });
+  };
   try {
-    const order = await Order.findById(req.body.orderId);
+    order = await Order.findById(req.body.orderId);
     const gw = await PaymentGateway.findOne({ gateway: 'koko', isEnabled: true });
     const c = gw?.config || {};
     if (!order || order.paymentMethod !== 'koko' || String(order.customer) !== String(req.user.id)) return res.status(404).json({ message: 'Koko order not found' });
-    if (!c.merchantId || !c.apiKey || !c.privateKey || !c.publicKey) return res.status(503).json({ message: 'Koko is not fully configured.' });
+    if (!c.merchantId || !c.apiKey || !c.privateKey || !c.publicKey) { await rollback(); return res.status(503).json({ message: 'Koko is not fully configured.' }); }
     const base = (process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || 'https://shopzen.lk').replace(/\/$/, '');
     const backend = (process.env.BACKEND_URL || base).replace(/\/$/, '');
     const data = { merchantId: String(c.merchantId), amount: Number(order.total).toFixed(2), currency: 'LKR', pluginName: c.pluginName || 'customapi', pluginVersion: Number(c.pluginVersion || 1), returnUrl: `${base}/my-orders?new=${order._id}&payment=koko`, cancelUrl: `${base}/checkout?payment=cancelled`, responseUrl: `${backend}/api/payments/koko/response`, orderId: order.orderNumber, reference: order.orderNumber, firstName: order.billing?.firstName, lastName: order.billing?.lastName, email: order.billing?.email, description: `ShopZen order ${order.orderNumber}`, apiKey: String(c.apiKey), mobileNo: order.billing?.phone };
     let signature;
     try { signature = crypto.sign('RSA-SHA256', Buffer.from(kokoSignaturePayload(data)), crypto.createPrivateKey({ key: normalizeKokoPem(c.privateKey, 'RSA PRIVATE KEY'), format: 'pem', type: 'pkcs1' })).toString('base64'); }
-    catch { return res.status(503).json({ message: 'Koko private key is invalid. Paste the complete RSA PEM key, including BEGIN/END lines.' }); }
+    catch { await rollback(); return res.status(503).json({ message: 'Koko private key is invalid. Paste the complete RSA PEM key, including BEGIN/END lines.' }); }
     await Order.updateOne({ _id: order._id }, { $set: { paymentMetadata: { ...data, signature } } });
     const endpoint = c.endpoint || (gw.isLive ? 'https://prodapi.paykoko.com/api/merchants/orderCreate' : 'https://qaapi.paykoko.com/api/merchants/orderCreate');
     const fields = { _mId:data.merchantId, api_key:data.apiKey, _returnUrl:data.returnUrl, _responseUrl:data.responseUrl, _currency:data.currency, _amount:data.amount, _reference:data.reference, _pluginName:data.pluginName, _pluginVersion:String(data.pluginVersion), _cancelUrl:data.cancelUrl, _orderId:data.orderId, _firstName:data.firstName || '', _lastName:data.lastName || '', _email:data.email || '', _description:data.description, dataString:kokoSignaturePayload(data), signature, _mobileNo:data.mobileNo || '' };
     res.json({ url: endpoint, fields });
-  } catch (e) { console.error('[Koko init]', e.message); res.status(502).json({ message: 'Could not initialise Koko payment.' }); }
+  } catch (e) { await rollback().catch(() => {}); console.error('[Koko init]', e.message); res.status(502).json({ message: `Could not initialise Koko payment: ${e.message}` }); }
 });
 router.post('/koko/abort', requireAuth, async (req,res) => { try { const Order=require('../models/Order'); const Product=require('../models/Product'); const order=await Order.findOne({ _id:req.body.orderId, customer:req.user.id, paymentMethod:'koko', paymentStatus:'pending' }); if(order){ for(const item of order.items||[]) await Product.findByIdAndUpdate(item.product,{$inc:{stock:Number(item.quantity)||0,soldCount:-(Number(item.quantity)||0)}}); await Order.deleteOne({_id:order._id}); } res.json({success:true}); } catch { res.status(500).json({message:'Could not cancel Koko order'}); } });
 router.all('/koko/response', async (req,res) => {
