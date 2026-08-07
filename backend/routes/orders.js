@@ -452,6 +452,54 @@ router.put('/admin/:id/read', adminAuth, async (req, res) => {
   }
 });
 
+// ── Admin — edit order items and totals ─────────────────────────────────────
+// Prices and totals are rebuilt from the current catalog on the server. Stock
+// is changed only by the quantity delta, so admin edits cannot create stock.
+router.put('/admin/:id/items', adminAuth, async (req, res) => {
+  const session = await mongoose.startSession();
+  try {
+    const { items, shippingCost } = req.body;
+    if (!Array.isArray(items) || items.length > 100) return res.status(400).json({ message: 'Invalid order items' });
+    session.startTransaction();
+    const order = await Order.findById(req.params.id).session(session);
+    if (!order) { await session.abortTransaction(); return res.status(404).json({ message: 'Order not found' }); }
+    if (['cancelled', 'refunded'].includes(order.orderStatus)) { await session.abortTransaction(); return res.status(400).json({ message: 'Cancelled or refunded orders cannot be edited' }); }
+    const Product = require('../models/Product');
+    const requested = new Map();
+    for (const row of items) {
+      const productId = String(row.productId || row.product?._id || row.product || '');
+      const quantity = Math.floor(Number(row.quantity));
+      if (!mongoose.isValidObjectId(productId) || !Number.isFinite(quantity) || quantity < 1 || quantity > 999) continue;
+      const requestedPrice = Number(row.price);
+      requested.set(productId, { quantity: (requested.get(productId)?.quantity || 0) + quantity, price: Number.isFinite(requestedPrice) && requestedPrice >= 0 ? Math.round(requestedPrice * 100) / 100 : null });
+    }
+    const productIds = [...requested.keys()];
+    const products = await Product.find({ _id: { $in: productIds } }).session(session);
+    if (products.length !== productIds.length) { await session.abortTransaction(); return res.status(400).json({ message: 'One or more products no longer exist' }); }
+    const byId = new Map(products.map(p => [String(p._id), p]));
+    const oldQty = new Map((order.items || []).filter(i => !i.isFree).map(i => [String(i.product), Number(i.quantity) || 0]));
+    for (const [id, qty] of requested) {
+      const delta = qty.quantity - (oldQty.get(id) || 0);
+      if (delta > 0 && Number(byId.get(id).stock || 0) < delta) { await session.abortTransaction(); return res.status(400).json({ message: `Insufficient stock for ${byId.get(id).name}` }); }
+    }
+    for (const [id, old] of oldQty) {
+      const delta = (requested.get(id)?.quantity || 0) - old;
+      if (delta) await Product.updateOne({ _id: id }, { $inc: { stock: -delta, soldCount: delta } }).session(session);
+    }
+    const editedItems = [...requested.entries()].map(([id, edit]) => { const p = byId.get(id); const catalogUnit = Number(p.salePrice > 0 && p.salePrice < p.price ? p.salePrice : p.price) || 0; const unit = edit.price == null ? catalogUnit : edit.price; return { product: p._id, name: p.name, image: p.thumbnail || p.images?.[0] || '', price: unit, quantity: edit.quantity, subtotal: Math.round(unit * edit.quantity * 100) / 100, isFree: false }; });
+    const freeItems = (order.items || []).filter(i => i.isFree);
+    const subtotal = Math.round([...editedItems, ...freeItems].reduce((sum, i) => sum + (Number(i.subtotal) || 0), 0) * 100) / 100;
+    const delivery = Math.max(0, Number(shippingCost ?? order.shippingCost) || 0);
+    const coupon = Math.min(subtotal, Math.max(0, Number(order.couponDiscount) || 0));
+    const gift = Math.min(subtotal - coupon + delivery, Math.max(0, Number(order.giftCardDiscount || order.giftCardDeduction) || 0));
+    const total = Math.max(0, Math.round((subtotal - coupon + delivery - gift) * 100) / 100);
+    order.items = [...editedItems, ...freeItems]; order.subtotal = subtotal; order.shippingCost = delivery; order.couponDiscount = coupon; order.total = total;
+    order.statusHistory.push({ status: order.orderStatus, note: `Order items and total edited by admin (${order.billing?.firstName || ''} ${order.billing?.lastName || ''})`, updatedBy: req.user.email });
+    await order.save({ session }); await session.commitTransaction(); res.json(order);
+  } catch (err) { await session.abortTransaction().catch(() => {}); console.error('[EDIT ORDER ITEMS]', err.message); res.status(500).json({ message: 'Could not update order items' }); }
+  finally { session.endSession(); }
+});
+
 // ── Admin — Confirm payment (manual gateway) ──────────────────────────────────
 router.put('/admin/:id/confirm-payment', adminAuth, async (req, res) => {
   try {

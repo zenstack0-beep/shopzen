@@ -35,12 +35,16 @@ export default function AdminOrderDetail() {
   // ── Internal admin notes state ──
   const [newNote, setNewNote]         = useState('');
   const [addingNote, setAddingNote]   = useState(false);
+  const [editingItems, setEditingItems] = useState(false);
+  const [editItems, setEditItems] = useState([]);
+  const [savingItems, setSavingItems] = useState(false);
 
   useEffect(() => {
     API.get(`/orders/${id}`).then(r => {
       setOrder(r.data);
       setStatusUpdate(p => ({ ...p, status: r.data.orderStatus }));
       setPaymentStatus(r.data.paymentStatus);
+      setEditItems((r.data.items || []).filter(i => !i.isFree).map(i => ({ productId: i.product?._id || i.product, name: i.name, quantity: i.quantity, price: i.price })));
       const address = r.data.shipToDifferentAddress ? r.data.shipping : r.data.billing;
       setCurfoxForm(p => ({ ...p, destinationCity: address?.city || '', remark: r.data.notes || '' }));
       if (!r.data.courierIntegration?.provider) {
@@ -53,6 +57,9 @@ export default function AdminOrderDetail() {
       API.put(`/orders/admin/${id}/read`, {}).catch(() => {});
     }).finally(() => setLoading(false));
   }, [id]);
+
+  const startEditItems = () => { setEditItems((order.items || []).filter(i => !i.isFree).map(i => ({ productId: i.product?._id || i.product, name: i.name, quantity: i.quantity, price: i.price }))); setEditingItems(true); };
+  const saveItems = async () => { setSavingItems(true); try { const { data } = await API.put(`/orders/admin/${id}/items`, { items: editItems }); setOrder(data); setEditingItems(false); toast.success('Order items and total updated'); } catch (e) { toast.error(e.response?.data?.message || 'Could not update order items'); } finally { setSavingItems(false); } };
 
   const handleStatusUpdate = async () => {
     if (!statusUpdate.status) return;
@@ -176,7 +183,13 @@ export default function AdminOrderDetail() {
 
           {/* Items */}
           <div className="bg-white rounded-2xl border border-gray-100 p-5">
-            <h2 className="font-semibold text-gray-900 mb-4">Order Items</h2>
+            <div className="flex items-center justify-between mb-4"><h2 className="font-semibold text-gray-900">Order Items</h2>{!editingItems && !['cancelled','refunded'].includes(order.orderStatus) && <button onClick={startEditItems} className="btn-outline text-xs py-1.5 px-3">✏️ Edit Items & Total</button>}</div>
+            {editingItems ? <div className="space-y-3">
+              <p className="text-xs text-amber-700 bg-amber-50 rounded-lg p-2">Changing quantities updates stock. Prices are recalculated from the current product catalog.</p>
+              {editItems.map((item, i) => <div key={i} className="grid sm:grid-cols-[1fr_120px_90px] gap-2 items-end"><div><label className="form-label">{item.name}</label></div><div><label className="form-label">Price (Rs.)</label><input type="number" min="0" step="0.01" value={item.price ?? ''} onChange={e => setEditItems(p => p.map((x,j) => j===i ? {...x, price:e.target.value} : x))} className="form-input" /></div><div><label className="form-label">Qty</label><input type="number" min="1" max="999" value={item.quantity} onChange={e => setEditItems(p => p.map((x,j) => j===i ? {...x, quantity:e.target.value} : x))} className="form-input" /></div><button onClick={() => setEditItems(p => p.filter((_,j) => j!==i))} className="text-sm text-red-600 py-2">Remove</button></div>)}
+              <div className="flex gap-2"><button onClick={saveItems} disabled={savingItems || !editItems.length} className="btn-primary text-sm">{savingItems ? 'Saving…' : 'Save Changes'}</button><button onClick={() => setEditingItems(false)} className="btn-outline text-sm">Cancel</button></div>
+            </div> : null}
+            {!editingItems && <>
             <div className="space-y-3">
               {order.items.map((item, i) => (
                 <div key={i} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
@@ -189,6 +202,7 @@ export default function AdminOrderDetail() {
                 </div>
               ))}
             </div>
+            </>}
             <div className="border-t border-gray-100 mt-4 pt-4 space-y-2 text-sm">
               <div className="flex justify-between text-gray-600"><span>Subtotal</span><span>Rs. {order.subtotal?.toLocaleString()}</span></div>
               {order.couponDiscount > 0 && <div className="flex justify-between text-green-600"><span>🏷️ Coupon Discount ({order.couponCode})</span><span>−Rs. {order.couponDiscount?.toLocaleString()}</span></div>}
