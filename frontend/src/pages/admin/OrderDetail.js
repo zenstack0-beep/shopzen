@@ -40,6 +40,9 @@ export default function AdminOrderDetail() {
   const [savingItems, setSavingItems] = useState(false);
   const [productSearch, setProductSearch] = useState('');
   const [productResults, setProductResults] = useState([]);
+  const [editingBill, setEditingBill] = useState(false);
+  const [billForm, setBillForm] = useState({});
+  const [savingBill, setSavingBill] = useState(false);
 
   useEffect(() => {
     API.get(`/orders/${id}`).then(r => {
@@ -47,6 +50,7 @@ export default function AdminOrderDetail() {
       setStatusUpdate(p => ({ ...p, status: r.data.orderStatus }));
       setPaymentStatus(r.data.paymentStatus);
       setEditItems((r.data.items || []).filter(i => !i.isFree).map(i => ({ productId: i.product?._id || i.product, name: i.name, quantity: i.quantity, price: i.price })));
+      setBillForm({ billing: r.data.billing || {}, shipping: r.data.shipping || {}, notes: r.data.notes || '', couponCode: r.data.couponCode || '', couponDiscount: r.data.couponDiscount || 0, shippingCost: r.data.shippingCost || 0, tax: r.data.tax || 0 });
       const address = r.data.shipToDifferentAddress ? r.data.shipping : r.data.billing;
       setCurfoxForm(p => ({ ...p, destinationCity: address?.city || '', remark: r.data.notes || '' }));
       if (!r.data.courierIntegration?.provider) {
@@ -64,6 +68,7 @@ export default function AdminOrderDetail() {
   const saveItems = async () => { setSavingItems(true); try { const { data } = await API.put(`/orders/admin/${id}/items`, { items: editItems }); setOrder(data); setEditingItems(false); toast.success('Order items and total updated'); } catch (e) { toast.error(e.response?.data?.message || 'Could not update order items'); } finally { setSavingItems(false); } };
   const searchProducts = async value => { setProductSearch(value); if (value.trim().length < 2) return setProductResults([]); try { const { data } = await API.get(`/products/admin/lookup?search=${encodeURIComponent(value.trim())}`); setProductResults(data.products || []); } catch { setProductResults([]); } };
   const addProduct = product => { if (editItems.some(i => String(i.productId) === String(product._id))) return toast.error('This item is already in the order'); setEditItems(p => [...p, { productId: product._id, name: product.name, quantity: 1, price: product.salePrice > 0 && product.salePrice < product.price ? product.salePrice : product.price }]); setProductSearch(''); setProductResults([]); };
+  const saveBill = async () => { setSavingBill(true); try { const { data } = await API.put(`/orders/admin/${id}/bill`, billForm); setOrder(data); setEditingBill(false); toast.success('Bill details updated'); } catch (e) { toast.error(e.response?.data?.message || 'Could not update bill'); } finally { setSavingBill(false); } };
 
   const handleStatusUpdate = async () => {
     if (!statusUpdate.status) return;
@@ -187,7 +192,8 @@ export default function AdminOrderDetail() {
 
           {/* Items */}
           <div className="bg-white rounded-2xl border border-gray-100 p-5">
-            <div className="flex items-center justify-between mb-4"><h2 className="font-semibold text-gray-900">Order Items</h2>{!editingItems && !['cancelled','refunded'].includes(order.orderStatus) && <button onClick={startEditItems} className="btn-outline text-xs py-1.5 px-3">✏️ Edit Items & Total</button>}</div>
+            <div className="flex items-center justify-between mb-4"><h2 className="font-semibold text-gray-900">Order Items</h2>{!editingItems && !['cancelled','refunded'].includes(order.orderStatus) && <div className="flex gap-2"><button onClick={() => { setBillForm({ billing: order.billing || {}, shipping: order.shipping || {}, notes: order.notes || '', couponCode: order.couponCode || '', couponDiscount: order.couponDiscount || 0, shippingCost: order.shippingCost || 0, tax: order.tax || 0 }); setEditingBill(true); }} className="btn-outline text-xs py-1.5 px-3">🧾 Edit Bill</button><button onClick={startEditItems} className="btn-outline text-xs py-1.5 px-3">✏️ Edit Items & Total</button></div>}</div>
+            {editingBill && <div className="mb-4 p-4 rounded-xl bg-blue-50 space-y-3"><div className="grid sm:grid-cols-2 gap-2">{['firstName','lastName','email','phone','street','city','country'].map(k => <input key={k} value={billForm.billing?.[k] || ''} onChange={e => setBillForm(p => ({...p,billing:{...p.billing,[k]:e.target.value}}))} className="form-input text-sm" placeholder={`Billing ${k}`} />)}</div><div className="grid sm:grid-cols-3 gap-2"><input type="number" value={billForm.couponDiscount} onChange={e=>setBillForm(p=>({...p,couponDiscount:e.target.value}))} className="form-input text-sm" placeholder="Coupon discount"/><input value={billForm.couponCode} onChange={e=>setBillForm(p=>({...p,couponCode:e.target.value}))} className="form-input text-sm" placeholder="Coupon code"/><input type="number" value={billForm.shippingCost} onChange={e=>setBillForm(p=>({...p,shippingCost:e.target.value}))} className="form-input text-sm" placeholder="Shipping cost"/><input type="number" value={billForm.tax} onChange={e=>setBillForm(p=>({...p,tax:e.target.value}))} className="form-input text-sm" placeholder="Tax"/></div><textarea value={billForm.notes} onChange={e=>setBillForm(p=>({...p,notes:e.target.value}))} className="form-input text-sm" placeholder="Order notes"/><div className="flex gap-2"><button onClick={saveBill} disabled={savingBill} className="btn-primary text-sm">{savingBill?'Saving…':'Save Bill'}</button><button onClick={()=>setEditingBill(false)} className="btn-outline text-sm">Cancel</button></div></div>}
             {editingItems ? <div className="space-y-3">
               <p className="text-xs text-amber-700 bg-amber-50 rounded-lg p-2">Changing quantities updates stock. Prices are recalculated from the current product catalog.</p>
               {editItems.map((item, i) => <div key={i} className="grid sm:grid-cols-[1fr_120px_90px] gap-2 items-end"><div><label className="form-label">{item.name}</label></div><div><label className="form-label">Price (Rs.)</label><input type="number" min="0" step="0.01" value={item.price ?? ''} onChange={e => setEditItems(p => p.map((x,j) => j===i ? {...x, price:e.target.value} : x))} className="form-input" /></div><div><label className="form-label">Qty</label><input type="number" min="1" max="999" value={item.quantity} onChange={e => setEditItems(p => p.map((x,j) => j===i ? {...x, quantity:e.target.value} : x))} className="form-input" /></div><button onClick={() => setEditItems(p => p.filter((_,j) => j!==i))} className="text-sm text-red-600 py-2">Remove</button></div>)}

@@ -496,8 +496,29 @@ router.put('/admin/:id/items', adminAuth, async (req, res) => {
     order.items = [...editedItems, ...freeItems]; order.subtotal = subtotal; order.shippingCost = delivery; order.couponDiscount = coupon; order.total = total;
     order.statusHistory.push({ status: order.orderStatus, note: `Order items and total edited by admin (${order.billing?.firstName || ''} ${order.billing?.lastName || ''})`, updatedBy: req.user.email });
     await order.save({ session }); await session.commitTransaction(); res.json(order);
-  } catch (err) { await session.abortTransaction().catch(() => {}); console.error('[EDIT ORDER ITEMS]', err.message); res.status(500).json({ message: 'Could not update order items' }); }
+  } catch (err) { await session.abortTransaction().catch(() => {}); console.error('[EDIT ORDER ITEMS]', err.message); res.status(500).json({ message: `Could not update order items: ${err.message}` }); }
   finally { session.endSession(); }
+});
+
+// Admin — edit bill/customer details and manual adjustments.
+router.put('/admin/:id/bill', adminAuth, async (req, res) => {
+  try {
+    const { billing, shipping, notes, couponCode, couponDiscount, shippingCost, tax } = req.body;
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ message: 'Order not found' });
+    if (['cancelled', 'refunded'].includes(order.orderStatus)) return res.status(400).json({ message: 'Cancelled or refunded orders cannot be edited' });
+    if (billing) order.billing = { ...order.billing?.toObject?.() || order.billing, ...billing };
+    if (shipping) order.shipping = { ...order.shipping?.toObject?.() || order.shipping, ...shipping };
+    if (notes !== undefined) order.notes = String(notes).slice(0, 2000);
+    if (couponCode !== undefined) order.couponCode = String(couponCode).slice(0, 80);
+    if (shippingCost !== undefined) order.shippingCost = Math.max(0, Number(shippingCost) || 0);
+    if (tax !== undefined) order.tax = Math.max(0, Number(tax) || 0);
+    if (couponDiscount !== undefined) order.couponDiscount = Math.max(0, Math.min(Number(order.subtotal) || 0, Number(couponDiscount) || 0));
+    const gift = Math.max(0, Number(order.giftCardDiscount || order.giftCardDeduction) || 0);
+    order.total = Math.max(0, Math.round(((Number(order.subtotal) || 0) - (Number(order.couponDiscount) || 0) + (Number(order.shippingCost) || 0) + (Number(order.tax) || 0) - gift) * 100) / 100);
+    order.statusHistory.push({ status: order.orderStatus, note: 'Bill and customer details edited by admin', updatedBy: req.user.email });
+    await order.save(); res.json(order);
+  } catch (err) { console.error('[EDIT ORDER BILL]', err.message); res.status(500).json({ message: `Could not update bill: ${err.message}` }); }
 });
 
 // ── Admin — Confirm payment (manual gateway) ──────────────────────────────────
