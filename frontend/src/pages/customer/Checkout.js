@@ -842,8 +842,12 @@ export default function Checkout() {
         fbp: _fbp,
         fbc: _fbc,
       });
+      // Use the payment method persisted by the backend as the final routing
+      // authority. This prevents stale React/session state from bypassing a
+      // hosted gateway after the draft has already been created.
+      const createdPaymentMethod = String(data.paymentMethod || effectivePaymentMethod || '').trim().toLowerCase();
 
-      if (effectivePaymentMethod === 'payzy') {
+      if (createdPaymentMethod === 'payzy') {
         try {
           const payzy = await API.post('/payments/payzy/init', { orderId: data.orderId });
           if (!payzy.data?.url) throw new Error('Payzy returned no checkout URL');
@@ -855,13 +859,16 @@ export default function Checkout() {
         return;
       }
 
-      if (effectivePaymentMethod === 'koko') {
+      if (createdPaymentMethod === 'koko') {
         try {
           const koko = await API.post('/payments/koko/init', { orderId: data.orderId });
           if (!koko.data?.url || !koko.data?.fields) throw new Error('Koko returned no checkout form');
           const form = document.createElement('form'); form.method = 'POST'; form.action = koko.data.url;
           Object.entries(koko.data.fields).forEach(([key, value]) => { const input = document.createElement('input'); input.type = 'hidden'; input.name = key; input.value = value ?? ''; form.appendChild(input); });
-          document.body.appendChild(form); form.submit();
+          document.body.appendChild(form);
+          // Call the native method directly in case a field/library shadows
+          // form.submit. Koko requires a real application/x-www-form-urlencoded POST.
+          window.HTMLFormElement.prototype.submit.call(form);
         } catch (kokoError) {
           await API.post('/payments/koko/abort', { orderId: data.orderId }).catch(() => {});
           throw kokoError;
@@ -888,7 +895,7 @@ export default function Checkout() {
       clearCart();
       sessionStorage.removeItem('checkout_state');
 
-      if (effectivePaymentMethod === 'bank_transfer') {
+      if (createdPaymentMethod === 'bank_transfer') {
         setPendingBankOrder({ orderId: data.orderId, orderNumber: data.orderNumber, total: data.total });
         setLoading(false);
         return;
