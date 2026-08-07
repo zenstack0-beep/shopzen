@@ -216,7 +216,7 @@ router.post('/koko/init', requireAuth, paymentInitLimiter, async (req, res) => {
     try { signature = crypto.sign('RSA-SHA256', Buffer.from(kokoSignaturePayload(data)), crypto.createPrivateKey({ key: normalizeKokoPem(c.privateKey, 'RSA PRIVATE KEY'), format: 'pem', type: 'pkcs1' })).toString('base64'); }
     catch { return res.status(503).json({ message: 'Koko private key is invalid. Paste the complete RSA PEM key, including BEGIN/END lines.' }); }
     await Order.updateOne({ _id: order._id }, { $set: { paymentMetadata: { ...data, signature } } });
-    const endpoint = c.endpoint || (gw.isLive ? 'https://api.paykoko.com/api/merchants/orderCreate' : 'https://qaapi.paykoko.com/api/merchants/orderCreate');
+    const endpoint = c.endpoint || (gw.isLive ? 'https://prodapi.paykoko.com/api/merchants/orderCreate' : 'https://qaapi.paykoko.com/api/merchants/orderCreate');
     const fields = { _mId:data.merchantId, api_key:data.apiKey, _returnUrl:data.returnUrl, _responseUrl:data.responseUrl, _currency:data.currency, _amount:data.amount, _reference:data.reference, _pluginName:data.pluginName, _pluginVersion:String(data.pluginVersion), _cancelUrl:data.cancelUrl, _orderId:data.orderId, _firstName:data.firstName || '', _lastName:data.lastName || '', _email:data.email || '', _description:data.description, dataString:kokoSignaturePayload(data), signature, _mobileNo:data.mobileNo || '' };
     res.json({ url: endpoint, fields });
   } catch (e) { console.error('[Koko init]', e.message); res.status(502).json({ message: 'Could not initialise Koko payment.' }); }
