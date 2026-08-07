@@ -1016,11 +1016,14 @@ router.post('/', orderRateLimiter, async (req, res) => {
     }
 
     const backendBase = String(process.env.BACKEND_URL || 'https://shopzen-production.up.railway.app').trim().replace(/\/$/, '');
+    if (paymentMethod === 'koko') console.log('[Koko draft] one-time hosted redirect issued', { orderId:String(order._id), orderNumber:order.orderNumber, backendBase });
     res.status(201).json({
       orderId:     order._id,
       orderNumber: order.orderNumber,
       total:       totals.total,
       paymentMethod,
+      paymentProvider: paymentMethod === 'koko' ? 'koko' : undefined,
+      requiresHostedPayment: paymentMethod === 'koko',
       paymentRedirectUrl: paymentMethod === 'koko' ? `${backendBase}/api/payments/koko/redirect?draftId=${order._id}&token=${kokoRedirectToken}` : undefined,
       metaEventId:  order.metaEventId || metaEventId || undefined,
     });

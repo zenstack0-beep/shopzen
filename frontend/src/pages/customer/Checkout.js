@@ -846,6 +846,7 @@ export default function Checkout() {
       // authority. This prevents stale React/session state from bypassing a
       // hosted gateway after the draft has already been created.
       const createdPaymentMethod = String(data.paymentMethod || effectivePaymentMethod || '').trim().toLowerCase();
+      const requiresKoko = effectivePaymentMethod === 'koko' || createdPaymentMethod === 'koko' || data.paymentProvider === 'koko' || data.requiresHostedPayment === true;
 
       if (createdPaymentMethod === 'payzy') {
         try {
@@ -859,7 +860,7 @@ export default function Checkout() {
         return;
       }
 
-      if (createdPaymentMethod === 'koko') {
+      if (requiresKoko) {
         try {
           if (data.paymentRedirectUrl) {
             window.location.assign(data.paymentRedirectUrl);
@@ -880,6 +881,9 @@ export default function Checkout() {
         }
         return;
       }
+
+      // A Koko draft must never fall through to normal order completion.
+      if (effectivePaymentMethod === 'koko') throw new Error('Koko redirect could not be started. Please try again.');
 
       if (user) {
         API.put('/auth/profile', {
