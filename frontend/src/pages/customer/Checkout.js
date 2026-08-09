@@ -493,6 +493,7 @@ export default function Checkout() {
   const [freeSelections,   setFreeSelections]   = useState({});
   const [shipDiff,         setShipDiff]         = useState(false);
   const [paymentMethod,    setPaymentMethod]    = useState('');
+  const [installmentPlanMonths, setInstallmentPlanMonths] = useState(null);
   const [agreedTerms,      setAgreedTerms]      = useState(false);
   const [notes,            setNotes]            = useState('');
   const [gateways,         setGateways]         = useState([]);
@@ -552,6 +553,7 @@ export default function Checkout() {
       if (s.notes)            setNotes(s.notes);
       if (s.shipDiff)         setShipDiff(s.shipDiff);
       if (s.paymentMethod)    setPaymentMethod(s.paymentMethod);
+      if (s.installmentPlanMonths) setInstallmentPlanMonths(Number(s.installmentPlanMonths));
       if (s.selectedDelivery) setSelectedDelivery(s.selectedDelivery);
       if (s.agreedTerms)      setAgreedTerms(s.agreedTerms);
     } catch {}
@@ -660,6 +662,14 @@ export default function Checkout() {
   const couponDiscount    = totals.couponDiscount;
   const giftCardDeduction = totals.giftCardDeduction;
   const total             = totals.total;
+  const selectedGateway   = gateways.find(g => g.gateway === paymentMethod);
+  const selectedPlans     = (selectedGateway?.installmentPlans || []).filter(p => p.active !== false);
+  const selectedInstallmentPlan = selectedPlans.find(p => Number(p.months) === Number(installmentPlanMonths)) || selectedPlans[0] || null;
+  const installmentInterestRate = ['payzy', 'koko'].includes(paymentMethod)
+    ? Number(selectedInstallmentPlan?.interestRate || 0)
+    : 0;
+  const installmentFee = Math.round((total * installmentInterestRate / 100) * 100) / 100;
+  const paymentTotal = Math.round((total + installmentFee) * 100) / 100;
   const isCouponActive    = benefit.couponDiscount > 0;
   const isGiftCardActive  = benefit.giftCardDeduction > 0;
 
@@ -732,7 +742,7 @@ export default function Checkout() {
       try {
         sessionStorage.setItem('checkout_state', JSON.stringify({
           billing, shipping, couponCode, couponData,
-          notes, shipDiff, paymentMethod, selectedDelivery, agreedTerms,
+          notes, shipDiff, paymentMethod, installmentPlanMonths, selectedDelivery, agreedTerms,
         }));
       } catch {}
       navigate('/register', {
@@ -757,6 +767,9 @@ export default function Checkout() {
         shipping: shipDiff ? shipping : billing,
         shipToDifferentAddress: shipDiff,
         paymentMethod: effectivePaymentMethod,
+        installmentPlanMonths: ['payzy', 'koko'].includes(effectivePaymentMethod)
+          ? Number(selectedInstallmentPlan?.months)
+          : undefined,
         couponCode:  couponData   ? couponCode   : undefined,
         giftCard:    giftCardData ? giftCardCode : undefined,
         notes,
@@ -1367,9 +1380,16 @@ export default function Checkout() {
                   </div>
                 )}
 
+                {installmentFee > 0 && selectedInstallmentPlan && (
+                  <div className="flex justify-between text-amber-700">
+                    <span>{paymentMethod === 'koko' ? 'Koko' : 'Payzy'} financing ({installmentInterestRate}% · {selectedInstallmentPlan.months} installments)</span>
+                    <span>+{sym} {installmentFee.toLocaleString()}</span>
+                  </div>
+                )}
+
                 <div className="flex justify-between text-base font-bold text-gray-900 pt-3 border-t border-gray-100">
                   <span>Total</span>
-                  <span style={{ color: 'var(--color-primary)' }}>{sym} {total.toLocaleString()}</span>
+                  <span style={{ color: 'var(--color-primary)' }}>{sym} {paymentTotal.toLocaleString()}</span>
                 </div>
               </div>
             </div>
@@ -1503,7 +1523,7 @@ export default function Checkout() {
                     )
                   )}
                   {gateways.map(gw => (
-                    <div key={gw.gateway} className={`pay-method-card ${paymentMethod === gw.gateway ? 'selected' : ''}`} onClick={() => setPaymentMethod(gw.gateway)}>
+                    <div key={gw.gateway} className={`pay-method-card ${paymentMethod === gw.gateway ? 'selected' : ''}`} onClick={() => { setPaymentMethod(gw.gateway); if ((gw.installmentPlans || []).length) setInstallmentPlanMonths(Number(gw.installmentPlans[0].months)); }}>
                       <div className="pay-method-radio" />
                       <div className="pay-method-icon">{gw.providerLogo?.startsWith?.('http') ? <img src={gw.providerLogo} alt={gw.displayName} style={{ height: 24, objectFit: 'contain' }} /> : (gw.gateway === 'payzy' ? '🟣' : gw.gateway === 'koko' ? '🔵' : '🔌')}</div>
                       <div>
@@ -1518,7 +1538,7 @@ export default function Checkout() {
                           {gw.gateway === 'payzy'   && 'Pay securely with Payzy installments'}
                           {gw.gateway === 'koko'    && 'Pay securely with Koko Buy Now Pay Later'}
                         </div>
-                        {(gw.installmentPlans || []).length > 0 && <div className="text-xs text-gray-500 mt-1">{gw.installmentPlans.slice(0, 3).map((p, i) => <span key={i} className="mr-3">{p.months} × {(total * (1 + Number(p.interestRate || 0) / 100) / Number(p.months || 1)).toFixed(2)} {(p.provider || gw.gateway).toUpperCase()}</span>)}</div>}
+                        {(gw.installmentPlans || []).length > 0 && <div className="flex flex-wrap gap-2 mt-2">{gw.installmentPlans.slice(0, 3).map((p, i) => <button type="button" key={i} onClick={e => { e.stopPropagation(); setPaymentMethod(gw.gateway); setInstallmentPlanMonths(Number(p.months)); }} className={`text-xs px-2 py-1 rounded border ${paymentMethod === gw.gateway && Number(selectedInstallmentPlan?.months) === Number(p.months) ? 'border-primary bg-primary/10 font-bold' : 'border-gray-200 text-gray-500'}`}>{p.months} × {(total * (1 + Number(p.interestRate || 0) / 100) / Number(p.months || 1)).toFixed(2)} {(p.provider || gw.gateway).toUpperCase()}</button>)}</div>}
                       </div>
                     </div>
                   ))}
@@ -1553,7 +1573,7 @@ export default function Checkout() {
                 {loading ? (
                   <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>Placing Order...</>
                 ) : user ? (
-                <>Place Order — {sym} {total.toLocaleString()}{['payhere', 'stripe', 'paypal', 'payzy', 'koko'].includes(paymentMethod) ? ' →' : ''}</>
+                <>Place Order — {sym} {paymentTotal.toLocaleString()}{['payhere', 'stripe', 'paypal', 'payzy', 'koko'].includes(paymentMethod) ? ' →' : ''}</>
                 ) : (
                   <>Create Account &amp; Place Order — {sym} {total.toLocaleString()}</>
                 )}

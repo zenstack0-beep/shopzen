@@ -56,6 +56,11 @@ const orderSchema = new mongoose.Schema({
   deliveryService: { type: String, default: 'standard', index: true },
   deliveryServiceName: String,
   tax: { type: Number, default: 0 },
+  installmentBaseTotal: { type: Number, default: 0 },
+  installmentFee: { type: Number, default: 0 },
+  installmentPlan: {
+    provider: String, name: String, months: Number, interestRate: Number,
+  },
   total: { type: Number, required: true },
   notes: { type: String },
   trackingNumber: { type: String },

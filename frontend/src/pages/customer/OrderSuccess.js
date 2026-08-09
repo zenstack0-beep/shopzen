@@ -372,6 +372,7 @@ export function OrderSuccess() {
               {order.couponDiscount > 0 && <div className="flex justify-between text-green-600"><span>Coupon</span><span>−{sym} {order.couponDiscount?.toLocaleString()}</span></div>}
               {order.giftCardDiscount > 0 && <div className="flex justify-between text-purple-600"><span>Gift Card</span><span>−{sym} {order.giftCardDiscount?.toLocaleString()}</span></div>}
               <div className="flex justify-between text-gray-600"><span>Delivery</span><span>{sym} {order.shippingCost?.toLocaleString()}</span></div>
+              {order.installmentFee > 0 && <div className="flex justify-between text-amber-700"><span>{String(order.paymentMethod).toUpperCase()} financing ({order.installmentPlan?.interestRate || 0}%)</span><span>+{sym} {order.installmentFee?.toLocaleString()}</span></div>}
               <div className="flex justify-between font-bold text-gray-900 text-base pt-1 border-t border-gray-100">
                 <span>Total</span><span>{sym} {order.total?.toLocaleString()}</span>
               </div>
@@ -611,6 +612,7 @@ export function OrderTracking() {
           <div className="flex justify-between text-gray-600"><span>Subtotal</span><span>{sym} {order.subtotal?.toLocaleString()}</span></div>
           {order.couponDiscount > 0 && <div className="flex justify-between text-green-600"><span>Discount</span><span>−{sym} {order.couponDiscount?.toLocaleString()}</span></div>}
           <div className="flex justify-between text-gray-600"><span>Delivery</span><span>{sym} {order.shippingCost?.toLocaleString()}</span></div>
+          {order.installmentFee > 0 && <div className="flex justify-between text-amber-700"><span>{String(order.paymentMethod).toUpperCase()} financing ({order.installmentPlan?.interestRate || 0}%)</span><span>+{sym} {order.installmentFee?.toLocaleString()}</span></div>}
           <div className="flex justify-between font-bold text-gray-900 text-base border-t border-gray-100 pt-2"><span>Total</span><span>{sym} {order.total?.toLocaleString()}</span></div>
         </div>
       </div>

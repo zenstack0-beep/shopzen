@@ -7,7 +7,7 @@ const Order = require('../models/Order');
 const Product = require('../models/Product');
 const { findEligibleOffer } = require('../services/offerEngine');
 const { DiscountEngine } = require('../services/discountEngine');
-const { Coupon, GiftCard, Notification, Settings, DeliveryService } = require('../models/index');
+const { Coupon, GiftCard, Notification, Settings, DeliveryService, PaymentGateway } = require('../models/index');
 const { auth, adminAuth } = require('../middleware/auth');
 const { sendPurchaseEvent } = require('../services/metaCAPI');
 const {
@@ -647,6 +647,7 @@ router.post('/', orderRateLimiter, async (req, res) => {
     const {
       items, billing, shipping, shipToDifferentAddress,
       paymentMethod, couponCode, giftCard, notes, deliveryService,
+      installmentPlanMonths,
       selectedOfferId, selectedFreeItems,
       paymentReference,   // provided by frontend after gateway payment succeeds
       metaEventId,        // browser pixel eventId for CAPI deduplication
@@ -837,6 +838,31 @@ router.post('/', orderRateLimiter, async (req, res) => {
     // ── 4. Compute canonical totals ───────────────────────────────────────────
     const totals = DiscountEngine.computeTotals({ subtotal, deliveryFee: shippingCost, benefit });
 
+    // Recalculate BNPL pricing from the active server-side plan. The client may
+    // select the term, but it cannot supply the rate, fee, or final amount.
+    let installmentPlan = null;
+    let installmentFee = 0;
+    let payableTotal = Number(totals.total);
+    if (['payzy', 'koko'].includes(paymentMethod) && payableTotal > 0) {
+      const gateway = await PaymentGateway.findOne({ gateway: paymentMethod, isEnabled: true }).lean();
+      const plans = (gateway?.config?.installmentPlans || []).filter(plan => plan.active !== false);
+      const requestedMonths = Number(installmentPlanMonths);
+      const plan = plans.find(candidate => Number(candidate.months) === requestedMonths)
+        || (plans.length === 1 ? plans[0] : null);
+      const months = Number(plan?.months);
+      const interestRate = Number(plan?.interestRate);
+      if (!plan || !Number.isInteger(months) || months < 1 || months > 60 ||
+          !Number.isFinite(interestRate) || interestRate < 0 || interestRate > 100) {
+        for (const item of orderItems) {
+          await Product.findByIdAndUpdate(item.product, { $inc: { stock: item.quantity, soldCount: -item.quantity } });
+        }
+        return res.status(400).json({ message: `Select a valid ${paymentMethod === 'koko' ? 'Koko' : 'Payzy'} installment plan` });
+      }
+      installmentFee = Math.round((payableTotal * interestRate / 100) * 100) / 100;
+      payableTotal = Math.round((payableTotal + installmentFee) * 100) / 100;
+      installmentPlan = { provider: paymentMethod, name: String(plan.name || `${months} months`), months, interestRate };
+    }
+
     // ── 5. Persist order ──────────────────────────────────────────────────────
     const hasCoupon   = benefit.couponDiscount > 0;
     const hasGiftCard = totals.giftCardDeduction > 0;
@@ -885,7 +911,10 @@ router.post('/', orderRateLimiter, async (req, res) => {
       subtotal:      totals.subtotal,
       shippingCost:  totals.deliveryFee,
       discount:      totals.couponDiscount,    // legacy: coupon discount only
-      total:         totals.total,
+      installmentBaseTotal: installmentPlan ? totals.total : 0,
+      installmentFee,
+      installmentPlan: installmentPlan || undefined,
+      total:         payableTotal,
       notes,
       deliveryService:     deliveryService || 'standard',
       // Meta Pixel dedup fields — stored for potential refund/cancel CAPI events
@@ -1029,7 +1058,7 @@ router.post('/', orderRateLimiter, async (req, res) => {
     res.status(201).json({
       orderId:     order._id,
       orderNumber: order.orderNumber,
-      total:       totals.total,
+      total:       order.total,
       paymentMethod,
       paymentProvider: paymentMethod === 'koko' ? 'koko' : undefined,
       requiresHostedPayment: paymentMethod === 'koko',
