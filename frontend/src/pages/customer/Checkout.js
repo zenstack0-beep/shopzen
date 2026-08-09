@@ -1382,7 +1382,7 @@ export default function Checkout() {
 
                 <div className="flex justify-between text-base font-bold text-gray-900 pt-3 border-t border-gray-100">
                   <span>Total</span>
-                  <span style={{ color: 'var(--color-primary)' }}>{sym} {paymentTotal.toLocaleString()}</span>
+                  <span style={{ color: 'var(--color-primary)' }}>{sym} {total.toLocaleString()}</span>
                 </div>
               </div>
             </div>
@@ -1568,7 +1568,7 @@ export default function Checkout() {
                 ) : user ? (
                 <>Place Order — {sym} {paymentTotal.toLocaleString()}{['payhere', 'stripe', 'paypal', 'payzy', 'koko'].includes(paymentMethod) ? ' →' : ''}</>
                 ) : (
-                  <>Create Account &amp; Place Order — {sym} {total.toLocaleString()}</>
+                  <>Create Account &amp; Place Order — {sym} {paymentTotal.toLocaleString()}</>
                 )}
               </button>
               {total > 0 && ['payhere', 'stripe', 'paypal', 'payzy', 'koko'].includes(paymentMethod) && (
