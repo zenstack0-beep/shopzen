@@ -80,11 +80,11 @@ async function buildInvoicePdf(order, settings = {}) {
     }
 
     y += 12; const boxX=318; const boxW=225;
-    const coupon=Number(order.couponDiscount||order.discount||0); const gift=Number(order.giftCardDeduction||order.giftCardDiscount||0); const installmentFee=Number(order.installmentFee||0);
-    const rows=3+(coupon>0?1:0)+(gift>0?1:0)+(installmentFee>0?1:0); const boxH=rows*25+22;
+    const coupon=Number(order.couponDiscount||order.discount||0); const gift=Number(order.giftCardDeduction||order.giftCardDiscount||0);
+    const rows=3+(coupon>0?1:0)+(gift>0?1:0); const boxH=rows*25+22;
     doc.roundedRect(boxX,y,boxW,boxH,8).fillAndStroke('#f8fafc','#cbd5e1'); let ry=y+17;
     const row=(label,value,color=muted,bold=false)=>{doc.fillColor(color).font(bold?'Helvetica-Bold':'Helvetica').fontSize(bold?12:8.5).text(label,boxX+16,ry,{width:95}).text(value,boxX+115,ry,{width:92,align:'right'});ry+=25;};
-    row('Subtotal',money(order.subtotal)); if(coupon>0)row(`Coupon${order.couponCode?` (${clean(order.couponCode)})`:''}`,`-${money(coupon)}`,green); if(gift>0)row('Gift Card',`-${money(gift)}`,'#7c3aed'); row('Shipping',money(order.shippingCost)); if(installmentFee>0)row(`${clean(order.paymentMethod).toUpperCase()} financing`,money(installmentFee),'#b45309');
+    row('Subtotal',money(order.subtotal)); if(coupon>0)row(`Coupon${order.couponCode?` (${clean(order.couponCode)})`:''}`,`-${money(coupon)}`,green); if(gift>0)row('Gift Card',`-${money(gift)}`,'#7c3aed'); row('Shipping',money(order.shippingCost));
     doc.moveTo(boxX+16,ry-6).lineTo(boxX+207,ry-6).strokeColor(green).lineWidth(1.3).stroke(); row('Total',money(order.total),navy,true);
 
     let payY=y+boxH+20; if(payY>705){doc.addPage({margin:0});payY=70;}

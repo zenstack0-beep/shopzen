@@ -241,7 +241,6 @@ const orderConfirmHtml = async (order) => {
           ${order.couponDiscount > 0 ? `<tr><td style="padding:8px 12px;font-size:13px;color:#059669">Coupon (${order.couponCode})</td><td style="padding:8px 12px;font-size:13px;color:#059669;text-align:right">−${sym} ${order.couponDiscount?.toLocaleString()}</td></tr>` : ''}
           ${order.giftCardDiscount > 0 ? `<tr><td style="padding:8px 12px;font-size:13px;color:#059669">Gift Card</td><td style="padding:8px 12px;font-size:13px;color:#059669;text-align:right">−${sym} ${order.giftCardDiscount?.toLocaleString()}</td></tr>` : ''}
           <tr><td style="padding:8px 12px;font-size:13px;color:#6b7280">Shipping</td><td style="padding:8px 12px;font-size:13px;color:#6b7280;text-align:right">${sym} ${(order.shippingCost || 0).toLocaleString()}</td></tr>
-          ${order.installmentFee > 0 ? `<tr><td style="padding:8px 12px;font-size:13px;color:#b45309">${String(order.paymentMethod).toUpperCase()} financing (${order.installmentPlan?.interestRate || 0}%)</td><td style="padding:8px 12px;font-size:13px;color:#b45309;text-align:right">+${sym} ${Number(order.installmentFee).toLocaleString()}</td></tr>` : ''}
           <tr style="border-top:2px solid #e5e7eb"><td style="padding:12px;font-size:15px;font-weight:700;color:#111">Total</td><td style="padding:12px;font-size:15px;font-weight:700;color:${t.primary};text-align:right">${sym} ${order.total?.toLocaleString()}</td></tr>
         </tfoot>
       </table>
@@ -377,7 +376,6 @@ const paymentConfirmedHtml = async (order) => {
         <tfoot>
           ${order.couponDiscount > 0 ? `<tr><td style="padding:8px 12px;font-size:13px;color:#059669">Coupon</td><td style="padding:8px 12px;font-size:13px;color:#059669;text-align:right">−${sym} ${order.couponDiscount?.toLocaleString()}</td></tr>` : ''}
           <tr><td style="padding:8px 12px;font-size:13px;color:#6b7280">Shipping</td><td style="padding:8px 12px;font-size:13px;color:#6b7280;text-align:right">${sym} ${(order.shippingCost || 0).toLocaleString()}</td></tr>
-          ${order.installmentFee > 0 ? `<tr><td style="padding:8px 12px;font-size:13px;color:#b45309">${String(order.paymentMethod).toUpperCase()} financing (${order.installmentPlan?.interestRate || 0}%)</td><td style="padding:8px 12px;font-size:13px;color:#b45309;text-align:right">+${sym} ${Number(order.installmentFee).toLocaleString()}</td></tr>` : ''}
           <tr style="border-top:2px solid #e5e7eb"><td style="padding:12px;font-size:15px;font-weight:700;color:#111">Total Paid</td><td style="padding:12px;font-size:15px;font-weight:700;color:#15803d;text-align:right">${sym} ${order.total?.toLocaleString()}</td></tr>
         </tfoot>
       </table>
@@ -592,7 +590,6 @@ const orderDeliveredCustomerHtml = async (order, note) => {
           ${couponDiscount > 0 ? `<tr><td style="padding:8px 12px;font-size:13px;color:#16a34a">Coupon discount</td><td style="padding:8px 12px;font-size:13px;color:#16a34a;text-align:right">− ${sym} ${couponDiscount.toLocaleString()}</td></tr>` : ''}
           ${giftCardDiscount > 0 ? `<tr><td style="padding:8px 12px;font-size:13px;color:#7c3aed">Gift card</td><td style="padding:8px 12px;font-size:13px;color:#7c3aed;text-align:right">− ${sym} ${giftCardDiscount.toLocaleString()}</td></tr>` : ''}
           <tr><td style="padding:8px 12px;font-size:13px;color:#6b7280">Shipping</td><td style="padding:8px 12px;font-size:13px;color:#374151;text-align:right">${sym} ${Number(order.shippingCost || 0).toLocaleString()}</td></tr>
-          ${order.installmentFee > 0 ? `<tr><td style="padding:8px 12px;font-size:13px;color:#b45309">${String(order.paymentMethod).toUpperCase()} financing (${order.installmentPlan?.interestRate || 0}%)</td><td style="padding:8px 12px;font-size:13px;color:#b45309;text-align:right">+ ${sym} ${Number(order.installmentFee).toLocaleString()}</td></tr>` : ''}
           <tr style="border-top:2px solid #e5e7eb"><td style="padding:12px;font-size:15px;font-weight:700;color:#111">Total</td><td style="padding:12px;font-size:15px;font-weight:700;color:#15803d;text-align:right">${sym} ${Number(order.total || 0).toLocaleString()}</td></tr>
         </tfoot>
       </table>

@@ -1380,13 +1380,6 @@ export default function Checkout() {
                   </div>
                 )}
 
-                {installmentFee > 0 && selectedInstallmentPlan && (
-                  <div className="flex justify-between text-amber-700">
-                    <span>{paymentMethod === 'koko' ? 'Koko' : 'Payzy'} financing ({installmentInterestRate}% · {selectedInstallmentPlan.months} installments)</span>
-                    <span>+{sym} {installmentFee.toLocaleString()}</span>
-                  </div>
-                )}
-
                 <div className="flex justify-between text-base font-bold text-gray-900 pt-3 border-t border-gray-100">
                   <span>Total</span>
                   <span style={{ color: 'var(--color-primary)' }}>{sym} {paymentTotal.toLocaleString()}</span>
