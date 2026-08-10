@@ -10,6 +10,26 @@ const Product = require('../models/Product');
 const Order = require('../models/Order');
 const { DiscountEngine } = require('../services/discountEngine');
 
+// One-time bootstrap endpoint. It is intentionally outside HMAC auth because
+// the pasted setup code is the initial high-entropy bearer credential. Codes
+// are hashed in the database, expire after ten minutes, and are consumed with
+// one atomic update before credentials are returned exactly once.
+router.post('/setup/redeem', rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many setup attempts' },
+}), async (req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    const credentials = await require('../services/socialMediaService').redeemWhatsappHubSetupCode(req.body?.setupCode);
+    return res.json(credentials);
+  } catch (error) {
+    return res.status(401).json({ message: error.message || 'Setup code could not be redeemed' });
+  }
+});
+
 router.use(whatsappHubAuth);
 router.use(rateLimit({
   windowMs: 60 * 1000,
@@ -255,4 +275,3 @@ router.get('/orders/lookup', async (req, res) => {
 });
 
 module.exports = router;
-

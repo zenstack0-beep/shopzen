@@ -115,6 +115,9 @@ function sanitizeDoc(doc) {
   obj.whatsappHub = {
     hasKey: !!obj.whatsappHub?.keyEncrypted,
     hasSecret: !!obj.whatsappHub?.secretEncrypted,
+    setupPending: !!obj.whatsappHub?.setupCodeHash && !obj.whatsappHub?.setupUsedAt && new Date(obj.whatsappHub?.setupExpiresAt || 0) > new Date(),
+    connected: !!obj.whatsappHub?.setupUsedAt,
+    setupUsedAt: obj.whatsappHub?.setupUsedAt || null,
     updatedAt: obj.whatsappHub?.updatedAt || null,
   };
   return obj;
@@ -134,6 +137,9 @@ async function getWhatsappHubStatus() {
   return {
     hasKey: !!doc.whatsappHub?.keyEncrypted,
     hasSecret: !!doc.whatsappHub?.secretEncrypted,
+    setupPending: !!doc.whatsappHub?.setupCodeHash && !doc.whatsappHub?.setupUsedAt && new Date(doc.whatsappHub?.setupExpiresAt || 0) > new Date(),
+    connected: !!doc.whatsappHub?.setupUsedAt,
+    setupUsedAt: doc.whatsappHub?.setupUsedAt || null,
     updatedAt: doc.whatsappHub?.updatedAt || null,
   };
 }
@@ -168,6 +174,69 @@ async function hydrateWhatsappHubEnvironment() {
   if (key) process.env.SHOPZEN_HUB_KEY = key;
   if (secret) process.env.SHOPZEN_HUB_SECRET = secret;
   return { configured: Boolean(key && secret) };
+}
+
+function whatsappHubBaseUrl() {
+  const raw = String(process.env.BACKEND_URL || process.env.PUBLIC_APP_URL || 'https://shopzen-production.up.railway.app').trim().replace(/\/$/, '');
+  const parsed = new URL(raw.startsWith('http') ? raw : `https://${raw}`);
+  if (parsed.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(parsed.hostname)) throw new Error('WhatsApp Hub endpoint must use HTTPS');
+  return parsed.origin;
+}
+
+async function createWhatsappHubSetupCode() {
+  const key = generateWhatsappHubCredential('key');
+  const secret = generateWhatsappHubCredential('secret');
+  const token = crypto.randomBytes(32).toString('base64url');
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  const endpoint = `${whatsappHubBaseUrl()}/api/integrations/whatsapp-hub`;
+  const payload = Buffer.from(JSON.stringify({ v: 1, endpoint, token }), 'utf8').toString('base64url');
+  const setupCode = `SZH1.${payload}`;
+  const setupCodeHash = crypto.createHash('sha256').update(setupCode).digest('hex');
+  const doc = await getOrCreate();
+  doc.whatsappHub = {
+    keyEncrypted: encryptHubCredential(key),
+    secretEncrypted: encryptHubCredential(secret),
+    setupCodeHash,
+    setupExpiresAt: expiresAt,
+    setupUsedAt: null,
+    updatedAt: new Date(),
+  };
+  await doc.save();
+  process.env.SHOPZEN_HUB_KEY = key;
+  process.env.SHOPZEN_HUB_SECRET = secret;
+  return { setupCode, expiresAt };
+}
+
+function parseWhatsappHubSetupCode(setupCode) {
+  const match = /^SZH1\.([A-Za-z0-9_-]+)$/.exec(String(setupCode || '').trim());
+  if (!match) throw new Error('Invalid setup code');
+  let payload;
+  try { payload = JSON.parse(Buffer.from(match[1], 'base64url').toString('utf8')); }
+  catch { throw new Error('Invalid setup code'); }
+  if (payload?.v !== 1 || !payload?.token || !payload?.endpoint) throw new Error('Invalid setup code');
+  return payload;
+}
+
+async function redeemWhatsappHubSetupCode(setupCode) {
+  const payload = parseWhatsappHubSetupCode(setupCode);
+  const hash = crypto.createHash('sha256').update(String(setupCode).trim()).digest('hex');
+  const doc = await SocialMedia.findOneAndUpdate(
+    { 'whatsappHub.setupCodeHash': hash, 'whatsappHub.setupUsedAt': null, 'whatsappHub.setupExpiresAt': { $gt: new Date() } },
+    { $set: { 'whatsappHub.setupUsedAt': new Date(), 'whatsappHub.setupCodeHash': '' } },
+    { new: true }
+  ).select('whatsappHub');
+  if (!doc) throw new Error('Setup code is invalid, expired, or already used');
+  const key = decryptHubCredential(doc.whatsappHub?.keyEncrypted || '');
+  const secret = decryptHubCredential(doc.whatsappHub?.secretEncrypted || '');
+  if (!key || !secret) throw new Error('Stored Hub credentials are unavailable');
+  return { endpoint: `${whatsappHubBaseUrl()}/api/integrations/whatsapp-hub`, key, secret };
+}
+
+async function testWhatsappHubConfiguration() {
+  const doc = await getOrCreate();
+  const key = decryptHubCredential(doc.whatsappHub?.keyEncrypted || '');
+  const secret = decryptHubCredential(doc.whatsappHub?.secretEncrypted || '');
+  return { ok: Boolean(key && secret && doc.whatsappHub?.setupUsedAt), connected: Boolean(doc.whatsappHub?.setupUsedAt) };
 }
 
 // ─── Encrypt sensitive fields in a platform object before save ────────────────
@@ -606,4 +675,7 @@ module.exports = {
   generateWhatsappHubCredential,
   saveWhatsappHubCredentials,
   hydrateWhatsappHubEnvironment,
+  createWhatsappHubSetupCode,
+  redeemWhatsappHubSetupCode,
+  testWhatsappHubConfiguration,
 };

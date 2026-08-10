@@ -804,7 +804,8 @@ function WhatsAppHubPanel() {
   const [status, setStatus] = useState({ hasKey: false, hasSecret: false, updatedAt: null });
   const [values, setValues] = useState({ key: '', secret: '' });
   const [visible, setVisible] = useState({ key: false, secret: false });
-  const [busy, setBusy] = useState({ load: true, key: false, secret: false, save: false });
+  const [setup, setSetup] = useState({ code: '', expiresAt: null });
+  const [busy, setBusy] = useState({ load: true, key: false, secret: false, save: false, setup: false, test: false });
 
   const loadStatus = useCallback(async () => {
     try {
@@ -858,6 +859,43 @@ function WhatsAppHubPanel() {
     }
   };
 
+  const createSetupCode = async () => {
+    if ((status.hasKey || status.hasSecret) && !window.confirm('Generate a new one-time setup code? This rotates the current Hub credentials, so the existing Hub connection will stop until the new code is redeemed.')) return;
+    setBusy(current => ({ ...current, setup: true }));
+    try {
+      const { data } = await API.post('/social-media/whatsapp-hub/setup-code');
+      setSetup({ code: data.setupCode, expiresAt: data.expiresAt });
+      setValues({ key: '', secret: '' });
+      await loadStatus();
+      toast.success('One-time setup code generated');
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Could not generate setup code');
+    } finally {
+      setBusy(current => ({ ...current, setup: false }));
+    }
+  };
+
+  const copySetupCode = async () => {
+    try {
+      await navigator.clipboard.writeText(setup.code);
+      toast.success('One-time setup code copied');
+    } catch { toast.error('Clipboard access was blocked by the browser'); }
+  };
+
+  const testConnection = async () => {
+    setBusy(current => ({ ...current, test: true }));
+    try {
+      const { data } = await API.post('/social-media/whatsapp-hub/test');
+      if (data.ok) toast.success('WhatsApp Hub is connected and credentials are available');
+      else toast.error('The setup code has not been redeemed by WhatsApp Hub yet');
+      await loadStatus();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'WhatsApp Hub is not connected yet');
+    } finally {
+      setBusy(current => ({ ...current, test: false }));
+    }
+  };
+
   const credentialField = (field, label, configured) => (
     <div>
       <label className="form-label">{label}</label>
@@ -895,6 +933,24 @@ function WhatsAppHubPanel() {
         {!busy.load && <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${status.hasKey && status.hasSecret ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>{status.hasKey && status.hasSecret ? 'Configured' : 'Configuration incomplete'}</span>}
       </div>
       <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-xs text-blue-800">Values are masked by default, encrypted at rest, restricted to administrators, and never returned by public APIs or written to application logs. Copy generated values before saving if another trusted service needs them.</div>
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 space-y-3">
+        <div>
+          <p className="text-sm font-semibold text-emerald-900">Admin-to-admin connection setup</p>
+          <p className="text-xs text-emerald-700 mt-1">Generate a code, copy it, and paste it into WhatsApp Hub Admin. It expires after 10 minutes and can be redeemed only once. The code contains no reusable plaintext Hub credentials.</p>
+        </div>
+        {setup.code && (
+          <div>
+            <textarea readOnly value={setup.code} rows={3} className="form-input w-full font-mono text-xs resize-none bg-white" />
+            <p className="text-xs text-amber-700 mt-1">Copy this now. It will not be shown again{setup.expiresAt ? ` and expires at ${new Date(setup.expiresAt).toLocaleTimeString()}` : ''}.</p>
+          </div>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={createSetupCode} disabled={busy.setup} className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-medium disabled:opacity-50">{busy.setup ? 'Generating…' : 'Generate One-Time Setup Code'}</button>
+          {setup.code && <button type="button" onClick={copySetupCode} className="px-4 py-2 rounded-xl bg-white border border-emerald-200 text-emerald-700 text-sm font-medium">Copy Setup Code</button>}
+          <button type="button" onClick={testConnection} disabled={busy.test} className="px-4 py-2 rounded-xl bg-white border border-gray-200 text-gray-700 text-sm font-medium disabled:opacity-50">{busy.test ? 'Testing…' : 'Connect / Test'}</button>
+        </div>
+        <p className="text-xs font-medium text-emerald-800">Status: {status.connected ? 'Connected — setup code redeemed' : status.setupPending ? 'Waiting for WhatsApp Hub Admin' : 'Not connected'}</p>
+      </div>
       {credentialField('key', 'SHOPZEN_HUB_KEY', status.hasKey)}
       {credentialField('secret', 'SHOPZEN_HUB_SECRET', status.hasSecret)}
       <div className="flex items-center justify-between gap-3 pt-4 border-t border-gray-100 flex-wrap">

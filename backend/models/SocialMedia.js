@@ -49,6 +49,9 @@ const socialMediaSchema = new mongoose.Schema({
   whatsappHub: {
     keyEncrypted:    { type: String, default: '' },
     secretEncrypted: { type: String, default: '' },
+    setupCodeHash:   { type: String, default: '' },
+    setupExpiresAt:  { type: Date, default: null },
+    setupUsedAt:     { type: Date, default: null },
     updatedAt:       { type: Date, default: null },
   },
 

@@ -131,6 +131,25 @@ router.put('/whatsapp-hub', hubCredentialLimiter, async (req, res) => {
   }
 });
 
+router.post('/whatsapp-hub/setup-code', hubCredentialLimiter, async (_req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    return res.json(await require('../services/socialMediaService').createWhatsappHubSetupCode());
+  } catch (error) {
+    return res.status(400).json({ message: error.message || 'Could not create setup code' });
+  }
+});
+
+router.post('/whatsapp-hub/test', hubCredentialLimiter, async (_req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    const result = await require('../services/socialMediaService').testWhatsappHubConfiguration();
+    return res.status(result.ok ? 200 : 409).json(result);
+  } catch {
+    return res.status(500).json({ message: 'Could not test WhatsApp Hub configuration' });
+  }
+});
+
 // Settings overview (sanitized — no secrets)
 router.get('/', ctrl.getSettings);
 
