@@ -250,6 +250,10 @@ async function startServer() {
     });
     console.log('✅ MongoDB Connected');
 
+    // Load encrypted WhatsApp Hub configuration into this process without
+    // logging either credential. Database configuration survives redeploys.
+    await require('./services/socialMediaService').hydrateWhatsappHubEnvironment();
+
     const { startTokenRefreshScheduler } = require('./services/tokenRefreshScheduler');
     startTokenRefreshScheduler();
 

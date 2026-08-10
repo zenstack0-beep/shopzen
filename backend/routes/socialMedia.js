@@ -8,6 +8,7 @@
 
 const express    = require('express');
 const router     = express.Router();
+const rateLimit  = require('express-rate-limit');
 const { adminAuth } = require('../middleware/auth');
 const ctrl       = require('../controllers/socialMediaController');
 const { refreshPlatformNow } = require('../services/tokenRefreshScheduler');
@@ -87,6 +88,48 @@ router.get('/fix-whatsapp', async (req, res) => {
 
 // ─── All routes below require admin auth ─────────────────────────────────────
 router.use(adminAuth);
+
+const hubCredentialLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many WhatsApp Hub credential requests. Please try again later.' },
+});
+
+// WhatsApp Hub credentials: admin-only, encrypted at rest, and never returned
+// after save. Generation responses are intentionally one-time values.
+router.get('/whatsapp-hub', async (_req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    return res.json(await require('../services/socialMediaService').getWhatsappHubStatus());
+  } catch {
+    return res.status(500).json({ message: 'Could not load WhatsApp Hub configuration' });
+  }
+});
+
+router.post('/whatsapp-hub/generate', hubCredentialLimiter, (req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    const value = require('../services/socialMediaService').generateWhatsappHubCredential(String(req.body?.field || ''));
+    return res.json({ value });
+  } catch (error) {
+    return res.status(400).json({ message: error.message || 'Could not generate credential' });
+  }
+});
+
+router.put('/whatsapp-hub', hubCredentialLimiter, async (req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    const status = await require('../services/socialMediaService').saveWhatsappHubCredentials({
+      key: req.body?.key,
+      secret: req.body?.secret,
+    });
+    return res.json({ success: true, ...status });
+  } catch (error) {
+    return res.status(400).json({ message: error.message || 'Could not save WhatsApp Hub configuration' });
+  }
+});
 
 // Settings overview (sanitized — no secrets)
 router.get('/', ctrl.getSettings);

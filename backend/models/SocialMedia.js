@@ -44,6 +44,14 @@ const socialMediaSchema = new mongoose.Schema({
   whatsapp:   { type: accountSchema, default: () => ({}) },
   telegram:   { type: accountSchema, default: () => ({}) },
 
+  // Encrypted WhatsApp Hub integration credentials. These values are never
+  // serialized by the admin settings service or any public API.
+  whatsappHub: {
+    keyEncrypted:    { type: String, default: '' },
+    secretEncrypted: { type: String, default: '' },
+    updatedAt:       { type: Date, default: null },
+  },
+
   // which platforms are enabled for automated posting
   automationEnabled: { type: Boolean, default: false },
   enabledPlatforms:  { type: [String], default: [] },

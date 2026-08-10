@@ -57,6 +57,35 @@ function decrypt(ciphertext) {
   return '';
 }
 
+// Hub credentials use a domain-separated key and never fall back to a
+// hard-coded development value. SHOPZEN_CONFIG_ENCRYPTION_KEY is preferred so
+// JWT rotation does not make persisted integration credentials unreadable.
+function getHubEncryptionKey() {
+  const root = process.env.SHOPZEN_CONFIG_ENCRYPTION_KEY || process.env.SOCIAL_MEDIA_SECRET || process.env.JWT_SECRET;
+  if (!root) throw new Error('Server credential encryption is not configured');
+  return crypto.createHash('sha256').update(`shopzen-whatsapp-hub:${root}`).digest();
+}
+
+function encryptHubCredential(value) {
+  if (!value) return '';
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv(ALGO, getHubEncryptionKey(), iv);
+  const body = Buffer.concat([cipher.update(String(value), 'utf8'), cipher.final()]);
+  return `${iv.toString('hex')}:${cipher.getAuthTag().toString('hex')}:${body.toString('hex')}`;
+}
+
+function decryptHubCredential(value) {
+  if (!value) return '';
+  try {
+    const [iv, tag, body] = String(value).split(':');
+    const decipher = crypto.createDecipheriv(ALGO, getHubEncryptionKey(), Buffer.from(iv, 'hex'));
+    decipher.setAuthTag(Buffer.from(tag, 'hex'));
+    return decipher.update(Buffer.from(body, 'hex')) + decipher.final('utf8');
+  } catch {
+    return '';
+  }
+}
+
 // ─── Credential fields that must be encrypted at rest ────────────────────────
 const SENSITIVE_FIELDS = ['accessToken', 'accessSecret', 'appSecret'];
 
@@ -83,7 +112,62 @@ function sanitizeDoc(doc) {
   PLATFORMS.forEach(p => {
     if (obj[p]) obj[p] = sanitizePlatform(obj[p]);
   });
+  obj.whatsappHub = {
+    hasKey: !!obj.whatsappHub?.keyEncrypted,
+    hasSecret: !!obj.whatsappHub?.secretEncrypted,
+    updatedAt: obj.whatsappHub?.updatedAt || null,
+  };
   return obj;
+}
+
+function validateHubCredential(value, field) {
+  const clean = String(value || '').trim();
+  if (!clean) return '';
+  if (clean.length < 32 || clean.length > 256 || !/^[A-Za-z0-9_-]+$/.test(clean)) {
+    throw new Error(`${field} must be a 32–256 character URL-safe value`);
+  }
+  return clean;
+}
+
+async function getWhatsappHubStatus() {
+  const doc = await getOrCreate();
+  return {
+    hasKey: !!doc.whatsappHub?.keyEncrypted,
+    hasSecret: !!doc.whatsappHub?.secretEncrypted,
+    updatedAt: doc.whatsappHub?.updatedAt || null,
+  };
+}
+
+function generateWhatsappHubCredential(field) {
+  if (!['key', 'secret'].includes(field)) throw new Error('Unknown credential field');
+  const prefix = field === 'key' ? 'szh_key_' : 'szh_secret_';
+  return `${prefix}${crypto.randomBytes(32).toString('base64url')}`;
+}
+
+async function saveWhatsappHubCredentials({ key, secret }) {
+  const doc = await getOrCreate();
+  const cleanKey = validateHubCredential(key, 'SHOPZEN_HUB_KEY');
+  const cleanSecret = validateHubCredential(secret, 'SHOPZEN_HUB_SECRET');
+  const current = doc.whatsappHub?.toObject?.() || doc.whatsappHub || {};
+  doc.whatsappHub = {
+    keyEncrypted: cleanKey ? encryptHubCredential(cleanKey) : current.keyEncrypted || '',
+    secretEncrypted: cleanSecret ? encryptHubCredential(cleanSecret) : current.secretEncrypted || '',
+    updatedAt: new Date(),
+  };
+  await doc.save();
+  if (cleanKey) process.env.SHOPZEN_HUB_KEY = cleanKey;
+  if (cleanSecret) process.env.SHOPZEN_HUB_SECRET = cleanSecret;
+  return getWhatsappHubStatus();
+}
+
+async function hydrateWhatsappHubEnvironment() {
+  const doc = await SocialMedia.findOne().select('whatsappHub').lean();
+  if (!doc?.whatsappHub) return { configured: false };
+  const key = decryptHubCredential(doc.whatsappHub.keyEncrypted || '');
+  const secret = decryptHubCredential(doc.whatsappHub.secretEncrypted || '');
+  if (key) process.env.SHOPZEN_HUB_KEY = key;
+  if (secret) process.env.SHOPZEN_HUB_SECRET = secret;
+  return { configured: Boolean(key && secret) };
 }
 
 // ─── Encrypt sensitive fields in a platform object before save ────────────────
@@ -518,4 +602,8 @@ module.exports = {
   getOrCreate,
   decryptPlatformFields,
   encryptPlatformFields,
+  getWhatsappHubStatus,
+  generateWhatsappHubCredential,
+  saveWhatsappHubCredentials,
+  hydrateWhatsappHubEnvironment,
 };

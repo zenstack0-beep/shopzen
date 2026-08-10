@@ -799,9 +799,115 @@ function PostManagementTab({ connectedPlatforms }) {
   );
 }
 
+// ─── WhatsApp Hub Integration ────────────────────────────────────────────────
+function WhatsAppHubPanel() {
+  const [status, setStatus] = useState({ hasKey: false, hasSecret: false, updatedAt: null });
+  const [values, setValues] = useState({ key: '', secret: '' });
+  const [visible, setVisible] = useState({ key: false, secret: false });
+  const [busy, setBusy] = useState({ load: true, key: false, secret: false, save: false });
+
+  const loadStatus = useCallback(async () => {
+    try {
+      const { data } = await API.get('/social-media/whatsapp-hub');
+      setStatus(data);
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Could not load WhatsApp Hub configuration');
+    } finally {
+      setBusy(current => ({ ...current, load: false }));
+    }
+  }, []);
+
+  useEffect(() => { loadStatus(); }, [loadStatus]);
+
+  const generate = async field => {
+    setBusy(current => ({ ...current, [field]: true }));
+    try {
+      const { data } = await API.post('/social-media/whatsapp-hub/generate', { field });
+      setValues(current => ({ ...current, [field]: data.value || '' }));
+      toast.success(`${field === 'key' ? 'Key' : 'Secret'} generated securely`);
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Could not generate credential');
+    } finally {
+      setBusy(current => ({ ...current, [field]: false }));
+    }
+  };
+
+  const copy = async field => {
+    if (!values[field]) return toast.error(`Generate or enter a new ${field} first`);
+    try {
+      await navigator.clipboard.writeText(values[field]);
+      toast.success(`${field === 'key' ? 'Key' : 'Secret'} copied`);
+    } catch {
+      toast.error('Clipboard access was blocked by the browser');
+    }
+  };
+
+  const save = async () => {
+    if (!values.key && !values.secret) return toast.error('Generate or enter at least one new credential');
+    setBusy(current => ({ ...current, save: true }));
+    try {
+      const { data } = await API.put('/social-media/whatsapp-hub', values);
+      setStatus(data);
+      setValues({ key: '', secret: '' });
+      setVisible({ key: false, secret: false });
+      toast.success('WhatsApp Hub credentials saved securely');
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Could not save WhatsApp Hub credentials');
+    } finally {
+      setBusy(current => ({ ...current, save: false }));
+    }
+  };
+
+  const credentialField = (field, label, configured) => (
+    <div>
+      <label className="form-label">{label}</label>
+      <div className="flex flex-col sm:flex-row gap-2">
+        <div className="relative flex-1">
+          <input
+            type={visible[field] ? 'text' : 'password'}
+            value={values[field]}
+            onChange={event => setValues(current => ({ ...current, [field]: event.target.value.trim() }))}
+            placeholder={configured ? '•••••••••••••••••••••••••••••••• (configured)' : 'Generate a secure value'}
+            autoComplete="new-password"
+            spellCheck={false}
+            className="form-input pr-16 font-mono"
+          />
+          <button type="button" onClick={() => setVisible(current => ({ ...current, [field]: !current[field] }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">
+            {visible[field] ? 'Hide' : 'Show'}
+          </button>
+        </div>
+        <button type="button" disabled={busy[field]} onClick={() => generate(field)} className="px-3 py-2 rounded-xl bg-emerald-50 text-emerald-700 text-sm font-medium disabled:opacity-50">
+          {busy[field] ? 'Generating…' : 'Generate'}
+        </button>
+        <button type="button" disabled={!values[field]} onClick={() => copy(field)} className="px-3 py-2 rounded-xl bg-gray-100 text-gray-700 text-sm font-medium disabled:opacity-40">Copy</button>
+      </div>
+      <p className="text-xs text-gray-400 mt-1">{configured ? 'A value is securely stored. Entering or generating a new value replaces it.' : 'No value is currently configured.'}</p>
+    </div>
+  );
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-emerald-100 p-5 sm:p-6 space-y-5">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h2 className="font-semibold text-gray-900">WhatsApp Hub Integration</h2>
+          <p className="text-sm text-gray-500 mt-1">Credentials used by the ShopZen backend to authenticate trusted WhatsApp Hub requests.</p>
+        </div>
+        {!busy.load && <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${status.hasKey && status.hasSecret ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>{status.hasKey && status.hasSecret ? 'Configured' : 'Configuration incomplete'}</span>}
+      </div>
+      <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-xs text-blue-800">Values are masked by default, encrypted at rest, restricted to administrators, and never returned by public APIs or written to application logs. Copy generated values before saving if another trusted service needs them.</div>
+      {credentialField('key', 'SHOPZEN_HUB_KEY', status.hasKey)}
+      {credentialField('secret', 'SHOPZEN_HUB_SECRET', status.hasSecret)}
+      <div className="flex items-center justify-between gap-3 pt-4 border-t border-gray-100 flex-wrap">
+        <p className="text-xs text-gray-400">{status.updatedAt ? `Last updated ${new Date(status.updatedAt).toLocaleString()}` : 'Not saved yet'}</p>
+        <button type="button" onClick={save} disabled={busy.save || (!values.key && !values.secret)} className="btn-primary flex items-center gap-2 text-sm disabled:opacity-50">{busy.save ? <><Spinner /> Saving…</> : 'Save Hub Credentials'}</button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function SocialMediaSettings() {
-  // ── Main tab: 'accounts' | 'post-management'
+  // ── Main tab: 'accounts' | 'post-management' | 'whatsapp-hub'
   const [mainTab, setMainTab] = useState('accounts');
 
   const [loading, setLoading]           = useState(true);
@@ -1065,12 +1171,20 @@ export default function SocialMediaSettings() {
             <span className="bg-primary/10 text-primary text-xs font-semibold px-1.5 py-0.5 rounded-full">{connectedPlatformIds.length}</span>
           )}
         </button>
+        <button
+          onClick={() => setMainTab('whatsapp-hub')}
+          className={`px-5 py-3 text-sm font-medium border-b-2 transition-all ${mainTab === 'whatsapp-hub' ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+        >
+          WhatsApp Hub
+        </button>
       </div>
 
       {/* ── Post Management Tab ── */}
       {mainTab === 'post-management' && (
         <PostManagementTab connectedPlatforms={connectedPlatformIds} />
       )}
+
+      {mainTab === 'whatsapp-hub' && <WhatsAppHubPanel />}
 
       {/* ── Account Settings Tab ── */}
       {mainTab === 'accounts' && (
