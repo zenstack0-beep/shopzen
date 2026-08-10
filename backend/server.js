@@ -204,6 +204,10 @@ app.use('/api/admin/reset', require('./routes/reset'));
 
 // ─── Other routes ─────────────────────────────────────────────────────────────
 app.use('/api/whatsapp',      require('./routes/whatsapp'));
+app.use(
+  '/api/integrations/whatsapp-hub',
+  require('./routes/whatsappHubIntegration')
+);
 app.use('/api/social-media',  require('./routes/socialMedia'));
 app.use('/api/automation',    require('./routes/automation'));
 app.use('/api/deals',         require('./routes/deals'));
@@ -252,7 +256,9 @@ async function startServer() {
 
     // Load encrypted WhatsApp Hub configuration into this process without
     // logging either credential. Database configuration survives redeploys.
-    await require('./services/socialMediaService').hydrateWhatsappHubEnvironment();
+    if (!process.env.SHOPZEN_HUB_KEY || !process.env.SHOPZEN_HUB_SECRET) {
+      await require('./services/socialMediaService').hydrateWhatsappHubEnvironment();
+    }
 
     const { startTokenRefreshScheduler } = require('./services/tokenRefreshScheduler');
     startTokenRefreshScheduler();
