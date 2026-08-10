@@ -24,7 +24,10 @@ router.post('/setup/redeem', rateLimit({
   try {
     res.set('Cache-Control', 'no-store');
     const credentials = await require('../services/socialMediaService').redeemWhatsappHubSetupCode(req.body?.setupCode);
-    return res.json(credentials);
+    return res.status(200).json({
+      shopzenHubKey: credentials.key,
+      shopzenHubSecret: credentials.secret,
+    });
   } catch (error) {
     return res.status(401).json({ message: error.message || 'Setup code could not be redeemed' });
   }
