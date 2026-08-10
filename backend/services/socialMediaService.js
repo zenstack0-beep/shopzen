@@ -239,6 +239,14 @@ async function testWhatsappHubConfiguration() {
   return { ok: Boolean(key && secret && doc.whatsappHub?.setupUsedAt), connected: Boolean(doc.whatsappHub?.setupUsedAt) };
 }
 
+async function getActiveWhatsappHubCredentials() {
+  const doc = await SocialMedia.findOne().select('whatsappHub.keyEncrypted whatsappHub.secretEncrypted').lean();
+  const key = decryptHubCredential(doc?.whatsappHub?.keyEncrypted || '');
+  const secret = decryptHubCredential(doc?.whatsappHub?.secretEncrypted || '');
+  if (!key || !secret) return null;
+  return { key, secret };
+}
+
 // ─── Encrypt sensitive fields in a platform object before save ────────────────
 function isAlreadyEncrypted(val) {
   // Encrypted format is exactly: iv_hex:tag_hex:ciphertext_hex  (3 colon-separated parts).
@@ -678,4 +686,5 @@ module.exports = {
   createWhatsappHubSetupCode,
   redeemWhatsappHubSetupCode,
   testWhatsappHubConfiguration,
+  getActiveWhatsappHubCredentials,
 };

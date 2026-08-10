@@ -100,7 +100,16 @@ applySecurityMiddleware(app);
 // ─── Body parsing ─────────────────────────────────────────────────────────────
 // SECURITY: 50 MB limit is retained from original to avoid breaking large
 //           product-import or image-upload payloads.
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({
+  limit: '50mb',
+  // Preserve exact bytes only for WhatsApp Hub HMAC verification. Existing
+  // JSON parsing and every other route remain unchanged.
+  verify: (req, _res, buffer) => {
+    if (req.originalUrl?.startsWith('/api/integrations/whatsapp-hub')) {
+      req.rawBody = buffer.toString('utf8');
+    }
+  },
+}));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // ─── Monitoring middleware — must come before routes ──────────────────────────

@@ -5,23 +5,13 @@ const crypto = require('crypto');
 const MAX_CLOCK_SKEW_SECONDS = 5 * 60;
 const replayCache = new Map();
 
-function stableStringify(value) {
-  if (value === undefined || value === null) return value === undefined ? '' : 'null';
-  if (Array.isArray(value)) return `[${value.map(item => stableStringify(item)).join(',')}]`;
-  if (typeof value === 'object') {
-    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
-  }
-  return JSON.stringify(value);
+function canonicalRequest({ timestamp, method, requestPath, rawRequestBody = '' }) {
+  return `${timestamp}\n${String(method).toUpperCase()}\n${requestPath}\n${rawRequestBody}`;
 }
 
-function canonicalRequest({ timestamp, method, originalUrl, body }) {
-  const bodyHash = crypto.createHash('sha256').update(stableStringify(body || {})).digest('hex');
-  return `${timestamp}\n${String(method).toUpperCase()}\n${originalUrl}\n${bodyHash}`;
-}
-
-function signRequest({ secret, timestamp, method, originalUrl, body }) {
+function signRequest({ secret, timestamp, method, requestPath, rawRequestBody = '' }) {
   return crypto.createHmac('sha256', secret)
-    .update(canonicalRequest({ timestamp, method, originalUrl, body }))
+    .update(canonicalRequest({ timestamp, method, requestPath, rawRequestBody }))
     .digest('hex');
 }
 
@@ -37,32 +27,35 @@ function pruneReplayCache(nowSeconds) {
   }
 }
 
-function whatsappHubAuth(req, res, next) {
-  const configuredKey = process.env.SHOPZEN_HUB_KEY;
-  const configuredSecret = process.env.SHOPZEN_HUB_SECRET;
-  if (!configuredKey || !configuredSecret) {
-    return res.status(503).json({ message: 'WhatsApp Hub connector is not configured' });
+async function whatsappHubAuth(req, res, next) {
+  let credentials;
+  try {
+    credentials = await require('../services/socialMediaService').getActiveWhatsappHubCredentials();
+  } catch {
+    return res.status(503).json({ message: 'WhatsApp Hub connector is unavailable' });
   }
+  if (!credentials) return res.status(503).json({ message: 'WhatsApp Hub connector is not configured' });
 
   const suppliedKey = req.get('X-ShopZen-Hub-Key');
   const timestampText = req.get('X-ShopZen-Hub-Timestamp');
   const suppliedSignature = String(req.get('X-ShopZen-Hub-Signature') || '').replace(/^sha256=/i, '').toLowerCase();
   const timestamp = Number(timestampText);
   const nowSeconds = Math.floor(Date.now() / 1000);
+  const timestampSeconds = timestamp > 100000000000 ? Math.floor(timestamp / 1000) : timestamp;
 
-  if (!timingSafeStringEqual(suppliedKey, configuredKey) ||
+  if (!timingSafeStringEqual(suppliedKey, credentials.key) ||
       !Number.isInteger(timestamp) ||
-      Math.abs(nowSeconds - timestamp) > MAX_CLOCK_SKEW_SECONDS ||
+      Math.abs(nowSeconds - timestampSeconds) > MAX_CLOCK_SKEW_SECONDS ||
       !/^[a-f0-9]{64}$/.test(suppliedSignature)) {
     return res.status(401).json({ message: 'Invalid connector authentication' });
   }
 
   const expected = signRequest({
-    secret: configuredSecret,
+    secret: credentials.secret,
     timestamp: timestampText,
     method: req.method,
-    originalUrl: req.originalUrl,
-    body: req.body,
+    requestPath: String(req.originalUrl || '').split('?')[0],
+    rawRequestBody: req.rawBody || '',
   });
   if (!timingSafeStringEqual(suppliedSignature, expected)) {
     return res.status(401).json({ message: 'Invalid connector authentication' });
@@ -80,5 +73,3 @@ function whatsappHubAuth(req, res, next) {
 module.exports = whatsappHubAuth;
 module.exports.canonicalRequest = canonicalRequest;
 module.exports.signRequest = signRequest;
-module.exports.stableStringify = stableStringify;
-
