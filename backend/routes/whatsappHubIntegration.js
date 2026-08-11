@@ -9,6 +9,76 @@ const WhatsAppHubCheckout = require('../models/WhatsAppHubCheckout');
 const Product = require('../models/Product');
 const Order = require('../models/Order');
 const { DiscountEngine } = require('../services/discountEngine');
+const crypto = require('crypto');
+const WhatsAppHubInbound = require('../models/WhatsAppHubInbound');
+const { getWhatsAppCredentials, sendWhatsAppMessage } = require('../services/whatsappCloudService');
+
+function constantTimeEqual(left, right) {
+  const a = Buffer.from(String(left || ''));
+  const b = Buffer.from(String(right || ''));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+// Meta webhook verification and reception remain in ShopZen. These two routes
+// intentionally precede Hub HMAC auth because Meta, not the Hub, calls them.
+router.get('/webhook', async (req, res) => {
+  try {
+    const credentials = await getWhatsAppCredentials();
+    const mode = String(req.query['hub.mode'] || '');
+    const token = String(req.query['hub.verify_token'] || '');
+    const challenge = String(req.query['hub.challenge'] || '');
+    if (mode !== 'subscribe' || !credentials.webhookVerifyToken || !constantTimeEqual(token, credentials.webhookVerifyToken)) {
+      return res.sendStatus(403);
+    }
+    return res.status(200).type('text/plain').send(challenge);
+  } catch {
+    return res.sendStatus(503);
+  }
+});
+
+router.post('/webhook', async (req, res) => {
+  try {
+    const credentials = await getWhatsAppCredentials();
+    const supplied = String(req.get('X-Hub-Signature-256') || '').replace(/^sha256=/i, '').toLowerCase();
+    const expected = credentials.appSecret
+      ? crypto.createHmac('sha256', credentials.appSecret).update(req.rawBody || '').digest('hex')
+      : '';
+    if (!credentials.appSecret || !/^[a-f0-9]{64}$/.test(supplied) || !constantTimeEqual(supplied, expected)) {
+      return res.sendStatus(401);
+    }
+
+    const writes = [];
+    for (const entry of req.body?.entry || []) {
+      for (const change of entry?.changes || []) {
+        const contacts = new Map((change?.value?.contacts || []).map(contact => [String(contact.wa_id || ''), contact]));
+        for (const message of change?.value?.messages || []) {
+          const metaMessageId = String(message.id || '').slice(0, 255);
+          const from = String(message.from || '').replace(/[^0-9]/g, '').slice(0, 32);
+          if (!metaMessageId || !from) continue;
+          const contact = contacts.get(from);
+          writes.push(WhatsAppHubInbound.updateOne(
+            { metaMessageId },
+            { $setOnInsert: {
+              metaMessageId,
+              from,
+              customerName: String(contact?.profile?.name || '').slice(0, 160),
+              messageType: String(message.type || 'unknown').slice(0, 40),
+              message,
+              receivedAt: new Date((Number(message.timestamp) || Math.floor(Date.now() / 1000)) * 1000),
+              expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+            } },
+            { upsert: true }
+          ));
+        }
+      }
+    }
+    await Promise.all(writes);
+    return res.sendStatus(200);
+  } catch {
+    // Meta retries non-2xx deliveries; no payload or credentials are logged.
+    return res.sendStatus(500);
+  }
+});
 
 // One-time bootstrap endpoint. It is intentionally outside HMAC auth because
 // the pasted setup code is the initial high-entropy bearer credential. Codes
@@ -90,6 +160,58 @@ function hubOrder(order) {
 router.get('/health', (_req, res) => {
   res.set('Cache-Control', 'no-store');
   return res.status(200).json({ ok: true, service: 'shopzen-whatsapp-hub-connector' });
+});
+
+router.get('/connection/health', async (_req, res) => {
+  try {
+    const credentials = await getWhatsAppCredentials();
+    return res.status(200).json({
+      ok: Boolean(credentials.connected && credentials.accessToken && credentials.phoneNumberId),
+      service: 'shopzen-whatsapp-hub-connector',
+      shopzenOwnsMeta: true,
+      whatsappConfigured: Boolean(credentials.accessToken && credentials.phoneNumberId),
+    });
+  } catch {
+    return res.status(503).json({ ok: false, service: 'shopzen-whatsapp-hub-connector' });
+  }
+});
+
+router.get('/messages/inbound', async (req, res) => {
+  try {
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
+    const rows = await WhatsAppHubInbound.find({ status: 'pending' }).sort({ receivedAt: 1 }).limit(limit).lean();
+    return res.json({ messages: rows.map(row => ({
+      id: row._id,
+      metaMessageId: row.metaMessageId,
+      from: row.from,
+      customerName: row.customerName,
+      type: row.messageType,
+      message: row.message,
+      receivedAt: row.receivedAt,
+    })) });
+  } catch {
+    return res.status(500).json({ message: 'Could not load inbound messages' });
+  }
+});
+
+router.post('/messages/inbound/:messageId/acknowledge', async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.messageId)) return res.status(400).json({ message: 'Invalid message ID' });
+  const row = await WhatsAppHubInbound.findOneAndUpdate(
+    { _id: req.params.messageId, status: 'pending' },
+    { $set: { status: 'acknowledged', acknowledgedAt: new Date() } },
+    { new: true }
+  ).lean();
+  if (!row) return res.status(404).json({ message: 'Inbound message is unavailable or already acknowledged' });
+  return res.json({ acknowledged: true, id: row._id });
+});
+
+router.post('/messages/send', async (req, res) => {
+  try {
+    const result = await sendWhatsAppMessage(req.body || {});
+    return res.status(200).json({ sent: true, ...result });
+  } catch (error) {
+    return res.status(error.status || 400).json({ message: error.message || 'WhatsApp message could not be sent' });
+  }
 });
 
 router.get('/products/search', async (req, res) => {
