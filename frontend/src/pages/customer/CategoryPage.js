@@ -11,7 +11,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { gsap } from 'gsap';
 import API from '../../utils/api';
 import { useCart } from '../../context/CartContext';
@@ -97,6 +97,7 @@ const Stars = ({ rating = 0 }) => (
 export default function CategoryPage() {
   const { slug } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const { settings } = useTheme();
   const { addItem } = useCart();
   const sym = settings?.currencySymbol || 'Rs.';
@@ -106,11 +107,24 @@ export default function CategoryPage() {
   const [products,   setProducts]   = useState([]);
   const [loading,    setLoading]    = useState(true);
   const [catLoading, setCatLoading] = useState(true);
-  const [page,       setPage]       = useState(1);
+  const [page,       setPageState]  = useState(() => Math.max(1, Number.parseInt(new URLSearchParams(location.search).get('page') || '1', 10) || 1));
   const [totalPages, setTotalPages] = useState(1);
   const [total,      setTotal]      = useState(0);
   const [sortBy,     setSortBy]     = useState('newest');
   const [addedId,    setAddedId]    = useState(null);
+  const pageResetReady = useRef(false);
+
+  const setPage = useCallback((next, options = {}) => {
+    const resolved = Math.max(1, typeof next === 'function' ? Number(next(page)) : Number(next));
+    const params = new URLSearchParams(location.search);
+    if (resolved > 1) params.set('page', String(resolved)); else params.delete('page');
+    setPageState(resolved);
+    navigate({ pathname: location.pathname, search: params.toString() ? `?${params}` : '' }, { replace: !!options.replace });
+  }, [location.pathname, location.search, navigate, page]);
+
+  useEffect(() => {
+    setPageState(Math.max(1, Number.parseInt(new URLSearchParams(location.search).get('page') || '1', 10) || 1));
+  }, [location.search]);
 
   // Load category metadata
   useEffect(() => {
@@ -186,7 +200,11 @@ export default function CategoryPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [products, category, categoryAggregateRating]);
 
-  useEffect(() => { setPage(1); }, [sortBy, slug]);
+  useEffect(() => {
+    if (!pageResetReady.current) { pageResetReady.current = true; return; }
+    setPage(1, { replace: true });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortBy, slug]);
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
 
   useEffect(() => {

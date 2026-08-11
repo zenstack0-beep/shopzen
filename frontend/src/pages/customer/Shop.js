@@ -28,11 +28,12 @@ export default function Shop() {
   const searchParam = qParams.get('search')   || '';
   const saleParam   = qParams.get('onSale')   === 'true';
   const featParam   = qParams.get('featured') === 'true';
+  const urlPage     = Math.max(1, Number.parseInt(qParams.get('page') || '1', 10) || 1);
 
   const [products,   setProducts]   = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading,    setLoading]    = useState(true);
-  const [page,       setPage]       = useState(1);
+  const [page,       setPageState]  = useState(urlPage);
   const [totalPages, setTotalPages] = useState(1);
   const [total,      setTotal]      = useState(0);
   const [category,   setCategory]   = useState(catParam);
@@ -49,6 +50,22 @@ export default function Shop() {
   const [subCategory, setSubCategory] = useState('');
   const [filterOpen, setFilterOpen] = useState(false);
   const [addedId,    setAddedId]    = useState(null);
+  const filterResetReady = useRef(false);
+
+  // Pagination is URL-backed so browser Back/Forward and returning from a
+  // product page restore the exact listing page instead of resetting to 1.
+  const setPage = useCallback((next, options = {}) => {
+    const resolved = Math.max(1, typeof next === 'function' ? Number(next(page)) : Number(next));
+    const params = new URLSearchParams(location.search);
+    if (resolved > 1) params.set('page', String(resolved)); else params.delete('page');
+    setPageState(resolved);
+    navigate({ pathname: location.pathname, search: params.toString() ? `?${params}` : '' }, { replace: !!options.replace });
+  }, [location.pathname, location.search, navigate, page]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    setPageState(Math.max(1, Number.parseInt(params.get('page') || '1', 10) || 1));
+  }, [location.search]);
 
   useEffect(() => {
     API.get('/categories/all?inventory=true')
@@ -59,13 +76,11 @@ export default function Shop() {
   // Sync category state when navigating via /shop/:category route or ?category= param
   useEffect(() => {
     setCategory(catParam);
-    setPage(1);
   }, [catParam]);
 
   // Sync search state when the ?search= URL param changes (e.g. "See all results" from navbar)
   useEffect(() => {
     setSearch(searchParam);
-    setPage(1);
   }, [searchParam]);
 
   // Debounce: only update debouncedSearch 500ms after the user stops typing.
@@ -108,7 +123,12 @@ export default function Shop() {
     }).catch(()=>{}).finally(()=>setLoading(false));
   }, [page, category, subCategory, categories, debouncedSearch, sortBy, onSale, inStock, priceMin, priceMax, featParam]);
 
-  useEffect(() => { setPage(1); }, [category, subCategory, debouncedSearch, sortBy, onSale, inStock, priceMin, priceMax]);
+  useEffect(() => {
+    if (!filterResetReady.current) { filterResetReady.current = true; return; }
+    setPage(1, { replace: true });
+  // setPage intentionally omitted: changing URL page alone must not reset filters.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category, subCategory, debouncedSearch, sortBy, onSale, inStock, priceMin, priceMax]);
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
 
   // Scroll to top of page whenever the page number changes (pagination)
