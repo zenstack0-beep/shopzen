@@ -10,6 +10,7 @@
     "seed": "node seed.js",
     "validate:merchant-feed": "node scripts/validateGoogleMerchantFeed.js",
     "test:marketing": "node tests/marketing.test.js",
+    "test:whatsapp-hub": "node tests/whatsappHubSecurity.test.js",
     "marketing:migrate": "node scripts/backfillMarketingConsent.js",
     "validate:marketing-indexes": "node scripts/backfillMarketingConsent.js"
   },

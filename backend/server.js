@@ -106,6 +106,11 @@ app.use(express.json({
   // JSON parsing and every other route remain unchanged.
   verify: (req, _res, buffer) => {
     if (req.originalUrl?.startsWith('/api/integrations/whatsapp-hub')) {
+      if (buffer.length > 256 * 1024) {
+        const error = new Error('WhatsApp Hub request body is too large');
+        error.status = 413;
+        throw error;
+      }
       req.rawBody = buffer.toString('utf8');
     }
   },

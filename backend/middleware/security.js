@@ -231,6 +231,11 @@ function xssClean(req, _res, next) {
 const isProd = process.env.NODE_ENV === 'production';
 const adminRateLimitCache = new Map();
 
+function isWhatsappHubIntegrationPath(req) {
+  const path = String(req.originalUrl || req.path || '').split('?')[0];
+  return path === '/api/integrations/whatsapp-hub' || path.startsWith('/api/integrations/whatsapp-hub/');
+}
+
 async function isAuthenticatedAdminRequest(req) {
   const header = String(req.get('Authorization') || '');
   if (!header.startsWith('Bearer ')) return false;
@@ -276,6 +281,10 @@ const globalLimiter = rateLimit({
   skip: (req) => {
     if (!isProd) return true;                              // dev: no limit
     if (req.path === '/api/health') return true;           // health probes
+    // The connector has its own mandatory HMAC authentication, timestamp and
+    // replay gate. Its identity is the signed credential pair, not a shared
+    // Railway/proxy IP. No other /api path receives this exemption.
+    if (isWhatsappHubIntegrationPath(req)) return true;
     // Active Admin bearer tokens are verified before exemption. Invalid,
     // expired, customer, and fabricated tokens remain rate-limited.
     return isAuthenticatedAdminRequest(req);
@@ -463,4 +472,5 @@ module.exports = {
   sanitizeBody,
   globalLimiter,
   isAuthenticatedAdminRequest,
+  isWhatsappHubIntegrationPath,
 };

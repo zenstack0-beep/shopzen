@@ -2,7 +2,6 @@
 
 const express = require('express');
 const mongoose = require('mongoose');
-const rateLimit = require('express-rate-limit');
 const router = express.Router();
 const whatsappHubAuth = require('../middleware/whatsappHubAuth');
 const WhatsAppHubCheckout = require('../models/WhatsAppHubCheckout');
@@ -12,6 +11,21 @@ const { DiscountEngine } = require('../services/discountEngine');
 const crypto = require('crypto');
 const WhatsAppHubInbound = require('../models/WhatsAppHubInbound');
 const { getWhatsAppCredentials, sendWhatsAppMessage } = require('../services/whatsappCloudService');
+
+// Bound connector execution time independently of the public IP limiter.
+// The timer is always cleared and never logs request bodies or credentials.
+router.use((req, res, next) => {
+  if (['POST', 'PUT', 'PATCH'].includes(req.method) && !req.is('application/json')) {
+    return res.status(415).json({ message: 'WhatsApp Hub requests must use application/json' });
+  }
+  const timer = setTimeout(() => {
+    if (!res.headersSent) res.status(503).json({ message: 'WhatsApp Hub request timed out' });
+  }, 25_000);
+  const clear = () => clearTimeout(timer);
+  res.once('finish', clear);
+  res.once('close', clear);
+  next();
+});
 
 function constantTimeEqual(left, right) {
   const a = Buffer.from(String(left || ''));
@@ -84,13 +98,7 @@ router.post('/webhook', async (req, res) => {
 // the pasted setup code is the initial high-entropy bearer credential. Codes
 // are hashed in the database, expire after ten minutes, and are consumed with
 // one atomic update before credentials are returned exactly once.
-router.post('/setup/redeem', rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { message: 'Too many setup attempts' },
-}), async (req, res) => {
+router.post('/setup/redeem', async (req, res) => {
   try {
     res.set('Cache-Control', 'no-store');
     const credentials = await require('../services/socialMediaService').redeemWhatsappHubSetupCode(req.body?.setupCode);
@@ -104,13 +112,6 @@ router.post('/setup/redeem', rateLimit({
 });
 
 router.use(whatsappHubAuth);
-router.use(rateLimit({
-  windowMs: 60 * 1000,
-  max: 120,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { message: 'Too many WhatsApp Hub requests' },
-}));
 
 const money = value => Math.round(Number(value || 0) * 100) / 100;
 const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
