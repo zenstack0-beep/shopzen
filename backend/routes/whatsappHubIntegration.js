@@ -33,6 +33,11 @@ function constantTimeEqual(left, right) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+function logWebhookDiagnostic(field, value) {
+  const allowed = new Set(['webhook received', 'signature valid', 'message event found', 'message stored', 'pending count']);
+  if (allowed.has(field)) console.info(`[WhatsApp Hub webhook] ${field}: ${value}`);
+}
+
 // Meta webhook verification and reception remain in ShopZen. These two routes
 // intentionally precede Hub HMAC auth because Meta, not the Hub, calls them.
 router.get('/webhook', async (req, res) => {
@@ -51,6 +56,7 @@ router.get('/webhook', async (req, res) => {
 });
 
 router.post('/webhook', async (req, res) => {
+  logWebhookDiagnostic('webhook received', true);
   try {
     const credentials = await getWhatsAppCredentials();
     const supplied = String(req.get('X-Hub-Signature-256') || '').replace(/^sha256=/i, '').toLowerCase();
@@ -58,15 +64,17 @@ router.post('/webhook', async (req, res) => {
       ? crypto.createHmac('sha256', credentials.appSecret).update(req.rawBody || '').digest('hex')
       : '';
     if (!credentials.appSecret || !/^[a-f0-9]{64}$/.test(supplied) || !constantTimeEqual(supplied, expected)) {
+      logWebhookDiagnostic('signature valid', false);
       return res.sendStatus(401);
     }
-    console.info('[WhatsApp Hub] Meta webhook received');
+    logWebhookDiagnostic('signature valid', true);
 
     const writes = [];
     for (const entry of req.body?.entry || []) {
       for (const change of entry?.changes || []) {
         const contacts = new Map((change?.value?.contacts || []).map(contact => [String(contact.wa_id || ''), contact]));
         for (const message of change?.value?.messages || []) {
+          if (message?.type !== 'text' || !String(message?.text?.body || '').trim()) continue;
           const metaMessageId = String(message.id || '').slice(0, 255);
           const from = String(message.from || '').replace(/[^0-9]/g, '').slice(0, 32);
           if (!metaMessageId || !from) continue;
@@ -80,6 +88,8 @@ router.post('/webhook', async (req, res) => {
               messageType: String(message.type || 'unknown').slice(0, 40),
               message,
               receivedAt: new Date((Number(message.timestamp) || Math.floor(Date.now() / 1000)) * 1000),
+              status: 'pending',
+              acknowledgedAt: null,
               expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
             } },
             { upsert: true }
@@ -87,14 +97,11 @@ router.post('/webhook', async (req, res) => {
         }
       }
     }
+    logWebhookDiagnostic('message event found', writes.length > 0);
     const results = await Promise.all(writes);
-    for (const result of results) {
-      if (Number(result.upsertedCount || 0) > 0) console.info('[WhatsApp Hub] Message stored');
-    }
-    if (writes.length) {
-      const pendingCount = await WhatsAppHubInbound.countDocuments({ status: 'pending' });
-      console.info(`[WhatsApp Hub] Pending inbound count: ${pendingCount}`);
-    }
+    logWebhookDiagnostic('message stored', results.some(result => Number(result.upsertedCount || 0) > 0));
+    const pendingCount = await WhatsAppHubInbound.countDocuments({ status: 'pending' });
+    logWebhookDiagnostic('pending count', pendingCount);
     return res.sendStatus(200);
   } catch {
     // Meta retries non-2xx deliveries; no payload or credentials are logged.
@@ -190,7 +197,7 @@ router.get('/messages/inbound', async (req, res) => {
     const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
     const rows = await WhatsAppHubInbound.find({ status: 'pending' }).sort({ receivedAt: 1 }).limit(limit).lean();
     const pendingCount = await WhatsAppHubInbound.countDocuments({ status: 'pending' });
-    console.info(`[WhatsApp Hub] Pending inbound count: ${pendingCount}`);
+    logWebhookDiagnostic('pending count', pendingCount);
     return res.json({ messages: rows.map(row => ({
       messageId: row.metaMessageId,
       from: row.from,
@@ -213,7 +220,6 @@ router.post('/messages/inbound/:messageId/acknowledge', async (req, res) => {
     { new: true }
   ).lean();
   if (!row) return res.status(404).json({ message: 'Inbound message is unavailable or already acknowledged' });
-  console.info('[WhatsApp Hub] Message acknowledged');
   return res.json({ acknowledged: true, messageId: row.metaMessageId });
 });
 
