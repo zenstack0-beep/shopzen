@@ -60,6 +60,7 @@ router.post('/webhook', async (req, res) => {
     if (!credentials.appSecret || !/^[a-f0-9]{64}$/.test(supplied) || !constantTimeEqual(supplied, expected)) {
       return res.sendStatus(401);
     }
+    console.info('[WhatsApp Hub] Meta webhook received');
 
     const writes = [];
     for (const entry of req.body?.entry || []) {
@@ -86,7 +87,14 @@ router.post('/webhook', async (req, res) => {
         }
       }
     }
-    await Promise.all(writes);
+    const results = await Promise.all(writes);
+    for (const result of results) {
+      if (Number(result.upsertedCount || 0) > 0) console.info('[WhatsApp Hub] Message stored');
+    }
+    if (writes.length) {
+      const pendingCount = await WhatsAppHubInbound.countDocuments({ status: 'pending' });
+      console.info(`[WhatsApp Hub] Pending inbound count: ${pendingCount}`);
+    }
     return res.sendStatus(200);
   } catch {
     // Meta retries non-2xx deliveries; no payload or credentials are logged.
@@ -181,14 +189,15 @@ router.get('/messages/inbound', async (req, res) => {
   try {
     const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
     const rows = await WhatsAppHubInbound.find({ status: 'pending' }).sort({ receivedAt: 1 }).limit(limit).lean();
+    const pendingCount = await WhatsAppHubInbound.countDocuments({ status: 'pending' });
+    console.info(`[WhatsApp Hub] Pending inbound count: ${pendingCount}`);
     return res.json({ messages: rows.map(row => ({
-      id: row._id,
-      metaMessageId: row.metaMessageId,
+      messageId: row.metaMessageId,
       from: row.from,
-      customerName: row.customerName,
+      name: row.customerName || 'Customer',
       type: row.messageType,
-      message: row.message,
-      receivedAt: row.receivedAt,
+      text: String(row.message?.text?.body || ''),
+      timestamp: new Date(row.receivedAt).toISOString(),
     })) });
   } catch {
     return res.status(500).json({ message: 'Could not load inbound messages' });
@@ -196,14 +205,16 @@ router.get('/messages/inbound', async (req, res) => {
 });
 
 router.post('/messages/inbound/:messageId/acknowledge', async (req, res) => {
-  if (!mongoose.isValidObjectId(req.params.messageId)) return res.status(400).json({ message: 'Invalid message ID' });
+  const messageId = String(req.params.messageId || '').trim();
+  if (!messageId || messageId.length > 255) return res.status(400).json({ message: 'Invalid message ID' });
   const row = await WhatsAppHubInbound.findOneAndUpdate(
-    { _id: req.params.messageId, status: 'pending' },
+    { metaMessageId: messageId, status: 'pending' },
     { $set: { status: 'acknowledged', acknowledgedAt: new Date() } },
     { new: true }
   ).lean();
   if (!row) return res.status(404).json({ message: 'Inbound message is unavailable or already acknowledged' });
-  return res.json({ acknowledged: true, id: row._id });
+  console.info('[WhatsApp Hub] Message acknowledged');
+  return res.json({ acknowledged: true, messageId: row.metaMessageId });
 });
 
 router.post('/messages/send', async (req, res) => {
