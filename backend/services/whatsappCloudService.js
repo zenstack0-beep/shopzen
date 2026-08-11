@@ -27,6 +27,27 @@ function normalizeRecipient(value) {
 function buildMessageBody(input) {
   const to = normalizeRecipient(input.to);
   const type = String(input.type || 'text').toLowerCase();
+  const suppliedButtons = Array.isArray(input.buttons) ? input.buttons : [];
+  if (suppliedButtons.length || ['button', 'buttons', 'interactive'].includes(type)) {
+    const text = String(input.text || '').trim();
+    if (!text || text.length > 1024) throw new Error('Button message text must contain 1–1024 characters');
+    if (suppliedButtons.length < 1 || suppliedButtons.length > 3) throw new Error('Button messages require 1–3 buttons');
+    const buttons = suppliedButtons.map((button, index) => {
+      const id = String(button?.id || button?.value || `button_${index + 1}`).trim();
+      const title = String(button?.title || button?.text || button?.label || '').trim();
+      if (!id || id.length > 256 || !title || title.length > 20) {
+        throw new Error('Each button requires an ID and a title of no more than 20 characters');
+      }
+      return { type: 'reply', reply: { id, title } };
+    });
+    return {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to,
+      type: 'interactive',
+      interactive: { type: 'button', body: { text }, action: { buttons } },
+    };
+  }
   if (type === 'text') {
     const body = String(input.text || '').trim();
     if (!body || body.length > 4096) throw new Error('Text must contain 1–4096 characters');
@@ -65,10 +86,23 @@ async function sendWhatsAppMessage(input) {
   if (!response.ok || result.error) {
     const error = new Error('WhatsApp message could not be sent');
     error.status = response.status >= 400 && response.status < 500 ? 422 : 502;
-    error.metaCode = result.error?.code;
+    error.internalMeta = {
+      httpStatus: response.status,
+      code: result.error?.code || null,
+      subcode: result.error?.error_subcode || null,
+      type: String(result.error?.type || '').slice(0, 100),
+      message: String(result.error?.message || 'Unknown Meta API error').slice(0, 500),
+    };
     throw error;
   }
-  return { messageId: String(result.messages?.[0]?.id || ''), recipient: body.to };
+  const messageId = String(result.messages?.[0]?.id || '');
+  if (!messageId) {
+    const error = new Error('WhatsApp message could not be sent');
+    error.status = 502;
+    error.internalMeta = { httpStatus: response.status, message: 'Meta returned no message ID' };
+    throw error;
+  }
+  return { messageId };
 }
 
-module.exports = { getWhatsAppCredentials, sendWhatsAppMessage };
+module.exports = { getWhatsAppCredentials, sendWhatsAppMessage, buildMessageBody };

@@ -208,9 +208,12 @@ router.post('/messages/inbound/:messageId/acknowledge', async (req, res) => {
 router.post('/messages/send', async (req, res) => {
   try {
     const result = await sendWhatsAppMessage(req.body || {});
-    return res.status(200).json({ sent: true, ...result });
+    return res.status(200).json({ messageId: result.messageId });
   } catch (error) {
-    return res.status(error.status || 400).json({ message: error.message || 'WhatsApp message could not be sent' });
+    if (error.internalMeta) console.error('[WhatsApp Hub send] Meta API failure', error.internalMeta);
+    const status = error.status || 400;
+    const message = status === 400 ? String(error.message || 'Invalid WhatsApp message') : 'WhatsApp message could not be sent';
+    return res.status(status).json({ message });
   }
 });
 
